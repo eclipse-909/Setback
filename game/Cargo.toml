@@ -1,0 +1,40 @@
+[package]
+name = "game"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { version = "0.14.0", default-features = false, features = [
+	# These are the default features:
+	# Bevy functionality:
+	"multi_threaded",     # Run with multithreading
+	"bevy_asset",         # Assets management
+	"bevy_audio",         # Builtin audio
+	"bevy_winit",         # Window management (cross-platform Winit backend)
+	"bevy_render",        # Rendering framework core
+	"bevy_core_pipeline", # Common rendering abstractions
+	"bevy_sprite",        # 2D (sprites) rendering
+	"bevy_text",          # Text/font rendering
+	"bevy_ui",            # UI toolkit
+	"tonemapping_luts",   # Support different camera Tonemapping modes (enables KTX2+zstd)
+	"default_font",       # Embed a minimal default font for text/UI
+	# File formats:
+	"png",    # PNG image format for simple 2D images
+	# Platform-specific:
+	"x11",                   # Linux: Support X11 windowing system
+	"android_shared_stdcxx", # Android: use shared C++ library
+	# These are other (non-default) features that may be of interest:
+	# Bevy functionality:
+	"subpixel_glyph_atlas", # Subpixel antialiasing for text/fonts
+	# File formats:
+	"wav",  # Audio: Uncompressed WAV
+	# Platform-specific:
+	"wayland",              # (Linux) Support Wayland windowing system
+	"accesskit_unix",       # (Unix-like) AccessKit integration for UI Accessibility
+	# Development/Debug features:
+	"dynamic_linking",   # Dynamic linking for faster compile-times
+] }
+bevy_dylib = "0.14.0"
+log = { version = "*", features = ["max_level_debug", "release_max_level_warn"] }
+bevy-inspector-egui = "0.25.1"
+sickle_ui = "0.2.1"

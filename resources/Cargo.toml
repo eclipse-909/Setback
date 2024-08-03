@@ -1,0 +1,10 @@
+[package]
+name = "resources"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bincode = "*"
+tokio = { version = "*", features = ["full"] }
+rand = "*"
+serde = { version = "*", features = ["derive"] }

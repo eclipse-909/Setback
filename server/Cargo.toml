@@ -1,0 +1,10 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+resources = { path = "../resources" }
+tokio = { version = "*", features = ["full"] }
+bincode = "*"
+rand = "*"
