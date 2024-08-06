@@ -15,8 +15,7 @@ use {
 		enc::Encoder,
 		de::{Decoder, BorrowDecoder},
 		error::{EncodeError, DecodeError}
-	},
-	godot::prelude::*
+	}
 };
 
 pub const J: u8 = 11;
@@ -161,8 +160,7 @@ impl Display for Card {
 }
 
 #[repr(u8)]
-#[derive(Encode, Decode, Clone, PartialEq, Eq, Hash, Debug, GodotConvert, Var)]
-#[godot(via=u8)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Suit {Hearts, Clubs, Diamonds, Spades}
 impl Suit {
 	pub fn iter() -> IntoIter<Self, 4> {[Self::Hearts, Self::Clubs, Self::Diamonds, Self::Spades].into_iter()}
@@ -191,8 +189,7 @@ pub struct GameFilter {
 }
 
 #[repr(u8)]
-#[derive(Encode, Decode, Debug, Clone, GodotConvert, Var)]
-#[godot(via=u8)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum Comparison {Equal, LessOrEqual, GreaterOrEqual, Less, Greater, NotEqual}
 impl Comparison {
 	pub fn compare<T: PartialOrd>(&self, a: T, b: T) -> bool {

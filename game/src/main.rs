@@ -1,7 +1,7 @@
 mod ui;
 
 use {
-	crate::ui::{MainMenuUIPlugin, SetupUIPlugin},
+	crate::ui::ScenePlugin,
 	bevy::{
 		prelude::*,
 		window::{PresentMode, WindowMode, EnabledButtons, WindowTheme},
@@ -34,13 +34,11 @@ fn main() {
 		}))
 		.add_plugins(SickleUiPlugin)
 		.add_plugins(WorldInspectorPlugin::default())//TODO remember to comment this line for release builds
-		.add_plugins((MainMenuUIPlugin, SetupUIPlugin))
+		.add_plugins(ScenePlugin)
 		.insert_resource(WinitSettings::game())
 		.init_state::<SceneType>()
 		.init_state::<HostType>()
-		.add_event::<SceneChangedEvent>()
 		.add_systems(Startup, setup)
-		.observe(on_scene_changed)
 		.run();
 }
 
@@ -68,24 +66,4 @@ enum HostType {
 	Host,
 	///Joined a multiplayer game as a client.
 	Client
-}
-
-#[derive(Event, Clone)]
-struct SceneChangedEvent {
-	scene: SceneType,
-	host: Option<HostType>
-}
-
-fn on_scene_changed(
-	trigger: Trigger<SceneChangedEvent>,
-	curr_scene: Res<State<SceneType>>,
-	mut next_scene: ResMut<NextState<SceneType>>,
-	mut next_host: ResMut<NextState<HostType>>
-) {
-	let event = trigger.event();
-	if event.scene == *curr_scene.get() {return;}
-	if let Some(host) = event.host.clone() {
-		next_host.set(host);
-	}
-	next_scene.set(event.scene.clone());
 }

@@ -9,8 +9,7 @@ use {
 		io::{AsyncWriteExt, AsyncReadExt}
 	},
 	bincode::{Decode, Encode, config::standard},
-	serde::{Deserialize, Serialize},
-	godot::prelude::*
+	serde::{Deserialize, Serialize}
 };
 
 pub struct Client {

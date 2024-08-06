@@ -7,8 +7,7 @@ use {
 	tokio::{
 		sync::watch,
 		task::JoinHandle
-	},
-	godot::prelude::*
+	}
 };
 
 ///8 is the max number of players for each player to have 6 cards in a 52-card deck
@@ -23,8 +22,7 @@ impl Version {
 }
 
 #[repr(u8)]
-#[derive(Encode, Decode, Clone, Debug, GodotConvert, Var)]
-#[godot(via=u8)]
+#[derive(Encode, Decode, Clone, Debug)]
 pub enum ServerError {
 	Indeterminate,
 	Deserialization,
@@ -49,8 +47,7 @@ impl Display for ServerError {
 impl std::error::Error for ServerError {}
 
 #[repr(u8)]
-#[derive(Encode, Decode, Debug, GodotConvert, Var)]
-#[godot(via=u8)]
+#[derive(Encode, Decode, Debug)]
 pub enum ClientError {IO, Serialization, NotConnected, Runtime, EndOfStream, NullPtr, WrongVersion, InvalidUsernameOrPassword, BadRequest}
 impl Display for ClientError {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {write!(f, "{:?}", self)}

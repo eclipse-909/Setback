@@ -1,7 +1,7 @@
 use {
 	crate::{
-		SceneType, HostType, SceneChangedEvent,
-		ui::scene::{SceneUI, RootUINode, UiButtonExt}
+		SceneType, HostType,
+		ui::scene::{SceneUI, RootUINode, UiButtonExt, ButtonPressedEvent, SceneChangedEvent, MultiplayerClickedEvent}
 	},
 	bevy::prelude::*,
 	sickle_ui::prelude::*
@@ -15,14 +15,14 @@ impl Plugin for MainMenuUIPlugin {
 	fn build(&self, app: &mut App) {
 		SceneUI::build(self, app);
 		app.add_plugins(ComponentThemePlugin::<ButtonTheme>::default())
-			.add_event::<MultiplayerEvent>()
-			.add_systems(Update, on_multiplayer_clicked.run_if(in_state(Self::SCENE)));
+			.add_systems(OnEnter(Self::SCENE), Self::spawn);
 	}
 }
-
 impl SceneUI for MainMenuUIPlugin {
 	const SCENE: SceneType = SceneType::MainMenu;
-	
+}
+
+impl MainMenuUIPlugin {
 	fn spawn(mut commands: Commands) {
 		commands.ui_builder(UiRoot).container(
 			NodeBundle {
@@ -42,19 +42,19 @@ impl SceneUI for MainMenuUIPlugin {
 					.font_size(200.)
 					.margin(UiRect::vertical(Val::Px(20.)));
 				ui_root
-					.button(ButtonTheme, SceneChangedEvent{scene: SceneType::Setup, host: Some(HostType::Singleplayer)})
+					.button(ButtonTheme, ButtonPressedEvent::SceneChanged(SceneChangedEvent(SceneType::Setup, Some(HostType::Singleplayer))))
 					.label(LabelConfig::from("Singleplayer")).style().font_size(75.);
 				ui_root
-					.button(ButtonTheme, MultiplayerEvent)
+					.button(ButtonTheme, ButtonPressedEvent::MultiplayerClicked(MultiplayerClickedEvent))
 					.label(LabelConfig::from("Multiplayer")).style().font_size(75.);
 				ui_root
-					.button(ButtonTheme, SceneChangedEvent{scene: SceneType::Settings, host: Some(HostType::None)})
+					.button(ButtonTheme, ButtonPressedEvent::SceneChanged(SceneChangedEvent(SceneType::Settings, Some(HostType::None))))
 					.label(LabelConfig::from("Settings")).style().font_size(75.);
 				ui_root
-					.button(ButtonTheme, SceneChangedEvent{scene: SceneType::Game, host: Some(HostType::Singleplayer)})
+					.button(ButtonTheme, ButtonPressedEvent::SceneChanged(SceneChangedEvent(SceneType::Game, Some(HostType::Singleplayer))))
 					.label(LabelConfig::from("Tutorial")).style().font_size(75.);
 				ui_root
-					.button(ButtonTheme, AppExit::Success)
+					.button(ButtonTheme, ButtonPressedEvent::AppExit)
 					.label(LabelConfig::from("Exit")).style().font_size(75.);
 			}
 		).insert(RootUINode)
@@ -85,11 +85,4 @@ impl ButtonTheme {
 			})
 			.copy_from(theme_data.interaction_animation);
 	}
-}
-
-#[derive(Event)]
-struct MultiplayerEvent;
-
-fn on_multiplayer_clicked(mut events: EventReader<MultiplayerEvent>) {
-	todo!()
 }

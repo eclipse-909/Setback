@@ -1,5 +1,7 @@
-This program runs a TCP server for the Setback game. It handles client communication
-with the Godot game client by using the resources workspace, which is also used by the
-Godot game client for easier compatibility. It manages game state in memory and doesn't
-use persistent storage. It handles game logic and is the authority if clients have conflicting
-information.
+# Server
+___
+Features:
+* Uses the Tokio async runtime
+* Uses TCP connections for communication with clients
+* Is the authority in the server-client architecture
+* Handles messages and performs calculations on game logic in multiplayer games
