@@ -1,7 +1,10 @@
 use {
 	crate::{
 		SceneType, HostType,
-		ui::scene::{SceneUI, RootUINode, UiButtonExt, ButtonPressedEvent, SceneChangedEvent, MultiplayerClickedEvent}
+		ui::{
+			scene::{SceneUI, RootUINode},
+			button::{UiButtonExt, EventType, SceneChangedEvent, MultiplayerClickedEvent}
+		}
 	},
 	bevy::prelude::*,
 	sickle_ui::prelude::*
@@ -42,19 +45,24 @@ impl MainMenuUIPlugin {
 					.font_size(200.)
 					.margin(UiRect::vertical(Val::Px(20.)));
 				ui_root
-					.button(ButtonTheme, ButtonPressedEvent::SceneChanged(SceneChangedEvent(SceneType::Setup, Some(HostType::Singleplayer))))
+					.button(EventType::Observer(SceneChangedEvent(SceneType::Setup, Some(HostType::Singleplayer))))
+					.insert(ButtonTheme)
 					.label(LabelConfig::from("Singleplayer")).style().font_size(75.);
 				ui_root
-					.button(ButtonTheme, ButtonPressedEvent::MultiplayerClicked(MultiplayerClickedEvent))
+					.button(EventType::Observer(MultiplayerClickedEvent))
+					.insert(ButtonTheme)
 					.label(LabelConfig::from("Multiplayer")).style().font_size(75.);
 				ui_root
-					.button(ButtonTheme, ButtonPressedEvent::SceneChanged(SceneChangedEvent(SceneType::Settings, Some(HostType::None))))
+					.button(EventType::Observer(SceneChangedEvent(SceneType::Settings, Some(HostType::None))))
+					.insert(ButtonTheme)
 					.label(LabelConfig::from("Settings")).style().font_size(75.);
 				ui_root
-					.button(ButtonTheme, ButtonPressedEvent::SceneChanged(SceneChangedEvent(SceneType::Game, Some(HostType::Singleplayer))))
+					.button(EventType::Observer(SceneChangedEvent(SceneType::Game, Some(HostType::Singleplayer))))
+					.insert(ButtonTheme)
 					.label(LabelConfig::from("Tutorial")).style().font_size(75.);
 				ui_root
-					.button(ButtonTheme, ButtonPressedEvent::AppExit)
+					.button(EventType::Writer(AppExit::Success))
+					.insert(ButtonTheme)
 					.label(LabelConfig::from("Exit")).style().font_size(75.);
 			}
 		).insert(RootUINode)

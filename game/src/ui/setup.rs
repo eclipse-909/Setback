@@ -3,14 +3,14 @@ use {
 		SceneType, HostType,
 		ui::{
 			OverrideTheme,
-			scene::{SceneUI, RootUINode, UiButtonExt, ButtonPressedEvent, SceneChangedEvent},
-			slider_u8::{SliderU8Plugin, UiSliderU8Ext, SliderU8Config}
+			scene::{SceneUI, RootUINode},
+			button::{UiButtonExt, EventType, SceneChangedEvent, ReadyEvent},
+			slider_u8::{SliderU8, UiSliderU8Ext, SliderU8Config}
 		}
 	},
 	bevy::prelude::*,
 	sickle_ui::prelude::*
 };
-use crate::ui::slider_u8::SliderU8;
 
 ///The UI associated with the Setup scene. This will automatically spawn when the [SceneType] state enters [SceneUI::SCENE] and de-spawns when it exits.
 #[derive(Component)]
@@ -20,7 +20,6 @@ impl Plugin for SetupUIPlugin {
 	fn build(&self, app: &mut App) {
 		SceneUI::build(self, app);
 		app.add_plugins(ComponentThemePlugin::<ButtonTheme>::default())
-			.add_plugins(SliderU8Plugin)
 			.add_systems(OnEnter(Self::SCENE), Self::spawn);
 	}
 }
@@ -29,7 +28,7 @@ impl SceneUI for SetupUIPlugin {
 }
 
 impl SetupUIPlugin {
-	fn spawn(mut commands: Commands, host: Res<State<HostType>>) {
+	fn spawn(mut commands: Commands, host: Res<State<HostType>>, asset_server: Res<AssetServer>) {
 		commands.ui_builder(UiRoot).container(
 			NodeBundle {
 				style: Style {
@@ -40,8 +39,10 @@ impl SetupUIPlugin {
 				background_color: BackgroundColor(Color::srgb_u8(0, 92, 24)),
 				..default()
 			}, |ui_root| {
-				let mut back_button: UiBuilder<Entity> = ui_root.button(ButtonTheme, ButtonPressedEvent::SceneChanged(SceneChangedEvent(SceneType::MainMenu, Some(HostType::None))));
-				back_button.label(LabelConfig::from("Back")).style().font_size(50.);
+				let mut back_button: UiBuilder<Entity> = ui_root.button(EventType::Observer(SceneChangedEvent(SceneType::MainMenu, Some(HostType::None))));
+				back_button
+					.insert(ButtonTheme)
+					.label(LabelConfig::from("Back")).style().font_size(50.);
 				back_button.style()
 					.position_type(PositionType::Absolute)
 					.top(Val::Px(15.))
@@ -50,13 +51,17 @@ impl SetupUIPlugin {
 				match host.get() {
 					HostType::None => {unreachable!("Must have a HostType to be in the Setup scene");}
 					HostType::Singleplayer => {
-						let mut start_button: UiBuilder<Entity> = ui_root.button(ButtonTheme, ButtonPressedEvent::SceneChanged(SceneChangedEvent(SceneType::Game, None)));
-						start_button.label(LabelConfig::from("Start")).style().font_size(50.);
+						let mut start_button: UiBuilder<Entity> = ui_root.button(EventType::Observer(SceneChangedEvent(SceneType::Game, None)));
+						start_button
+							.insert(ButtonTheme)
+							.label(LabelConfig::from("Start")).style().font_size(50.);
 						start_button
 					}
 					HostType::Host | HostType::Client => {
-						let mut start_button: UiBuilder<Entity> = ui_root.button(ButtonTheme, ButtonPressedEvent::Ready);
-						start_button.label(LabelConfig::from("Ready")).style().font_size(50.);
+						let mut start_button: UiBuilder<Entity> = ui_root.button(EventType::Observer(ReadyEvent));
+						start_button
+							.insert(ButtonTheme)
+							.label(LabelConfig::from("Ready")).style().font_size(50.);
 						start_button
 					}
 				}.style()

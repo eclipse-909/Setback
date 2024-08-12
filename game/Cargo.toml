@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = { version = "0.14.0", default-features = false, features = [
+resources = { path = "../resources" }
+bevy = { version = "0.14.1", default-features = false, features = [
 	# These are the default features:
 	# Bevy functionality:
 	"multi_threaded",     # Run with multithreading
@@ -34,7 +35,7 @@ bevy = { version = "0.14.0", default-features = false, features = [
 	# Development/Debug features:
 	"dynamic_linking",   # Dynamic linking for faster compile-times
 ] }
-bevy_dylib = "0.14.0"
+bevy_dylib = "0.14.1"
 log = { version = "0.4.22", features = ["max_level_debug", "release_max_level_warn"] }
-bevy-inspector-egui = "0.25.1"
+bevy-inspector-egui = "0.25.2"
 sickle_ui = { version = "0.2.1", features = ["dev"] }
