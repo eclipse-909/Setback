@@ -12,7 +12,7 @@ use {
 };
 
 fn main() {
-	App::new()
+	let mut app: &mut App = App::new()
 		.add_plugins(DefaultPlugins.set(WindowPlugin {
 			primary_window: Some(Window {
 				present_mode: PresentMode::AutoVsync,
@@ -32,9 +32,12 @@ fn main() {
 			}),
 			..default()
 		}))
-		.add_plugins(SickleUiPlugin)
-		.add_plugins(WorldInspectorPlugin::default())//TODO remember to comment this line for release builds
-		.add_plugins(ScenePlugin)
+		.add_plugins(SickleUiPlugin);
+	#[cfg(feature = "dev")]
+	{
+		app.add_plugins(WorldInspectorPlugin::default());
+	}
+	app.add_plugins(ScenePlugin)
 		.insert_resource(WinitSettings::game())
 		.init_state::<SceneType>()
 		.init_state::<HostType>()

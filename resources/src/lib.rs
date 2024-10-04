@@ -18,7 +18,7 @@ pub mod server_items {
 pub mod client_items {
 	pub use crate::{
 		ssp::{Ssp, Protocol},
-		util::{ServerError, ClientError, Version, MAX_PLAYERS},
+		util::{ServerError, ClientError, Version, MAX_PLAYERS, MIN_PLAYERS},
 		game::{SPGame, TurnResult},
 		game_items::{Player, PlayerType, GameFilter, Comparison, GameMeta, GameData, Team, Card, Suit, RoundScores, CARDS_PER_PLAYER},
 		client::{AccountData, AccountResponse}

@@ -3,7 +3,7 @@ use {
 		SceneType, HostType,
 		ui::{
 			scene::{SceneUI, RootUINode},
-			button::{UiButtonExt, EventType, SceneChangedEvent, MultiplayerClickedEvent}
+			button::{ButtonAction, UiButtonExt}
 		}
 	},
 	bevy::prelude::*,
@@ -45,31 +45,68 @@ impl MainMenuUIPlugin {
 					.font_size(200.)
 					.margin(UiRect::vertical(Val::Px(20.)));
 				ui_root
-					.button(EventType::Observer(SceneChangedEvent(SceneType::Setup, Some(HostType::Singleplayer))))
+					.button(ButtonAction::SceneChanged(SceneType::Setup, Some(HostType::Singleplayer)))
 					.insert(ButtonTheme)
-					.label(LabelConfig::from("Singleplayer")).style().font_size(75.);
+					.label(LabelConfig::from("Singleplayer"))
+					.style()
+					.font_size(75.);
 				ui_root
-					.button(EventType::Observer(MultiplayerClickedEvent))
+					.button(ButtonAction::MultiplayerClicked)
 					.insert(ButtonTheme)
-					.label(LabelConfig::from("Multiplayer")).style().font_size(75.);
+					.label(LabelConfig::from("Multiplayer"))
+					.style()
+					.font_size(75.);
 				ui_root
-					.button(EventType::Observer(SceneChangedEvent(SceneType::Settings, Some(HostType::None))))
+					.button(ButtonAction::SceneChanged(SceneType::Settings, Some(HostType::None)))
 					.insert(ButtonTheme)
-					.label(LabelConfig::from("Settings")).style().font_size(75.);
+					.label(LabelConfig::from("Settings"))
+					.style()
+					.font_size(75.);
 				ui_root
-					.button(EventType::Observer(SceneChangedEvent(SceneType::Game, Some(HostType::Singleplayer))))
+					.button(ButtonAction::SceneChanged(SceneType::Game, Some(HostType::Singleplayer)))
 					.insert(ButtonTheme)
-					.label(LabelConfig::from("Tutorial")).style().font_size(75.);
+					.label(LabelConfig::from("Tutorial"))
+					.style()
+					.font_size(75.);
 				ui_root
-					.button(EventType::Writer(AppExit::Success))
+					.button(ButtonAction::AppExit(AppExit::Success))
 					.insert(ButtonTheme)
-					.label(LabelConfig::from("Exit")).style().font_size(75.);
+					.label(LabelConfig::from("Exit"))
+					.style()
+					.font_size(75.);
+				ui_root.container((NodeBundle::default(), MultiplayerPopup), |container| {
+					container
+						.button(ButtonAction::HostClicked)
+						.insert(ButtonTheme)
+						.label(LabelConfig::from("Host"))
+						.style()
+						.font_size(75.);
+					container
+						.button(ButtonAction::JoinClicked)
+						.insert(ButtonTheme)
+						.label(LabelConfig::from("Host"))
+						.style()
+						.font_size(75.);
+					container
+						.button(ButtonAction::MultiplayerPopupClosed)
+						.insert(ButtonTheme)
+						.label(LabelConfig::from("Host"))
+						.style()
+						.font_size(75.);
+				}).style()
+					.position_type(PositionType::Absolute)
+					.display(Display::None)
+					.justify_content(JustifyContent::SpaceEvenly)
+					.align_items(AlignItems::Center);
 			}
 		).insert(RootUINode)
 			.style()
 			.align_items(AlignItems::Center);
 	}
 }
+
+#[derive(Component)]
+pub struct MultiplayerPopup;
 
 #[derive(Component, UiContext, Default)]
 struct ButtonTheme;

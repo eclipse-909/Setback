@@ -4,6 +4,7 @@ mod slider_u8;
 mod setup_player;
 mod spinbox;
 mod button;
+mod game;
 
 use {
 	bevy::prelude::*,
@@ -14,7 +15,7 @@ pub struct ScenePlugin;
 
 impl Plugin for ScenePlugin {
 	fn build(&self, app: &mut App) {
-		app.add_plugins((button::ButtonPlugin, slider_u8::SliderU8Plugin, spinbox::SpinBoxPlugin))
+		app.add_plugins((button::ButtonPlugin, slider_u8::SliderU8Plugin, spinbox::SpinBoxPlugin, setup_player::SetupPlayerPlugin))
 			.add_plugins((main_menu::MainMenuUIPlugin, setup::SetupUIPlugin));
 	}
 }
@@ -48,6 +49,11 @@ mod scene {
 }
 
 trait OverrideTheme: Sized + Component + UiContext + DefaultTheme {
-	fn overriding_theme() -> Theme<Self>;
-	fn overriding_style(style_builder: &mut StyleBuilder, theme_data: &ThemeData);
+	fn overriding_theme0() -> Theme<Self>;
+	fn overriding_theme1() -> Theme<Self> {Self::overriding_theme0()}
+	fn overriding_style0(style_builder: &mut StyleBuilder, theme_data: &ThemeData);
+	fn overriding_style1(style_builder: &mut StyleBuilder, theme_data: &ThemeData) {Self::overriding_style0(style_builder, theme_data)}
 }
+
+#[derive(Component)]
+struct EntityReference(Entity);

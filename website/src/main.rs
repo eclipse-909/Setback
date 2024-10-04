@@ -49,7 +49,6 @@ async fn main() -> std::io::Result<()> {
 			.service(web::scope("/account")
 				.wrap(SessionValidator)
 				.service(create_account)
-				.service(update_email)
 				.service(update_username)
 				.service(update_password)
 				.service(delete_account)

@@ -4,7 +4,8 @@ use {
 	bevy::prelude::*,
 	sickle_ui::{
 		prelude::*,
-		ui_commands::UpdateTextExt
+		ui_commands::UpdateTextExt,
+		theme::theme_colors::SchemeColors
 	}
 };
 
@@ -17,7 +18,7 @@ impl Plugin for SpinBoxPlugin {
 }
 
 #[derive(Component)]
-struct Button<T: OnClick> {
+pub struct Button<T: OnClick> {
 	spin_box: Entity,
 	p: PhantomData<T>
 }
@@ -31,18 +32,19 @@ impl<T: OnClick> Default for Button<T> {
 }
 
 trait OnClick: Sized + Send + Sync + 'static {}
-struct Dec;
+pub struct Dec;
 impl OnClick for Dec {}
-struct Inc;
+pub struct Inc;
 impl OnClick for Inc {}
 
 ///Has increment and decrement buttons to set a u8 value.
 #[derive(Component)]
 pub struct SpinBox {
-	dec_button: Entity,
-	value: u8,
-	value_label: Entity,
-	inc_button: Entity,
+	container: Entity,
+	pub dec_button: Entity,
+	pub value: u8,
+	pub value_label: Entity,
+	pub inc_button: Entity,
 	label: Entity,
 	min_value: u8,
 	max_value: u8,
@@ -50,6 +52,7 @@ pub struct SpinBox {
 impl Default for SpinBox {
 	fn default() -> Self {
 		Self {
+			container: Entity::PLACEHOLDER,
 			dec_button: Entity::PLACEHOLDER,
 			value: 0,
 			value_label: Entity::PLACEHOLDER,
@@ -63,26 +66,101 @@ impl Default for SpinBox {
 impl UiContext for SpinBox {
 	fn get(&self, target: &str) -> Result<Entity, String> {
 		match target {
+			Self::CONTAINER => Ok(self.container),
 			Self::DEC_BUTTON => Ok(self.dec_button),
 			Self::VALUE_LABEL => Ok(self.value_label),
 			Self::INC_BUTTON => Ok(self.inc_button),
 			Self::LABEL => Ok(self.label),
-			_ => Err(format!("{} doesn't exist for SpinBox. Possible contexts: {:?}", target, self.contexts()))
+			_ => Err(format!("{} doesn't exist for SpinBox. Possible contexts: {:?}", target, Vec::from_iter(self.contexts())))
 		}
 	}
-	fn contexts(&self) -> Vec<&'static str> {vec![Self::DEC_BUTTON, Self::VALUE_LABEL, Self::INC_BUTTON, Self::LABEL]}
+	fn contexts(&self) -> impl Iterator<Item = &str> + '_ {[Self::CONTAINER, Self::DEC_BUTTON, Self::VALUE_LABEL, Self::INC_BUTTON, Self::LABEL].into_iter()}
 }
 impl DefaultTheme for SpinBox {
-	fn default_theme() -> Option<Theme<Self>> {Theme::new(vec![PseudoTheme::deferred(None, Self::primary_style)]).into()}
+	fn default_theme() -> Option<Theme<Self>> {
+		let base_theme: PseudoTheme<Self> = PseudoTheme::deferred(None, Self::primary_style);
+		let enabled_theme: PseudoTheme<Self> = PseudoTheme::deferred(vec![PseudoState::Custom(String::from("ButtonsEnabled"))], Self::buttons_enabled_style);
+		Theme::new(vec![base_theme, enabled_theme]).into()
+	}
 }
 impl SpinBox {
-	const DEC_BUTTON: &'static str = "Sprite";
-	const VALUE_LABEL: &'static str = "TeamSpinBox";
-	const INC_BUTTON: &'static str = "HumanCheckbox";
-	const LABEL: &'static str = "RemoveButton";
+	const CONTAINER: &'static str = "Container";
+	const DEC_BUTTON: &'static str = "Decrement";
+	const VALUE_LABEL: &'static str = "Value";
+	const INC_BUTTON: &'static str = "Increment";
+	const LABEL: &'static str = "Label";
 	
 	fn primary_style(style_builder: &mut StyleBuilder, theme_data: &ThemeData) {
-		todo!()
+		let colors: SchemeColors = theme_data.colors();
+		
+		style_builder
+			.flex_direction(FlexDirection::Row)
+			.justify_content(JustifyContent::FlexStart)
+			.align_items(AlignItems::FlexStart);
+		
+		style_builder
+			.switch_target(Self::CONTAINER)
+			.flex_direction(FlexDirection::Row)
+			.justify_content(JustifyContent::Center)
+			.align_items(AlignItems::FlexStart);
+		
+		style_builder
+			.switch_target(Self::LABEL)
+			.margin(UiRect::right(Val::Px(5.)))
+			.font_size(30.)
+			.font_color(colors.on(OnColor::Surface));
+		
+		style_builder
+			.switch_target(Self::DEC_BUTTON)
+			.display(Display::None)
+			.margin(UiRect::horizontal(Val::Px(5.)))
+			.width(Val::Px(30.))
+			.height(Val::Px(30.))
+			.border(UiRect::all(Val::Px(2.5)))
+			.border_color(Color::srgb_u8(216, 216, 216))
+			.justify_content(JustifyContent::Center)
+			.animated()
+			.background_color(AnimatedVals {
+				idle: Color::srgb_u8(0, 64, 0),
+				hover: Some(Color::srgb_u8(0, 60, 0)),
+				press: Some(Color::srgb_u8(0, 55, 0)),
+				..default()
+			})
+			.copy_from(theme_data.interaction_animation);
+		
+		style_builder
+			.switch_target(Self::VALUE_LABEL)
+			.margin(UiRect::horizontal(Val::Px(5.)))
+			.font_size(30.)
+			.font_color(colors.on(OnColor::Surface));
+		
+		style_builder
+			.switch_target(Self::INC_BUTTON)
+			.display(Display::None)
+			.margin(UiRect::horizontal(Val::Px(5.)))
+			.width(Val::Px(30.))
+			.height(Val::Px(30.))
+			.border(UiRect::all(Val::Px(2.5)))
+			.border_color(Color::srgb_u8(216, 216, 216))
+			.justify_content(JustifyContent::Center)
+			.animated()
+			.background_color(AnimatedVals {
+				idle: Color::srgb_u8(0, 64, 0),
+				hover: Some(Color::srgb_u8(0, 60, 0)),
+				press: Some(Color::srgb_u8(0, 55, 0)),
+				..default()
+			})
+			.copy_from(theme_data.interaction_animation);
+	}
+	
+	fn buttons_enabled_style(style_builder: &mut StyleBuilder, _theme_data: &ThemeData) {
+		style_builder
+			.switch_target(Self::DEC_BUTTON)
+			.display(Display::Flex);
+		
+		style_builder
+			.switch_target(Self::INC_BUTTON)
+			.display(Display::Flex);
 	}
 	
 	fn button<T: OnClick>(spin_box: Entity) -> impl Bundle {(
@@ -93,33 +171,34 @@ impl SpinBox {
 	)}
 }
 
-pub trait UiSpinBoxExt {fn spin_box(&mut self, label: &str) -> UiBuilder<Entity>;}
+pub trait UiSpinBoxExt {fn spin_box(&mut self, label: &str, value: u8, enabled: bool) -> UiBuilder<Entity>;}
 impl UiSpinBoxExt for UiBuilder<'_, Entity> {
-	fn spin_box(&mut self, label: &str) -> UiBuilder<Entity> {
-		let mut spin_box: SpinBox = SpinBox::default();
-		let mut spin_box_container: UiBuilder<Entity> = self.container((Name::new("SpinBox"), NodeBundle::default()), |container| {
+	// fn spin_box(&mut self, label: &str) -> UiBuilder<Entity> {self.spin_box_with_value(label, 0)}
+	fn spin_box(&mut self, label: &str, value: u8, enabled: bool) -> UiBuilder<Entity> {
+		let mut spin_box: SpinBox = SpinBox {value, ..default()};
+		self.container((Name::new("SpinBox"), NodeBundle::default()), |container| {
 			let id: Entity = container.id();
-			container.container(NodeBundle::default(), |interaction_container| {
-				spin_box.dec_button = interaction_container
-					.spawn(SpinBox::button::<Dec>(id.clone()))
-					.label(LabelConfig::from("<"))
-					.id();
-				spin_box.value_label = interaction_container
-					.label(LabelConfig::from(format!("{}", spin_box.value)))
-					.id();
-				spin_box.inc_button = interaction_container
-					.spawn(SpinBox::button::<Inc>(id))
-					.label(LabelConfig::from(">"))
-					.id();
-			}).style()
-				.flex_direction(FlexDirection::Row);
 			spin_box.label = container.label(LabelConfig::from(label)).id();
-		});
-		spin_box_container
-			.style()
-			.flex_direction(FlexDirection::Column);
-		spin_box_container.insert(spin_box);
-		spin_box_container
+			spin_box.container = container.container(NodeBundle::default(), |interaction_container| {
+				let mut dec_button: UiBuilder<Entity> = interaction_container.spawn(SpinBox::button::<Dec>(id));
+				spin_box.dec_button = dec_button.id();
+				dec_button.label(LabelConfig::from("<"))
+					.style()
+					.font_size(30.);
+				spin_box.value_label = interaction_container
+					.label(LabelConfig::from(format!("{}", value)))
+					.id();
+				let mut inc_button: UiBuilder<Entity> = interaction_container.spawn(SpinBox::button::<Inc>(id));
+				spin_box.inc_button = inc_button.id();
+				inc_button.label(LabelConfig::from(">"))
+					.style()
+					.font_size(30.);
+			}).id();
+			container.insert(spin_box);//insert here so the buttons can access the spin box component when they're pressed
+			if enabled {
+				container.entity_commands().add_pseudo_state(PseudoState::Custom(String::from("ButtonsEnabled")));
+			}
+		})
 	}
 }
 
@@ -137,12 +216,12 @@ fn on_click(
 			continue;
 		};
 		let Ok(mut spin_box) = spin_boxes.get_mut(spin_box_id) else {continue;};
-		if spin_box.value != spin_box.min_value && spin_box.value != spin_box.max_value {
-			if inc {
+		if inc {
+			if spin_box.value < spin_box.max_value {
 				spin_box.value += 1;
-			} else {
-				spin_box.value -= 1;
 			}
+		} else if spin_box.value > spin_box.min_value {
+			spin_box.value -= 1;
 		}
 	}
 }
@@ -150,7 +229,7 @@ fn on_click(
 fn update_spin_box(spin_boxes: Query<&SpinBox, Changed<SpinBox>>, mut commands: Commands) {
 	for spin_box in &spin_boxes {
 		commands
-			.entity(spin_box.label)
+			.entity(spin_box.value_label)
 			.update_text(format!("{}", spin_box.value));
 	}
 }

@@ -14,8 +14,6 @@ struct UsernameQuery {username: String}
 #[derive(Deserialize)]
 struct PasswordQuery {password: String}
 #[derive(Deserialize)]
-struct EmailQuery {email: String}
-#[derive(Deserialize)]
 struct AuthQuery {username: String, password: String}
 
 ///Creates an account with the body of the post request and inserts it into the database.
@@ -35,10 +33,7 @@ async fn create_account(session: Session, user: web::Json<AccountData>, db: web:
 
 fn create_account_helper(user: web::Json<AccountData>, db: web::Data<Database>) -> Result<u32, String> {
 	let user: AccountData = user.into_inner();
-	
-	todo!("Verify the email is valid");
-	
-	db.create_account(user.email, user.username, user.password)
+	db.create_account(user.username, user.password)
 }
 
 ///Fetches the account with the user_id from the database.
@@ -48,18 +43,6 @@ async fn get_account(account_id: web::Path<u32>, db: web::Data<Database>) -> Htt
 		Ok(data) => {HttpResponse::Ok().json(data)}
 		Err(_) => {HttpResponse::InternalServerError().body("Could not get account")}
 	}
-}
-
-///Updates the user's email
-#[patch("/email")]
-async fn update_email(session: Session, email: web::Query<EmailQuery>, db: web::Data<Database>) -> HttpResponse {
-	
-	todo!("Verify the email is valid");
-	
-	let Ok(Some(account_id)) = session.get(SESSION_ACCOUNT_ID) else {return HttpResponse::Unauthorized().body("Could not get session info");};
-	if let Err(str) = db.update_email(account_id, email.into_inner().email) {return HttpResponse::InternalServerError().body(str);}
-	session.renew();
-	HttpResponse::Ok().finish()
 }
 
 ///Updates the user's username

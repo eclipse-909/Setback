@@ -7,10 +7,16 @@ use {
 	sickle_ui::{
 		prelude::*,
 		widgets::inputs::slider::{SliderBar, SliderDragHandle, SliderAxis},
-		ui_commands::UpdateTextExt,
-		lerp::Lerp
-	}
+		ui_commands::UpdateTextExt
+	},
+	std::ops::DerefMut
 };
+
+#[cfg(feature = "observable")]
+#[derive(Event, Copy, Clone, Debug)]
+pub struct SliderChanged {
+	pub ratio: f32
+}
 
 pub struct SliderU8Plugin;
 
@@ -22,11 +28,13 @@ impl Plugin for SliderU8Plugin {
 				(
 					update_slider_on_scroll.after(ScrollableUpdate),
 					update_slider_on_drag.after(DraggableUpdate),
+					update_slider_on_bar_change,
 					update_slider_handle,
 					update_slider_readout,
-				)
-					.chain(),
+				).chain(),
 			);
+		#[cfg(feature = "observable")]
+		app.add_event::<SliderChanged>();
 	}
 }
 
@@ -38,6 +46,7 @@ fn update_slider_on_scroll(
 		Changed<Scrollable>,
 	>,
 	mut q_slider: Query<&mut SliderU8>,
+	mut commands: Commands
 ) {
 	for ((slider_bar, handle), scrollable) in &q_scrollables {
 		let Some((axis, diff, unit)) = scrollable.last_change() else {
@@ -66,6 +75,9 @@ fn update_slider_on_scroll(
 		
 		let fraction = offset / 100.;
 		slider.ratio = (slider.ratio + fraction as f64).clamp(0., 1.);
+		
+		#[cfg(feature = "observable")]
+		commands.trigger_targets(SliderChanged{ratio: slider.ratio as f32 }, slider_id);
 	}
 }
 
@@ -73,6 +85,7 @@ fn update_slider_on_drag(
 	q_draggable: Query<(&Draggable, &SliderDragHandle, &Node), Changed<Draggable>>,
 	q_node: Query<&Node>,
 	mut q_slider: Query<&mut SliderU8>,
+	mut commands: Commands
 ) {
 	for (draggable, handle, node) in &q_draggable {
 		let Ok(mut slider) = q_slider.get_mut(handle.slider) else {
@@ -120,6 +133,21 @@ fn update_slider_on_drag(
 		};
 		
 		slider.ratio = (slider.ratio + fraction as f64).clamp(0., 1.);
+		
+		#[cfg(feature = "observable")]
+		commands.trigger_targets(SliderChanged{ratio: slider.ratio as f32 }, handle.slider);
+	}
+}
+
+fn update_slider_on_bar_change(
+	q_slider_bars: Query<&SliderBar, Changed<Node>>,
+	mut q_slider: Query<&mut SliderU8>,
+) {
+	for bar in &q_slider_bars {
+		let Ok(mut slider_u8) = q_slider.get_mut(bar.slider) else {
+			continue;
+		};
+		slider_u8.deref_mut();
 	}
 }
 
@@ -303,22 +331,22 @@ impl UiContext for SliderU8 {
 			Self::READOUT_CONTAINER => Ok(self.readout_container),
 			Self::READOUT => Ok(self.readout),
 			_ => Err(format!(
-				"{} doesn't exists for Slider. Possible contexts: {:?}",
+				"{} doesn't exists for SliderU8. Possible contexts: {:?}",
 				target,
-				self.contexts()
+				Vec::from_iter(self.contexts())
 			)),
 		}
 	}
 	
-	fn contexts(&self) -> Vec<&'static str> {
-		vec![
+	fn contexts(&self) -> impl Iterator<Item = &str> + '_ {
+		[
 			Self::LABEL,
 			Self::BAR_CONTAINER,
 			Self::BAR,
 			Self::HANDLE,
 			Self::READOUT_CONTAINER,
 			Self::READOUT,
-		]
+		].into_iter()
 	}
 }
 
@@ -450,7 +478,7 @@ impl SliderU8 {
 		style_builder
 			.switch_target(Self::LABEL)
 			.sized_font(font.clone())
-			.font_color(colors.on(On::Surface));
+			.font_color(colors.on(OnColor::Surface));
 		
 		if slider.config().label.is_none() {
 			style_builder
@@ -479,7 +507,7 @@ impl SliderU8 {
 		style_builder
 			.switch_target(Self::READOUT)
 			.sized_font(font.clone())
-			.font_color(colors.on(On::Surface));
+			.font_color(colors.on(OnColor::Surface));
 		
 		style_builder
 			.switch_target(Self::BAR)

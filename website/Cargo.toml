@@ -7,10 +7,10 @@ edition = "2021"
 resources = { path = "../resources" }
 actix-web = "4.9.0"
 actix-files = "0.6.6"
-actix-session = { version = "0.10.0", features = ["cookie-session"] }
+actix-session = { version = "0.10.1", features = ["cookie-session"] }
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 argon2 = { version = "0.6.0-pre.1", features = ["password-hash", "std"] }
 r2d2 = "0.8.10"
 r2d2_sqlite = "0.25.0"
-serde = { version = "1.0.206", features = ["derive"] }
+serde = { version = "1.0.210", features = ["derive"] }
 futures-util = "0.3.30"
