@@ -1,14 +1,13 @@
 mod ui;
 
 use {
-	crate::ui::ScenePlugin,
+	crate::ui::UIPlugin,
 	bevy::{
 		prelude::*,
 		window::{PresentMode, WindowMode, EnabledButtons, WindowTheme},
 		winit::WinitSettings
 	},
-	bevy_inspector_egui::quick::WorldInspectorPlugin,
-	sickle_ui::SickleUiPlugin
+	bevy_inspector_egui::quick::WorldInspectorPlugin
 };
 
 fn main() {
@@ -16,7 +15,7 @@ fn main() {
 		.add_plugins(DefaultPlugins.set(WindowPlugin {
 			primary_window: Some(Window {
 				present_mode: PresentMode::AutoVsync,
-				mode: WindowMode::BorderlessFullscreen,
+				mode: WindowMode::BorderlessFullscreen(MonitorSelection::Current),
 				resolution: (1920., 1080.).into(),
 				title: "Setback".into(),
 				name: Some("setback.app".into()),
@@ -31,13 +30,12 @@ fn main() {
 				..default()
 			}),
 			..default()
-		}))
-		.add_plugins(SickleUiPlugin);
+		}));
 	#[cfg(feature = "dev")]
 	{
 		app.add_plugins(WorldInspectorPlugin::default());
 	}
-	app.add_plugins(ScenePlugin)
+	app.add_plugins(UIPlugin)
 		.insert_resource(WinitSettings::game())
 		.init_state::<SceneType>()
 		.init_state::<HostType>()

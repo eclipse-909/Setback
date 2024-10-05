@@ -1,19 +1,7 @@
 use {
-	crate::{
-		SceneType,
-		HostType,
-		ui::{
-			main_menu::MultiplayerPopup,
-			setup::{SetupUIPlugin, SetupData, AddPlayerButton, PlayerContainer, SetupSettings, LocalPlayer},
-			setup_player::{SetupPlayer, UiSetupPlayerExt},
-			spinbox::SpinBox
-		}
-	},
+	crate::{SceneType, HostType},
+	crate::ui::widgets::{UiBuilder, UiBuilderExt},
 	bevy::prelude::*,
-	sickle_ui::{
-		prelude::*,
-		ui_commands::UpdateTextExt
-	},
 	resources::client_items::{MAX_PLAYERS, MIN_PLAYERS}
 };
 
@@ -21,21 +9,23 @@ pub struct ButtonPlugin;
 
 impl Plugin for ButtonPlugin {
 	fn build(&self, app: &mut App) {
-		app.add_systems(Update, on_button_clicked.after(FluxInteractionUpdate));
+		app.add_systems(Update, on_button_clicked);
 	}
 }
 
 #[derive(Component)]
 pub struct Button(ButtonAction);
 
-pub trait UiButtonExt {fn button(&mut self, action: ButtonAction) -> UiBuilder<Entity>;}
+trait UiButtonExt {
+	fn button(&mut self, action: ButtonAction);
+}
+
 impl UiButtonExt for UiBuilder<'_, Entity> {
 	fn button(&mut self, action: ButtonAction) -> UiBuilder<Entity> {
 		self.spawn((
 			ButtonBundle::default(),
 			Name::new("Button"),
-			Button(action),
-			TrackedInteraction::default()
+			Button(action)
 		))
 	}
 }

@@ -239,45 +239,51 @@ pub struct SetupSettings {
 
 #[derive(Component, UiContext, Default)]
 struct ButtonTheme;
+
+impl bevy_ecs::component::Component for ButtonTheme { const STORAGE_TYPE: bevy_ecs::component::StorageType = Default::default(); }
+
 impl DefaultTheme for ButtonTheme {fn default_theme() -> Option<Theme<Self>> {Self::theme().into()}}
 impl ButtonTheme {
 	fn theme() -> Theme<Self> {Theme::new(vec![PseudoTheme::deferred(None, Self::primary_style)])}
 	fn primary_style(style_builder: &mut StyleBuilder, theme_data: &ThemeData) {
 		style_builder
-			.border(UiRect::all(Val::Px(5.)))
-			.border_color(Color::srgb_u8(216, 216, 216))
-			.width(Val::Percent(8.))
+			.border(UiRect::all(Val::Px(5.)).into())
+			.border_color(Color::srgb_u8(216, 216, 216).into())
+			.width(Val::Percent(8.).into())
 			.animated()
 			.background_color(AnimatedVals {
 				idle: Color::srgb_u8(0, 64, 0),
 				hover: Some(Color::srgb_u8(0, 60, 0)),
 				press: Some(Color::srgb_u8(0, 55, 0)),
 				..default()
-			})
+			}.into())
 			.copy_from(theme_data.interaction_animation);
 	}
 }
 
 #[derive(Component, UiContext, Default)]
 struct AddPlayerButtonTheme;
+
+impl Component for AddPlayerButtonTheme { const STORAGE_TYPE: StorageType = Default::default(); }
+
 impl DefaultTheme for AddPlayerButtonTheme {fn default_theme() -> Option<Theme<Self>> {Self::theme().into()}}
 impl AddPlayerButtonTheme {
 	fn theme() -> Theme<Self> {Theme::new(vec![PseudoTheme::deferred(None, Self::primary_style)])}
 	fn primary_style(style_builder: &mut StyleBuilder, theme_data: &ThemeData) {
 		style_builder
-			.border(UiRect::all(Val::Px(5.)))
-			.border_color(Color::srgb_u8(216, 216, 216))
-			.height(Val::Px(40.))
-			.width(Val::Percent(40.))
-			.margin(UiRect::axes(Val::Px(theme_data.spacing.gaps.small), Val::Px(15.)))
-			.display(Display::None)
+			.border(UiRect::all(Val::Px(5.)).into())
+			.border_color(Color::srgb_u8(216, 216, 216).into())
+			.height(Val::Px(40.).into())
+			.width(Val::Percent(40.).into())
+			.margin(UiRect::axes(Val::Px(theme_data.spacing.gaps.small), Val::Px(15.)).into())
+			.display(Display::None.into())
 			.animated()
 			.background_color(AnimatedVals {
 				idle: Color::srgb_u8(0, 64, 0),
 				hover: Some(Color::srgb_u8(0, 60, 0)),
 				press: Some(Color::srgb_u8(0, 55, 0)),
 				..default()
-			})
+			}.into())
 			.copy_from(theme_data.interaction_animation);
 	}
 }
@@ -286,17 +292,17 @@ impl OverrideTheme for SliderU8 {
 	fn overriding_theme0() -> Theme<Self> {Theme::new(vec![PseudoTheme::deferred(None, Self::overriding_style0)])}
 	fn overriding_style0(style_builder: &mut StyleBuilder, _theme_data: &ThemeData) {
 		style_builder
-			.height(Val::Px(30.));
+			.height(Val::Px(30.).into());
 		style_builder
 			.switch_target(Self::LABEL)
 			.font_size(30.);
 		style_builder
 			.switch_target(Self::BAR)
-			.height(Val::Px(7.5))
-			.align_items(AlignItems::Center);
+			.height(Val::Px(7.5).into())
+			.align_items(AlignItems::Center.into());
 		style_builder
 			.switch_target(Self::READOUT_CONTAINER)
-			.height(Val::Px(30.));
+			.height(Val::Px(30.).into());
 		style_builder
 			.switch_target(Self::READOUT)
 			.font_size(30.);
