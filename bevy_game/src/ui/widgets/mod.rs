@@ -1,24 +1,15 @@
-mod button;
 mod spinbox;
 mod slider;
 mod setup_player;
+mod checkbox;
 
 use {
 	crate::ui::scenes::RootUINode,
-	slider::SliderPlugin,
 	bevy::{
 		prelude::*,
 		ecs::system::IntoObserverSystem
 	}
 };
-
-pub struct WidgetsPlugin;
-
-impl Plugin for WidgetsPlugin {
-	fn build(&self, app: &mut App) {
-		app.add_plugins((SliderPlugin));
-	}
-}
 
 pub struct UiBuilder<'a, T> {
 	commands: Commands<'a, 'a>,

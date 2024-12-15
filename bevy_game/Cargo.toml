@@ -1,0 +1,42 @@
+[package]
+name = "bevy_game"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+resources = { path = "../resources" }
+bevy = { version = "0.15.0", default-features = false, features = [
+	"bevy_asset",
+	"bevy_state",
+	"bevy_color",
+	"bevy_winit",
+	"bevy_core_pipeline",
+	"bevy_picking",
+	"bevy_sprite_picking_backend",
+	"bevy_ui_picking_backend",
+	"bevy_render",
+	"bevy_sprite",
+	"bevy_text",
+	"bevy_ui",
+	"multi_threaded",
+	"png",
+	"tonemapping_luts",
+	"default_font"
+]}
+log = { version = "0.4.22", features = ["max_level_debug", "release_max_level_warn"] }
+bevy-inspector-egui = "0.28.0"
+image = "0.25.5"
+winit = "0.30.5"
+
+[dev-dependencies]
+bevy_dylib = "0.15.0"
+tokio = { version = "1.42.0", features = ["full"] } # TODO I may switch to Rust's std Tcp library or whatever works best with Bevy
+bincode = "2.0.0-rc.3"
+awc = "3.5.1"
+
+[build-dependencies]
+embed-resource = "3.0.1"
+
+[features]
+dev = ["bevy/dynamic_linking"]
+#TODO make a release with all the Bevy features that support other platforms and stuff

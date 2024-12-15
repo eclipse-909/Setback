@@ -8,7 +8,7 @@ use {
 	}
 };
 
-///Opaque pointer for external code. Holds game state and used in functions which manage game flow.
+///Opaque pointer for external code. Holds bevy_game state and used in functions which manage bevy_game flow.
 pub struct Game {
 	runtime: Runtime,
 	game_loop: Option<JoinHandle<()>>,
@@ -24,22 +24,22 @@ fn new_game() -> Option<Game> {
 	Game{runtime, game_loop: None, terminator: None, bid_tx: None, play_card_tx: None, sp_game: Arc::new(RwLock::new(sp_game))}.into()
 }
 
-///Sends the kill-signal to end the game loop.
+///Sends the kill-signal to end the bevy_game loop.
 fn terminate_game(game: &mut Game) {
 	if let Some(terminator) = game.terminator.take() {
 		let _ = terminator.send(());
 	}
 }
 
-///Blocks the current thread until the game loop ends
+///Blocks the current thread until the bevy_game loop ends
 fn block_on_game_loop(game: &mut Game) {
 	if let Some(handle) = game.game_loop.take() {
 		game.runtime.block_on(async move {let _ = handle.await;});
 	}
 }
 
-///De-allocates the Game object. Blocks until the game loop is finished, which shouldn't take long.
-///Returns immediately if game is null. Do not call this multiple times, and do not use the pointer afterward.
+///De-allocates the Game object. Blocks until the bevy_game loop is finished, which shouldn't take long.
+///Returns immediately if bevy_game is null. Do not call this multiple times, and do not use the pointer afterward.
 fn drop_game(game: &mut Game) {
 	if let Some(terminator) = game.terminator.take() {
 		let _ = terminator.send(());
@@ -47,7 +47,7 @@ fn drop_game(game: &mut Game) {
 	block_on_game_loop(game);
 }
 
-///Adds a player to the game and initializes its data. Blocks until sp_game has write access.
+///Adds a player to the bevy_game and initializes its data. Blocks until sp_game has write access.
 ///Returns if successful. False should be treated as an unrecoverable error.
 fn add_player(game: &mut Game, human: bool, team_id: u8) -> bool {
 	let Some(player) = (if human {Player::new_human(team_id)} else {Player::new_ai(team_id)}) else {return false;};
@@ -55,7 +55,7 @@ fn add_player(game: &mut Game, human: bool, team_id: u8) -> bool {
 	true
 }
 
-///Clears the list of players. This should only be called in the setup and not in-game.
+///Clears the list of players. This should only be called in the setup and not in-bevy_game.
 ///This should be used whenever a change is made to the order of players. The intention is
 ///to be lazy and clear the list and call add_player again for each player. This means that
 ///the caller needs to have a list of team_ids and human booleans to represent the players.
@@ -64,7 +64,7 @@ fn clear_players(game: &mut Game) {
 	game.runtime.block_on(async move {game.sp_game.write().await.players.clear();});
 }
 
-///Initializes any remaining data and starts the game loop.
+///Initializes any remaining data and starts the bevy_game loop.
 ///You should not call [add_player] or [clear_players] after this has been called.
 ///Returns whether it is successful. If it returns false, the caller should treat
 ///it as an error. If it returns true, all other communication should be handled in the callbacks.
@@ -73,7 +73,7 @@ fn clear_players(game: &mut Game) {
 ///[play_card_callback] Notifies you what card an AI has played. It will already be the next player's turn when you receive this.
 ///[my_turn_callback] Notifies you when it is your turn, and whether you are bidding or playing a card this turn.
 ///[scores_callback] Notifies you when the round has ended and what the scores of the round are. It will already be the next player's turn when you receive this.
-///[error_callback] Notifies you if there's an unrecoverable error during the game loop.
+///[error_callback] Notifies you if there's an unrecoverable error during the bevy_game loop.
 fn start_game(
 	game: &mut Game,
 	bid_callback: fn(index: u8, bid: u8),
@@ -121,7 +121,7 @@ fn start_game(
 						}
 						Ok(TurnResult::IsAI(false)) => {
 							let is_bidding: bool = sp_game.read().await.game_data.turn_number == 0;
-							my_turn_callback(game, is_bidding);//TODO I may need to wrap game in an Arc RwLock because I can't pass a mutable reference between threads
+							my_turn_callback(game, is_bidding);//TODO I may need to wrap bevy_game in an Arc RwLock because I can't pass a mutable reference between threads
 							let mut sp_game_write_guard: RwLockWriteGuard<SPGame> = sp_game.write().await;
 							if sp_game_write_guard.game_data.turn_number == 0 {
 								if bid_rx.recv().await.is_none() {
@@ -163,7 +163,7 @@ fn start_game(
 	true
 }
 
-///Make a bid. If the game loop is waiting on the user input bid, this will allow it to continue.
+///Make a bid. If the bevy_game loop is waiting on the user input bid, this will allow it to continue.
 ///Blocks until sp_game has write access.
 fn make_bid(game: &mut Game, bid: u8) -> Result<bool, ServerError> {
 	game.runtime.block_on(async move {
@@ -175,7 +175,7 @@ fn make_bid(game: &mut Game, bid: u8) -> Result<bool, ServerError> {
 	})
 }
 
-///Play a card. If the game loop is waiting on the user input play, this will allow it to continue.
+///Play a card. If the bevy_game loop is waiting on the user input play, this will allow it to continue.
 fn play_card(game: &mut Game, card: Card) -> Result<bool, ServerError> {
 	game.runtime.block_on(async move {
 		let mut sp_game_write_guard: RwLockWriteGuard<SPGame> = game.sp_game.write().await;

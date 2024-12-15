@@ -208,7 +208,7 @@ impl Comparison {
 pub struct Team {
 	//the cards the team collects after winning a turn
 	pub pile: Vec<Card>,
-	//score of the game
+	//score of the bevy_game
 	pub score: i8
 }
 impl Default for Team {

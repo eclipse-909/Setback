@@ -22,7 +22,7 @@ use {
 		}
 	},
 	bincode::config::{Configuration, standard},
-	reqwest::Client
+	awc::Client
 };
 
 ///TODO change to server IP and port for production

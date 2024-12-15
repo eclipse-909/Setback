@@ -41,7 +41,7 @@ impl GameUIPlugin {
 			
 			//Score panel
 				//Label for each team and their score of the match
-				//Indicators for which team has high, low, jack, and/or game for the current game
+				//Indicators for which team has high, low, jack, and/or bevy_game for the current bevy_game
 			
 			//Bid panel - only show the bids that are higher than the current highest bid
 				//pass button
@@ -50,7 +50,7 @@ impl GameUIPlugin {
 				//bid 4 button
 			
 			//Settings menu
-				//Leave game button
+				//Leave bevy_game button
 		});
 	}
 }

@@ -1,17 +1,17 @@
 use {
 	resources::server_items::*,
 	std::{
-		sync::Arc,
+		sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard},
 		collections::HashMap,
 		mem
 	},
 	tokio::{
 		time::{self, Duration, Interval},
-		sync::{mpsc, watch, RwLock, RwLockWriteGuard, RwLockReadGuard}
+		sync::{mpsc, watch}
 	},
 	rand::{
 		rngs::ThreadRng,
-		Rng, thread_rng
+		Rng, rng
 	}
 };
 
@@ -33,13 +33,13 @@ pub struct MPGame {
 }
 
 impl MPGame {
-	///Check if you can create a game before creating one
+	///Check if you can create a bevy_game before creating one
 	pub async fn create(
 		games: Games,
 		server_terminator_tx: watch::Sender<()>,
 		mut server_terminator_rx: watch::Receiver<()>
 	) -> Arc<RwLock<Self>> {
-		//create the game
+		//create the bevy_game
 		let (tx, rx) = mpsc::unbounded_channel::<Ssp>();
 		let (terminator_tx, mut terminator_rx) = watch::channel::<()>(());
 		let (countdown_signal, mut countdown_rx) = watch::channel::<bool>(false);
@@ -53,16 +53,16 @@ impl MPGame {
 			sp_game: SPGame::default()
 		}));
 
-		//create a join code and add the game to the hashmap
+		//create a join code and add the bevy_game to the hashmap
 		let mut code: u32;
 		{
 			let games_guard: RwLockReadGuard<HashMap<u32, Arc<RwLock<Self>>>> = games.read().await;
-			let mut rng: ThreadRng = thread_rng();
-			code = rng.gen();
+			let mut rng: ThreadRng = rng();
+			code = rng.random();
 			
-			//TODO come up with a better way to generate a game code
+			//TODO come up with a better way to generate a bevy_game code
 			
-			while games_guard.contains_key(&code) {code = rng.gen();}
+			while games_guard.contains_key(&code) {code = rng.random();}
 		}//rng must be dropped before the next yield
 		games.write().await.insert(code, game.clone());
 		let return_game: Arc<RwLock<Self>> = game.clone();
@@ -87,8 +87,8 @@ impl MPGame {
 											if result.is_err() {return;};
 										}
 										_ = interval.tick() => {
-											//start the game
-											//initialize remaining game data and tell clients to start
+											//start the bevy_game
+											//initialize remaining bevy_game data and tell clients to start
 											let mut game_guard: RwLockWriteGuard<MPGame> = game_clone.write().await;
 											if !game_guard.sp_game.start_game() {
 												return game_guard.terminate();
@@ -116,7 +116,7 @@ impl MPGame {
 			}
 		});
 
-		//have the game continuously listen for messages
+		//have the bevy_game continuously listen for messages
 		tokio::spawn(async move {
 			tokio::select! {
 				_ = async move {
@@ -135,7 +135,7 @@ impl MPGame {
 										}
 									}
 								}
-								//shutdown game if nobody is left
+								//shutdown bevy_game if nobody is left
 								return;
 							}
 							Protocol::GameMeta(meta_data) => {
@@ -247,14 +247,14 @@ impl MPGame {
 								game_guard.broadcast_message(&Ssp::new_with_src(Protocol::Players(players), ssp.src_id)).await;
 							}
 							Protocol::Ready(is_ready) => {
-								//update game state
+								//update bevy_game state
 								let mut game_guard: RwLockWriteGuard<Self> = game.write().await;
 								let Some((player_client, _)) = game_guard.get_player_client(ssp.src_id) else {continue;};
 								player_client.ready = *is_ready;
 								game_guard.broadcast_message(&Ssp::new_with_src(Protocol::Ready(*is_ready), ssp.src_id)).await;
 								//if everyone is ready, start a 10-second countdown
 								//if the countdown is ticking, and someone un-readies, stop the countdown and reset it
-								//if the countdown reaches 0, start the game
+								//if the countdown reaches 0, start the bevy_game
 								if !is_ready {continue 'listener;}
 								for i in 0..game_guard.sp_game.players.len() {
 									match &game_guard.sp_game.players[i].player_type {
@@ -286,8 +286,8 @@ impl MPGame {
 									game_guard.send_error_back(ssp.src_id, ServerError::InvalidBid).await;
 									continue;
 								}
-								//update game and player data
-								//broadcast the bid and game data
+								//update bevy_game and player data
+								//broadcast the bid and bevy_game data
 								game_guard.broadcast_message(&Ssp::new_with_src(Protocol::Bid(*amount), ssp.src_id)).await;
 								let game_data: GameData = game_guard.sp_game.game_data.clone();
 								game_guard.broadcast_message(&Ssp::new(Protocol::GameData(game_data))).await;
@@ -312,7 +312,7 @@ impl MPGame {
 									}
 									Err(_) => {return;}
 								}
-								//broadcast card played and game data
+								//broadcast card played and bevy_game data
 								game_guard.broadcast_message(&Ssp::new_with_src(Protocol::PlayCard(card.clone()), ssp.src_id)).await;
 								let game_data: GameData = game_guard.sp_game.game_data.clone();
 								game_guard.broadcast_message(&Ssp::new(Protocol::GameData(game_data))).await;
@@ -328,7 +328,7 @@ impl MPGame {
 				_ = terminator_rx.changed() => {}
 			}
 
-			//The game shuts down here. Clean up the players and resources, and remove the game from the server's games hashmap
+			//The bevy_game shuts down here. Clean up the players and resources, and remove the bevy_game from the server's games hashmap
 			let mut games_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<MPGame>>>> = games.write().await;
 			if let Some(this_game) = games_guard.remove(&code) {
 				let mut game_guard: RwLockWriteGuard<Self> = this_game.write().await;
@@ -336,7 +336,7 @@ impl MPGame {
 					game_guard.remove_player(i as u8);
 				}
 			}
-			//occasionally shrink HashMap capacity when game ends to clean up unused memory
+			//occasionally shrink HashMap capacity when bevy_game ends to clean up unused memory
 			if (games_guard.len() as f32) < f32::max(games_guard.capacity() as f32 * 0.1, MIN_GAMES as f32) {
 				let num_games: usize = games_guard.len();
 				games_guard.shrink_to(usize::max(num_games * 5, MIN_GAMES));
@@ -360,8 +360,8 @@ impl MPGame {
 		Some((player_client.client.as_mut()?, index))
 	}
 	
-	///To add a client to a game, the server must remove the client from its hashmap, and move it into this function.
-	///Called when a player creates or joins a game.
+	///To add a client to a bevy_game, the server must remove the client from its hashmap, and move it into this function.
+	///Called when a player creates or joins a bevy_game.
 	///Call [Self::can_add_player] before this function to determine if a client can be added.
 	pub async fn add_client(&mut self, c: Arc<RwLock<Client>>, h: bool) {
 		//Get the index of where this client will be added, and the client_id that this client will get
@@ -438,7 +438,7 @@ impl MPGame {
 		Some(client)
 	}
 	
-	///Tries to terminate this game only. If that fails, it tries to terminate the server. If that fails, it panics.
+	///Tries to terminate this bevy_game only. If that fails, it tries to terminate the server. If that fails, it panics.
 	pub fn terminate(&mut self) {
 		if self.game_terminator.send(()).is_err() {
 			self.server_terminator.send(()).expect("Could not gracefully shut down server.");
@@ -472,7 +472,7 @@ impl MPGame {
 			let PlayerType::Client(player_client) = &self.sp_game.players[i].player_type else { continue; };
 			self.send_message(&Ssp::new(Protocol::Player(self.sp_game.players[i].clone(), i as u8)), player_client.account_id).await;
 		}
-		//broadcast game data
+		//broadcast bevy_game data
 		self.broadcast_message(&Ssp::new(Protocol::GameData(self.sp_game.game_data.clone()))).await;
 		Ok(())
 	}

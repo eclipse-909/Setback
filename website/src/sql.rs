@@ -1,106 +1,217 @@
 use {
-	rusqlite::{Error, params},
-	resources::website_items::*,
-	argon2::{
-		password_hash::{
-			rand_core::OsRng,
-			PasswordHash, PasswordHasher, PasswordVerifier, SaltString
-		},
-		Argon2
+	sqlx::{
+		MySql, Sqlite, Error, Pool,
+		mysql::MySqlPool,
+		sqlite::SqlitePool,
 	},
-	r2d2::{Pool, PooledConnection},
-	r2d2_sqlite::SqliteConnectionManager
+	chrono::NaiveDate
 };
 
-pub struct Database {pool: Pool<SqliteConnectionManager>}
+#[cfg(debug_assertions)]
+pub type Database = SqliteDatabase;
 
-impl Database {
-	pub fn connect() -> Self {
-		let db = Database {pool: Pool::new(SqliteConnectionManager::file("setback.db")).unwrap()};
-		db.get_conn().unwrap().execute(include_str!("./schema.sql"), []).unwrap();
-		db
+#[cfg(not(debug_assertions))]
+pub type Database = MySqlDatabase;
+
+pub enum SqlError {
+	SqlXError(Error),
+	Custom(String)
+}
+
+impl From<Error> for SqlError {
+	fn from(value: Error) -> Self {
+		SqlError::SqlXError(value)
 	}
+}
 
-	fn get_conn(&self) -> Result<PooledConnection<SqliteConnectionManager>, String> {self.pool.get().map_err(|_| "System busy, try again later".to_string())}
+#[derive(sqlx::FromRow)]
+struct Account {
+	account_id: u32,
+	username: String,
+	password: String,
+	last_active: NaiveDate
+}
+
+pub trait DB: Sized {
+	const SCHEMA: &'static str = include_str!("../schema.sql");
+	type SqlxDatabase: sqlx::Database;
+	async fn connect(database_url: &str) -> Result<Self, Error>;
+	async fn create_account(&self, username: String, password: String) -> Result<(), Error>;
+	async fn renew_activity(&self, account_id: u32) -> Result<(), Error>;
+	async fn verify_login(&self, username: String, password: String) -> Result<u32, SqlError>;
+	async fn update_username(&self, account_id: u32, username: String) -> Result<(), Error>;
+	async fn update_password(&self, account_id: u32, password: String) -> Result<(), Error>;
+	async fn delete_account(&self, account_id: u32) -> Result<(), Error>;
+	async fn delete_inactive_accounts(&self) -> Result<u64, Error>;
+	fn get_pool(&self) -> &Pool<Self::SqlxDatabase>;
+	async fn create_if_not_exists(&self) -> Result<(), Error>;
+}
+
+pub struct MySqlDatabase {pool: MySqlPool}
+
+impl DB for MySqlDatabase {
+	type SqlxDatabase = MySql;
 	
-	pub fn create_account(&self, username: String, password: String) -> Result<u32, String> {
-		let conn: PooledConnection<SqliteConnectionManager> = self.get_conn()?;
-		match conn.prepare("select account_id from Account where username = ?1").unwrap().query_row([username.clone()], |_| {Ok(())}) {
-			Err(Error::QueryReturnedNoRows) => {}
-			Err(_) => {panic!();}
-			Ok(()) => {return Err("Error username already exists".to_string());}
+	async fn connect(database_url: &str) -> Result<Self, Error> {
+		Ok(Self {pool: MySqlPool::connect(database_url).await?})
+	}
+	
+	async fn create_account(&self, username: String, password: String) -> Result<(), Error> {
+		sqlx::query("insert into Accounts (username, password, last_active) values (?, ?, CURRENT_DATE())")
+			.bind(username)
+			.bind(password)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
+	}
+	
+	async fn renew_activity(&self, account_id: u32) -> Result<(), Error> {
+		sqlx::query("update Accounts set last_active = CURRENT_DATE() where account_id = ?")
+			.bind(account_id)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
+	}
+	
+	async fn verify_login(&self, username: String, password: String) -> Result<u32, SqlError> {
+		let account: Account = sqlx::query_as::<_, Account>("select * from Accounts where username = ?")
+			.bind(username)
+			.fetch_one(&self.pool)
+			.await?;
+		if account.password != password {
+			return Err(SqlError::Custom(String::from("Invalid username or password")));
 		}
-		conn.execute(
-			"insert into Accounts (username, password, last_active) values (?1, ?2, CURRENT_DATE)",
-			[username.clone(), hash(&password)?]
-		).unwrap();
-		Ok(conn.prepare("select account_id from Account where username = ?1").unwrap().query_row([username], |row| {row.get(0)}).unwrap())
+		Ok(account.account_id)
 	}
-
-	pub fn get_account(&self, account_id: u32) -> Result<AccountData, String> {
-		self.get_conn()?
-			.prepare("select account_id, username from Accounts where account_id = ?1").unwrap()
-			.query_row([account_id], |row| {
-				Ok(AccountData {
-					account_id,
-					username: row.get(1)?,
-					//password and last_active should never be used or needed
-					password: "".to_string(),
-					last_active: "".to_string()
-				}
-			)})
-			.map_err(|_| {"Account not found".to_string()})
+	
+	async fn update_username(&self, account_id: u32, username: String) -> Result<(), Error> {
+		sqlx::query("update Accounts set username = ? where account_id = ?")
+			.bind(username)
+			.bind(account_id)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
 	}
+	
+	async fn update_password(&self, account_id: u32, password: String) -> Result<(), Error> {
+		sqlx::query("update Accounts set password = ? where account_id = ?")
+			.bind(password)
+			.bind(account_id)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
+	}
+	
+	async fn delete_account(&self, account_id: u32) -> Result<(), Error> {
+		sqlx::query("delete from Accounts where account_id = ?")
+			.bind(account_id)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
+	}
+	
+	async fn delete_inactive_accounts(&self) -> Result<u64, Error> {
+		//TODO use query! macro when I've created the actual database and updated the .env.release
+		Ok(sqlx::query("delete from Accounts where last_active <= DATE_SUB(CURDATE(), INTERVAL 5 YEAR)")
+			.execute(&self.pool)
+			.await?.rows_affected()
+		)
+	}
+	
+	fn get_pool(&self) -> &Pool<Self::SqlxDatabase> {&self.pool}
+	
+	async fn create_if_not_exists(&self) -> Result<(), Error> {
+		sqlx::query::<Self::SqlxDatabase>(Self::SCHEMA)
+			.execute(self.get_pool())
+			.await?;
+		Ok(())
+	}
+}
 
-	pub fn renew_activity(&self, account_id: u32) -> Result<(), String> {
-		let conn: PooledConnection<SqliteConnectionManager> = self.get_conn()?;
-		conn.execute("update Accounts set last_active = CURRENT_DATE where account_id = ?1", [account_id]).unwrap();
+pub struct SqliteDatabase {pool: SqlitePool}
+
+impl DB for SqliteDatabase {
+	type SqlxDatabase = Sqlite;
+	
+	async fn connect(database_url: &str) -> Result<Self, Error> {
+		Ok(Self {pool: SqlitePool::connect(database_url).await?})
+	}
+	
+	async fn create_account(&self, username: String, password: String) -> Result<(), Error> {
+		sqlx::query("insert into Accounts (username, password, last_active) values (?1, ?2, CURRENT_DATE)")
+			.bind(username)
+			.bind(password)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
+	}
+	
+	async fn renew_activity(&self, account_id: u32) -> Result<(), Error> {
+		sqlx::query("update Accounts set last_active = CURRENT_DATE where account_id = ?1")
+			.bind(account_id)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
+	}
+	
+	async fn verify_login(&self, username: String, password: String) -> Result<u32, SqlError> {
+		let account: Account = sqlx::query_as::<_, Account>("select * from Accounts where username = ?1")
+			.bind(username)
+			.fetch_one(&self.pool)
+			.await?;
+		if account.password != password {
+			return Err(SqlError::Custom(String::from("Invalid username or password")));
+		}
+		Ok(account.account_id)
+	}
+	
+	async fn update_username(&self, account_id: u32, username: String) -> Result<(), Error> {
+		sqlx::query("update Accounts set username = ?1 where account_id = ?2")
+			.bind(username)
+			.bind(account_id)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
+	}
+	
+	async fn update_password(&self, account_id: u32, password: String) -> Result<(), Error> {
+		sqlx::query("update Accounts set password = ?1 where account_id = ?2")
+			.bind(password)
+			.bind(account_id)
+			.execute(&self.pool)
+			.await?;
 		Ok(())
 	}
 
-	pub fn verify_login(&self, username: String, password: String) -> Result<u32, String> {
-		let (account_id, password_hash) = self.get_conn()?
-			.prepare("select account_id, password from Accounts where username = ?1").unwrap()
-			.query_row([username], |row| {Ok((row.get(0)?, row.get(1)?))})
-			.map_err(|_| "Username not found".to_string())?;
-		if !verify_password(password, password_hash)? {return Err("Incorrect username or password".to_string());}
-		self.renew_activity(account_id)?;
-		Ok(account_id)
+    async fn update_password(&self, account_id: u32, password: String) -> Result<(), Error> {
+		sqlx::query(format!("update Accounts set password = {} where account_id = {}", password, account_id))
+			.execute(&self.pool)
+			.await?;
+		Ok(())
 	}
 
-	pub fn update_username(&self, account_id: u32, username: String) -> Result<(), String> {
-		Ok(assert_eq!(self.get_conn()?.execute("update Accounts set username = ?1 where account_id = ?2", params![account_id, username]).unwrap(), 1))
+	async fn delete_account(&self, account_id: u32) -> Result<(), Error> {
+		sqlx::query("delete from Accounts where account_id = ?1")
+			.bind(account_id)
+			.execute(&self.pool)
+			.await?;
+		Ok(())
 	}
-
-	pub fn update_password(&self, account_id: u32, password: String) -> Result<(), String> {
-		Ok(assert_eq!(self.get_conn()?.execute("update Accounts set password = ?1 where account_id = ?2", params![account_id, hash(&password)?]).unwrap(), 1))
+	
+	async fn delete_inactive_accounts(&self) -> Result<u64, Error> {
+		//TODO use query! macro when I've created the actual database and updated the .env.release
+		Ok(sqlx::query("delete from Accounts where last_active <= date('now', '-5 years')")
+			.execute(&self.pool)
+			.await?.rows_affected()
+		)
 	}
-
-	pub fn delete_account(&self, account_id: u32) -> Result<(), String> {
-		Ok(assert_eq!(self.get_conn()?.execute("delete from Accounts where account_id = ?1", [account_id]).unwrap(), 1))
-	}
-
-	pub fn delete_inactive_accounts(&self) -> Result<usize, String> {
-		Ok(self.get_conn()?.execute("delete from Accounts where last_active <= date('now', '-5 years')", []).unwrap())
-	}
-}
-
-fn hash(password: &String) -> Result<String, String> {
-	Ok(Argon2::default().hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng)).map_err(|_| "Invalid password".to_string())?.to_string())
-}
-
-fn verify_password(password: String, password_hash: String) -> Result<bool, String> {
-	Ok(Argon2::default().verify_password(password.as_bytes(), &PasswordHash::new(&password_hash).map_err(|_| "Invalid password".to_string())?).is_ok())
-}
-
-#[cfg(test)]
-mod test_hash {
-	use super::{hash, verify_password};
-
-	#[test]
-	fn test_password_hash() {
-		let password: String = "wordpass".to_string();
-		let password_hash: String = hash(&password).unwrap();
-		assert!(verify_password(password, password_hash).unwrap())
+	
+	fn get_pool(&self) -> &Pool<Self::SqlxDatabase> {&self.pool}
+	
+	async fn create_if_not_exists(&self) -> Result<(), Error> {
+		sqlx::query::<Self::SqlxDatabase>(Self::SCHEMA)
+			.execute(self.get_pool())
+			.await?;
+		Ok(())
 	}
 }

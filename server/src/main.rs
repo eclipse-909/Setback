@@ -3,12 +3,12 @@ use {
 	resources::server_items::*,
 	std::{
 		collections::HashMap,
-		sync::Arc
+		sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard}
 	},
 	tokio::{
 		io::AsyncWriteExt,
 		net::TcpListener,
-		sync::{RwLock, RwLockWriteGuard, RwLockReadGuard, watch, mpsc},
+		sync::{watch, mpsc},
 		time::{self, Duration, Interval}
 	},
 	bincode::config::{Configuration, standard}
@@ -18,8 +18,7 @@ mod game;
 
 type Clients = Arc<RwLock<HashMap<u32, Arc<RwLock<Client>>>>>;
 
-///TODO change to "0.0.0.0" for production and use a different port
-const SOCKET: &str = "127.0.0.1:42069";
+const SOCKET: &str = if cfg!(debug_assertions) {"127.0.0.1:42069"} else {"0.0.0.0:42069"};
 const MIN_CLIENTS: usize = 20;
 
 ///main represents the server
@@ -52,7 +51,7 @@ async fn main() {
 						continue;
 					}
 					let Some(client) = clients_clone.write().await.remove(&ssp.src_id) else {continue;};
-					//create the game and add the client to it
+					//create the bevy_game and add the client to it
 					let game: Arc<RwLock<MPGame>> = MPGame::create(games.clone(), server_term_tx.clone(), server_term_rx.clone()).await;
 					let mut game_guard: RwLockWriteGuard<MPGame> = game.write().await;
 					game_guard.add_client(client.clone(), true).await;
@@ -61,7 +60,7 @@ async fn main() {
 						let team_id: u8 = (game_guard.sp_game.players.len() % 2) as u8;
 						game_guard.sp_game.players.push(Player::new_ai(team_id));
 					}
-					//Send game info back to client, letting them know they've joined the lobby
+					//Send bevy_game info back to client, letting them know they've joined the lobby
 					if client.write().await.message_client(&Ssp::new(Protocol::Game(game_guard.sp_game.meta_data.clone(), game_guard.sp_game.players.clone()))).await.is_err() {
 						remove_player(&clients_clone, ssp.src_id).await;
 					}
@@ -142,7 +141,7 @@ async fn main() {
 			let server_term_rx: watch::Receiver<()> = server_terminator_rx.clone();
 			let clients_clone: Clients = clients.clone();
 			tokio::spawn(async move {
-				//listen for messages and send them to the server/game
+				//listen for messages and send them to the server/bevy_game
 				spawn_sync(server_term_rx, async move {
 					loop {
 						let mut client_guard: RwLockWriteGuard<Client> = client_clone.write().await;

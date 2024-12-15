@@ -14,7 +14,7 @@ use {
 
 pub struct Client {
 	tcp_stream: TcpStream,
-	///transmitter to propagate messages to the main server or game server in a thread-safe manner
+	///transmitter to propagate messages to the main server or bevy_game server in a thread-safe manner
 	pub owner_tx: UnboundedSender<Ssp>,
 	pub account_id: u32
 }

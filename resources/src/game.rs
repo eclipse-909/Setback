@@ -11,7 +11,7 @@ use {
 	}
 };
 
-///When playing singleplayer, this is instantiated in the players game, and manages state.
+///When playing singleplayer, this is instantiated in the players bevy_game, and manages state.
 ///When playing multiplayer, this is a component of the MPGame. It is instantiated on the server, and players make API calls to change state.
 pub struct SPGame {
 	pub meta_data: GameMeta,
@@ -49,7 +49,7 @@ impl Default for SPGame {
 impl SPGame {
 	///Jumps to the next player's turn and increments turn and round data.
 	///If Ok, the TurnResult represents what action the caller needs to take immediately after.
-	///If Err, the caller needs to handle it, usually be terminating the game.
+	///If Err, the caller needs to handle it, usually be terminating the bevy_game.
 	pub fn next_turn(&mut self) -> Result<TurnResult, ServerError> {
 		if self.game_data.turn_number == 1 && self.pile.is_empty() {
 			self.game_data.turn_index = self.highest_bidder;
@@ -105,7 +105,7 @@ impl SPGame {
 		for player in self.players.iter() {
 			team_ids.entry(player.team_id).or_insert(0);
 		}
-		//create team objects in the game data
+		//create team objects in the bevy_game data
 		for _ in 0..team_ids.len() {
 			self.game_data.teams.push(Team::default());
 		}
@@ -198,7 +198,7 @@ impl SPGame {
 	}
 	
 	pub fn deal_cards(&mut self) -> Result<(), ServerError> {
-		//reset game data
+		//reset bevy_game data
 		self.highest_bid = 0;
 		self.game_data.turn_number = 0;
 		self.game_data.turn_index = self.game_data.dealer_index + 1;
@@ -228,7 +228,7 @@ impl SPGame {
 	///Which ever player's turn it currently is, this checks if that player is an AI.
 	pub fn is_ai(&self) -> bool {matches!(self.players[self.game_data.turn_index as usize].player_type, PlayerType::AI)}
 	
-	///Validates the bid and updates game state. Returns early if the bid was invalid. Call [Self::next_turn] after this.
+	///Validates the bid and updates bevy_game state. Returns early if the bid was invalid. Call [Self::next_turn] after this.
 	pub fn validate_bid(&mut self, bid: u8) -> bool {
 		if bid == 1 || bid > 4 || bid <= self.highest_bid {return false;}
 		let index: u8 = self.game_data.turn_index;
@@ -244,7 +244,7 @@ impl SPGame {
 	pub fn validate_card(&mut self, card: Card) -> Result<bool, ServerError> {
 		let player: &mut Player = &mut self.players[self.game_data.turn_index as usize];
 		let Some(card_index) = player.hand.iter().position(|c| {*c == card}) else {return Ok(false);};
-		//update game state
+		//update bevy_game state
 		if self.pile.is_empty() {
 			//the first card played of the turn
 			self.pile_owner = self.game_data.turn_index;
@@ -258,7 +258,7 @@ impl SPGame {
 		} else {
 			//verify legality of card
 			if card.suit != self.game_data.trump && card.suit != self.game_data.lead && player.can_follow(self.game_data.lead.clone()) {return Ok(false);}
-			//calculate if new owner and update game data
+			//calculate if new owner and update bevy_game data
 			if (card.suit == self.highest_card.suit && card.number > self.highest_card.number) || (self.highest_card.suit != self.game_data.trump && card.suit == self.game_data.trump) {
 				self.highest_card = card.clone();
 				self.pile_owner = self.game_data.turn_index;
@@ -298,7 +298,7 @@ impl SPGame {
 		Some((suit.clone(), *num))
 	}
 	
-	///Uses a card-scoring system, the turn order, and the game score to determine the bid
+	///Uses a card-scoring system, the turn order, and the bevy_game score to determine the bid
 	pub fn ai_bid(&mut self) -> u8 {
 		let Some((_, points)) = self.ai_eval_bid() else {
 			self.validate_bid(0);
@@ -375,7 +375,7 @@ impl SPGame {
 			the highest trump card that hasn't been played
 			who's following trump suit
 			if the pile contains A, J, and/or 2 (or 3 if 2 hasn't been played yet)
-			how many game points are in the pile
+			how many bevy_game points are in the pile
 			
 		Heuristics:
 			if AI can follow, only allow follow suit or trump suit, else allow all cards
@@ -399,7 +399,7 @@ fn shuffle(deck: &mut [Card]) {
 		}
 	}
 }
-///returns (high, low, jack, game)
+///returns (high, low, jack, bevy_game)
 fn calc_points(pile: &[Card], trump: Suit) -> (u8, u8, bool, u8) {
 	let mut highest: u8 = 2;
 	let mut lowest: u8 = A;

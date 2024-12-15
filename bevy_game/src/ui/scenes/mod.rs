@@ -36,4 +36,4 @@ pub trait SceneUI: Plugin {
 	fn build(&self, app: &mut App) {app.add_systems(OnExit(Self::SCENE), de_spawn);}
 }
 
-fn de_spawn(mut commands: Commands, root: Query<Entity, With<RootUINode>>) {commands.entity(root.single()).despawn_recursive();}
+fn de_spawn(mut commands: Commands, root: Query<Entity, With<RootUINode>>) {root.iter().for_each(|r| {commands.entity(r).despawn_recursive();})}

@@ -46,42 +46,47 @@ impl MainMenuUIPlugin {
 			margin: UiRect::vertical(Val::Px(20.)), ..default()
 		}));
 		//Singleplayer button
-		ui_root.main_menu_button("Singleplayer")
+		main_menu_button(&mut ui_root, "Singleplayer")
 			.observe(|
-				_trigger: Trigger<Pointer<Click>>,
+				trigger: Trigger<Pointer<Click>>,
 				curr_scene: Res<State<SceneType>>,
 				mut next_scene: ResMut<NextState<SceneType>>,
 				mut next_host: ResMut<NextState<HostType>>
 			| {
+				if trigger.button != PointerButton::Primary {return;}
 				if SceneType::Setup == *curr_scene.get() {return;}
 				next_host.set(HostType::Singleplayer);
 				next_scene.set(SceneType::Setup);
 			});
 		//Multiplayer button
-		ui_root.main_menu_button("Multiplayer")
+		main_menu_button(&mut ui_root, "Multiplayer")
 			.observe(|trigger: Trigger<Pointer<Click>>, mut mul_popup: Query<&mut Style, With<MultiplayerPopup>>| {
+				if trigger.button != PointerButton::Primary {return;}
 				mul_popup.single_mut().display = Display::Flex;
 			});
 		//Settings button
-		ui_root.main_menu_button("Settings")
+		main_menu_button(&mut ui_root, "Settings")
 			.observe(|
-				_trigger: Trigger<Pointer<Click>>,
+				trigger: Trigger<Pointer<Click>>,
 				curr_scene: Res<State<SceneType>>,
 				mut next_scene: ResMut<NextState<SceneType>>,
 				mut next_host: ResMut<NextState<HostType>>
 			| {
+				if trigger.button != PointerButton::Primary {return;}
 				if SceneType::Settings == *curr_scene.get() {return;}
 				next_host.set(HostType::None);
 				next_scene.set(SceneType::Settings);
 			});
 		//Tutorial button
-		ui_root.main_menu_button("Tutorial")
+		main_menu_button(&mut ui_root, "Tutorial")
 			.observe(|trigger: Trigger<Pointer<Click>>| {
+				if trigger.button != PointerButton::Primary {return;}
 				todo!("Prompt user if they want to take the tutorial")
 			});
 		//Exit button
-		ui_root.main_menu_button("Exit")
+		main_menu_button(&mut ui_root, "Exit")
 			.observe(|trigger: Trigger<Pointer<Click>>, mut event_writer: EventWriter<AppExit>| {
+				if trigger.button != PointerButton::Primary {return;}
 				//TODO I might want to prompt the user asking if they're sure they want to exit
 				event_writer.send(AppExit::Success);
 			});
@@ -98,61 +103,61 @@ impl MainMenuUIPlugin {
 			..default()
 		}, MultiplayerPopup));
 		//Host button
-		mul_popup.main_menu_button("Host")
+		main_menu_button(&mut mul_popup, "Host")
 			.observe(|trigger: Trigger<Pointer<Click>>| {
+				if trigger.button != PointerButton::Primary {return;}
 				todo!("Connect to server, send a HostGame message, wait for response, change scene to game")
 			});
 		//Join button
-		mul_popup.main_menu_button("Join")
+		main_menu_button(&mut mul_popup, "Join")
 			.observe(|trigger: Trigger<Pointer<Click>>| {
+				if trigger.button != PointerButton::Primary {return;}
 				todo!("Prompt user for join code")
 			});
 		//Cancel button
-		mul_popup.main_menu_button("Cancel")
-			.observe(|trigger: Trigger<Pointer<Click>>, mut mul_popup: Query<&mut Style, With<MultiplayerPopup>>| {
-				mul_popup.single_mut().display = Display::None;
+		main_menu_button(&mut mul_popup, "Cancel")
+			.observe(|trigger: Trigger<Pointer<Click>>, mut popup: Query<&mut Style, With<MultiplayerPopup>>| {
+				if trigger.button != PointerButton::Primary {return;}
+				popup.single_mut().display = Display::None;
 			});
 	}
 }
 
-trait MainMenuButtonStyle {
-	fn main_menu_button(&mut self, label: Option<impl Into<String>>) -> UiBuilder<Entity>;
-}
-impl MainMenuButtonStyle for UiBuilder<Entity> {
-	fn main_menu_button(&mut self, label: impl Into<Option<String>>) -> UiBuilder<Entity> {
-		let mut button: UiBuilder<Entity> = self.spawn(ButtonBundle {
-			style: Style {
-				border: UiRect::all(Val::Px(10.)),
-				margin: UiRect::all(Val::Px(20.)),
-				padding: UiRect::all(Val::Px(10.)),
-				width: Val::Percent(26.),
-				..default()
-			},
-			border_color: Color::srgb_u8(216, 216, 216).into(),
-			background_color: Color::srgb_u8(0, 64, 0).into(),
+fn main_menu_button(builder: &mut UiBuilder<Entity>, label: impl Into<Option<String>>) -> UiBuilder<Entity> {
+	let mut button: UiBuilder<Entity> = builder.spawn(ButtonBundle {
+		style: Style {
+			border: UiRect::all(Val::Px(10.)),
+			margin: UiRect::all(Val::Px(20.)),
+			padding: UiRect::all(Val::Px(10.)),
+			width: Val::Percent(26.),
 			..default()
-		});
-		if let Some(label) = label {
-			button.spawn(TextBundle::from_section(label, TextStyle {font_size: 75., ..default()}));
-		}
-		button
-			.observe(|trigger: Trigger<Pointer<Out>>, mut bg_colors: Query<&mut BackgroundColor>| {
-				*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(216, 216, 216).into();
-			})
-			.observe(|trigger: Trigger<Pointer<Over>>, mut bg_colors: Query<&mut BackgroundColor>| {
-				*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 60, 0).into();
-			})
-			// .observe(|trigger: Trigger<Pointer<Move>>, mut bg_colors: Query<&mut BackgroundColor>| {
-			// 	*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 60, 0).into();
-			// })
-			// .observe(|trigger: Trigger<Pointer<Up>>, mut bg_colors: Query<&mut BackgroundColor>| {
-			// 	*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 60, 0).into();
-			// })
-			.observe(|trigger: Trigger<Pointer<Click>>, mut bg_colors: Query<&mut BackgroundColor>| {
-				*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 55, 0).into();
-			});
-		button
+		},
+		border_color: BorderColor(Color::srgb_u8(216, 216, 216)),
+		background_color: BackgroundColor(Color::srgb_u8(0, 64, 0)),
+		..default()
+	});
+	if let Some(label) = label {
+		button.spawn(TextBundle::from_section(label, TextStyle {font_size: 75., ..default()}));
 	}
+	button
+		.observe(|trigger: Trigger<Pointer<Out>>, mut bg_colors: Query<&mut BackgroundColor>| {
+			*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(216, 216, 216);
+		})
+		.observe(|trigger: Trigger<Pointer<Over>>, mut bg_colors: Query<&mut BackgroundColor>| {
+			*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 60, 0);
+		})
+		// .observe(|trigger: Trigger<Pointer<Move>>, mut bg_colors: Query<&mut BackgroundColor>| {
+		// 	*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 60, 0);
+		// })
+		// .observe(|trigger: Trigger<Pointer<Up>>, mut bg_colors: Query<&mut BackgroundColor>| {
+		// 	if trigger.button != PointerButton::Primary {return;}
+		// 	*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 60, 0);
+		// })
+		.observe(|trigger: Trigger<Pointer<Click>>, mut bg_colors: Query<&mut BackgroundColor>| {
+			if trigger.button != PointerButton::Primary {return;}
+			*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 55, 0);
+		});
+	button
 }
 
 #[derive(Component)]

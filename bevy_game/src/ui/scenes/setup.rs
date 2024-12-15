@@ -1,20 +1,13 @@
 use {
 	crate::{
-		SceneType, HostType,
+		SceneType,
+		HostType,
 		ui::{
-			OverrideTheme,
-			scene::{SceneUI, RootUINode},
-			button::{ButtonAction, UiButtonExt},
-			slider_u8::{SliderU8, UiSliderU8Ext, SliderU8Config},
-			setup_player::{UiSetupPlayerExt, SetupPlayer},
-			spinbox::SpinBox
+			scenes::{SceneUI, RootUINode},
+			widgets::{UiBuilder, UiBuilderExt}
 		}
 	},
 	bevy::prelude::*,
-	sickle_ui::{
-		prelude::*,
-		ui_commands::UpdateTextExt
-	},
 	resources::client_items::MAX_PLAYERS,
 	std::f32::consts::PI
 };
@@ -26,12 +19,10 @@ pub struct SetupUIPlugin;
 impl Plugin for SetupUIPlugin {
 	fn build(&self, app: &mut App) {
 		SceneUI::build(self, app);
-		app.add_plugins(ComponentThemePlugin::<ButtonTheme>::default())
-			.add_plugins(ComponentThemePlugin::<AddPlayerButtonTheme>::default())
-			.add_systems(OnEnter(Self::SCENE), Self::spawn)
+		app.add_systems(OnEnter(Self::SCENE), Self::spawn)
 			.add_systems(OnExit(Self::SCENE), Self::despawn)
 			.add_systems(Update, Self::update_player_pos.run_if(in_state(Self::SCENE)))
-			.add_systems(Update, (Self::update_team_mode_checkbox, Self::update_player_teams).chain().after(FluxInteractionUpdate).run_if(in_state(Self::SCENE)));
+			.add_systems(Update, (Self::update_team_mode_checkbox, Self::update_player_teams).chain().run_if(in_state(Self::SCENE)));
 	}
 }
 impl SceneUI for SetupUIPlugin {
@@ -44,47 +35,93 @@ impl SetupUIPlugin {
 	const PLAYER_ANIM_SPEED: f32 = 10.;
 	
 	fn spawn(mut commands: Commands, host: Res<State<HostType>>, asset_server: Res<AssetServer>) {
-		commands.ui_builder(UiRoot).container(
-			NodeBundle {
-				style: Style {
-					width: Val::Percent(100.),
-					height: Val::Percent(100.),
-					..default()
-				},
-				background_color: BackgroundColor(Color::srgb_u8(0, 92, 24)),
+		//UI scene root node
+		let mut ui_root: UiBuilder<Entity> = commands.ui_builder(RootUINode).spawn(NodeBundle {
+			style: Style {
+				width: Val::Percent(100.),
+				height: Val::Percent(100.),
 				..default()
-			}, |ui_root| {
-				//back button
-				let mut back_button: UiBuilder<Entity> = ui_root.button(ButtonAction::SceneChanged(SceneType::MainMenu, Some(HostType::None)));
-				back_button
-					.insert(ButtonTheme)
-					.label(LabelConfig::from("Back")).style().font_size(50.);
-				back_button.style()
-					.position_type(PositionType::Absolute)
-					.top(Val::Px(15.))
-					.left(Val::Px(15.));
-				//start/ready button
-				let host_type: HostType = host.get().to_owned();
-				match host_type {
-					HostType::None => {unreachable!("Must have a HostType to be in the Setup scene");}
-					HostType::Singleplayer => {
-						let mut start_button: UiBuilder<Entity> = ui_root.button(ButtonAction::SceneChanged(SceneType::Game, None));
-						start_button
-							.insert(ButtonTheme)
-							.label(LabelConfig::from("Start")).style().font_size(50.);
-						start_button
-					}
-					HostType::Host | HostType::Client => {
-						let mut start_button: UiBuilder<Entity> = ui_root.button(ButtonAction::ReadyClicked);
-						start_button
-							.insert(ButtonTheme)
-							.label(LabelConfig::from("Ready")).style().font_size(50.);
-						start_button
-					}
-				}.style()
-					.position_type(PositionType::Absolute)
-					.bottom(Val::Px(15.))
-					.right(Val::Px(15.));
+			},
+			background_color: BackgroundColor(Color::srgb_u8(0, 92, 24)),
+			..default()
+		});
+		//Back button
+		setup_button(&mut ui_root, "Back", Style {
+			top: Val::Px(15.),
+			left: Val::Px(15.),
+			position_type: PositionType::Absolute,
+			..default()}
+		).observe(|
+			trigger: Trigger<Pointer<Click>>,
+			curr_scene: Res<State<SceneType>>,
+			mut next_scene: ResMut<NextState<SceneType>>,
+			mut next_host: ResMut<NextState<HostType>>
+		| {
+			if trigger.button != PointerButton::Primary {return;}
+			if SceneType::MainMenu == *curr_scene.get() {return;}
+			next_host.set(HostType::None);
+			next_scene.set(SceneType::MainMenu);
+		});
+		//Start/Ready button
+		match host.get() {
+			HostType::None => {unreachable!("Must have a HostType to be in the Setup scene");}
+			HostType::Singleplayer => {
+				setup_button(&mut ui_root, "Start", Style {
+					bottom: Val::Px(15.),
+					right: Val::Px(15.),
+					position_type: PositionType::Absolute,
+					..default()}
+				).observe(|
+					trigger: Trigger<Pointer<Click>>,
+					curr_scene: Res<State<SceneType>>,
+					mut next_scene: ResMut<NextState<SceneType>>
+				| {
+					if trigger.button != PointerButton::Primary {return;}
+					if SceneType::Game == *curr_scene.get() {return;}
+					next_scene.set(SceneType::Game);
+				});
+			}
+			HostType::Host | HostType::Client => {
+				setup_button(&mut ui_root, "Ready", Style {
+					bottom: Val::Px(15.),
+					right: Val::Px(15.),
+					position_type: PositionType::Absolute,
+					..default()
+				}).observe(|trigger: Trigger<Pointer<Click>>| {
+					if trigger.button != PointerButton::Primary {return;}
+					todo!("Send ready message to server")
+				});
+			}
+		}
+		//Settings panel
+		let mut settings_panel: UiBuilder<Entity> = ui_root.spawn(NodeBundle {
+			style: Style {
+				position_type: PositionType::Absolute,
+				top: Val::Px(15.),
+				right: Val::Px(15.),
+				flex_direction: FlexDirection::Column,
+				width: Val::Percent(25.),
+				height: Val::Percent(29.),
+				justify_content: JustifyContent::FlexStart,
+				..default()
+			},
+			background_color: BackgroundColor(Color::srgba_u8(0, 0, 0, 92)),
+			..default()
+		});
+		settings_panel.checkbox("Standard Team Mode", true);
+		settings_panel.slider("Max Score", 21., 1., 2., 124.);
+		settings_panel.checkbox("Win By 2", false);
+		settings_panel.checkbox("Negative Scores", true);
+		setup_button(&mut ui_root, "Add Player", Style {align_items: AlignItems::Center, ..default()})
+			.observe(|trigger: Trigger<Pointer<Click>>| {
+				if trigger.button != PointerButton::Primary {return;}
+				todo!("Send ready message to server")
+			});
+		
+		//TODO setup players
+		
+		
+		|ui_root| {
 				//settings
 				ui_root.panel(String::from("Settings"), |settings_container| {
 					settings_container
@@ -307,4 +344,56 @@ impl OverrideTheme for SliderU8 {
 			.switch_target(Self::READOUT)
 			.font_size(30.);
 	}
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+fn setup_button(builder: &mut UiBuilder<Entity>, label: impl Into<Option<String>>, style: Style) -> UiBuilder<Entity> {
+	let mut button: UiBuilder<Entity> = builder.spawn(ButtonBundle {
+		style: Style {
+			border: UiRect::all(Val::Px(10.)),
+			margin: UiRect::all(Val::Px(20.)),
+			padding: UiRect::all(Val::Px(10.)),
+			width: Val::Percent(26.),
+			..style
+		},
+		border_color: BorderColor(Color::srgb_u8(216, 216, 216)),
+		background_color: BackgroundColor(Color::srgb_u8(0, 64, 0)),
+		..default()
+	});
+	if let Some(label) = label {
+		button.spawn(TextBundle::from_section(label, TextStyle {font_size: 50., ..default()}));
+	}
+	button
+		.observe(|trigger: Trigger<Pointer<Out>>, mut bg_colors: Query<&mut BackgroundColor>| {
+			*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(216, 216, 216);
+		})
+		.observe(|trigger: Trigger<Pointer<Over>>, mut bg_colors: Query<&mut BackgroundColor>| {
+			*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 60, 0);
+		})
+		// .observe(|trigger: Trigger<Pointer<Move>>, mut bg_colors: Query<&mut BackgroundColor>| {
+		// 	*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 60, 0);
+		// })
+		// .observe(|trigger: Trigger<Pointer<Up>>, mut bg_colors: Query<&mut BackgroundColor>| {
+		// 	if trigger.button != PointerButton::Primary {return;}
+		// 	*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 60, 0);
+		// })
+		.observe(|trigger: Trigger<Pointer<Click>>, mut bg_colors: Query<&mut BackgroundColor>| {
+			if trigger.button != PointerButton::Primary {return;}
+			*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0, 55, 0);
+		});
+	button
 }

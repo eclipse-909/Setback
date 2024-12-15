@@ -5,6 +5,6 @@ edition = "2021"
 
 [dependencies]
 resources = { path = "../resources" }
-tokio = { version = "1.40.0", features = ["full"] }
+tokio = { version = "1.42.0", features = ["full"] }
 bincode = "2.0.0-rc.3"
-rand = "0.9.0-alpha.2"
+rand = "0.9.0-beta.1"

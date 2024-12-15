@@ -1,5 +1,7 @@
 #!/bin/bash
 
+#call these from ./Setback in shell
+
 push() {
 	branches=(main testing)
 	if [ -z "$1" ]; then
@@ -27,10 +29,11 @@ push() {
 	git push origin main:"$1"
 }
 
-run_game_dev() {
-	RUST_BACKTRACE=full cargo run -p game --features dev
-}
+alias run_bevy_dev='RUST_BACKTRACE=full cargo run -p bevy_game --features dev'
+alias run_bevy_release='RUST_BACKTRACE=full cargo run -p bevy_game --release'
 
-run_game_release() {
-	RUST_BACKTRACE=full cargo run -p game --release
-}
+alias docker-build-website='docker build -t setback-website -f ./website/Dockerfile .'
+alias docker-run-website='docker run --rm -p 80:8080 setback-website'
+
+alias docker-build-server='docker build -t setback-server -f ./server/Dockerfile .'
+alias docker-run-server='docker run --rm -p 42069:42069 setback-server'

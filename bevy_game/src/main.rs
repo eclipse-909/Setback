@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod ui;
 
 use {
@@ -5,9 +7,10 @@ use {
 	bevy::{
 		prelude::*,
 		window::{PresentMode, WindowMode, EnabledButtons, WindowTheme},
-		winit::WinitSettings
+		winit::{WinitWindows, WinitSettings}
 	},
-	bevy_inspector_egui::quick::WorldInspectorPlugin
+	bevy_inspector_egui::quick::WorldInspectorPlugin,
+	winit::window::Icon
 };
 
 fn main() {
@@ -31,19 +34,32 @@ fn main() {
 			}),
 			..default()
 		}));
+	
 	#[cfg(feature = "dev")]
-	{
-		app.add_plugins(WorldInspectorPlugin::default());
-	}
+	app.add_plugins(WorldInspectorPlugin::default());
+	
 	app.add_plugins(UIPlugin)
 		.insert_resource(WinitSettings::game())
 		.init_state::<SceneType>()
 		.init_state::<HostType>()
-		.add_systems(Startup, setup)
+		.add_systems(Startup, (setup, set_window_icon))
 		.run();
 }
 
 fn setup(mut commands: Commands) {commands.spawn(Camera2dBundle::default());}
+
+fn set_window_icon(windows: NonSend<WinitWindows>) {
+	let (icon_rgba, icon_width, icon_height) = {
+		let image = image::open("icon.ico").expect("Failed to open icon path").into_rgba8();
+		let (width, height) = image.dimensions();
+		let rgba = image.into_raw();
+		(rgba, width, height)
+	};
+	let icon = Icon::from_rgba(icon_rgba, icon_width, icon_height).unwrap();
+	for window in windows.windows.values() {
+		window.set_window_icon(Some(icon.clone()));
+	}
+}
 
 ///Game state which stores what scene is currently active.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -56,15 +72,15 @@ enum SceneType {
 	Settings
 }
 
-///Game state which stores the relation between the player and the type of game they're playing.
+///Game state which stores the relation between the player and the type of bevy_game they're playing.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 enum HostType {
-	///Not in a game.
+	///Not in a bevy_game.
 	#[default]
 	None,
 	Singleplayer,
-	///Created a multiplayer game as the host.
+	///Created a multiplayer bevy_game as the host.
 	Host,
-	///Joined a multiplayer game as a client.
+	///Joined a multiplayer bevy_game as a client.
 	Client
 }
