@@ -4,83 +4,90 @@ mod setup_player;
 mod checkbox;
 
 use {
-	crate::ui::scenes::RootUINode,
 	bevy::{
 		prelude::*,
 		ecs::system::IntoObserverSystem
-	}
+	},
+	std::fmt::Debug
 };
 
-pub struct UiBuilder<'a, T> {
-	commands: Commands<'a, 'a>,
-	context: T
-}
-
-impl<'a, T> UiBuilder<'a, T> {
-	pub fn context(&self) -> &T {&self.context}
-	pub fn commands(&mut self) -> &mut Commands<'a, 'a> {&mut self.commands}
-}
-
-impl UiBuilder<'_, RootUINode> {
-	pub fn spawn(&mut self, bundle: impl Bundle) -> UiBuilder<Entity> {
-		self.commands().ui_builder(self.commands().spawn(bundle).id())
+///The entity being observed must have a BackgroundColor component.
+pub fn pick_bg_color<E: Debug + Clone + Reflect>(bg_color: Color) -> impl IntoObserverSystem<_,_,_> {
+	|trigger: Trigger<Pointer<E>>, mut bg_colors: Query<&mut BackgroundColor>| {
+		*bg_colors.get_mut(trigger.entity()) = bg_color;
 	}
 }
 
-impl UiBuilder<'_, Entity> {
-	pub fn id(&self) -> Entity {
-		self.context().get_id()
-	}
-	
-	pub fn entity_commands(&mut self) -> EntityCommands {
-		self.commands().entity(self.id())
-	}
-	
-	/// This allows for using the `EntityCommands` of the builder, and also returning the UiBuilder with context
-	/// intact for further processing
-	pub fn entity_commands_inplace(&mut self, entity_commands_fn: impl FnOnce(&mut EntityCommands)) -> &mut Self {
-		entity_commands_fn(&mut self.entity_commands());
-		self
-	}
-	
-	pub fn spawn(&mut self, bundle: impl Bundle) -> UiBuilder<Entity> {
-		let mut new_entity: Entity = Entity::PLACEHOLDER;
-		let entity: Entity = self.id();
-		self.commands().entity(entity).with_children(|parent| {
-			new_entity = parent.spawn(bundle).id();
-		});
-		self.commands().ui_builder(new_entity)
-	}
-	
-	pub fn insert(&mut self, bundle: impl Bundle) -> &mut Self {
-		self.entity_commands().insert(bundle);
-		self
-	}
-	
-	pub fn observe<E: Event, B: Bundle, M>(&mut self, system: impl IntoObserverSystem<E, B, M>) -> &mut Self {
-		self.entity_commands().observe(system);
-		self
-	}
-}
-
-pub trait UiBuilderExt {
-	fn ui_builder<T>(&mut self, context: T) -> UiBuilder<T>;
-}
-
-impl UiBuilderExt for Commands<'_, '_> {
-	fn ui_builder<T>(&mut self, context: T) -> UiBuilder<T> {
-		UiBuilder {
-			commands: self.reborrow(),
-			context,
-		}
-	}
-}
-
-impl UiBuilderExt for EntityCommands<'_> {
-	fn ui_builder<T>(&mut self, context: T) -> UiBuilder<T> {
-		UiBuilder {
-			commands: self.commands(),
-			context,
-		}
-	}
-}
+// pub struct UiBuilder<'a, T> {
+// 	commands: Commands<'a, 'a>,
+// 	context: T
+// }
+//
+// impl<'a, T> UiBuilder<'a, T> {
+// 	pub fn context(&self) -> &T {&self.context}
+// 	pub fn commands(&mut self) -> &mut Commands<'a, 'a> {&mut self.commands}
+// }
+//
+// impl UiBuilder<'_, RootUINode> {
+// 	pub fn spawn(&mut self, bundle: impl Bundle) -> UiBuilder<Entity> {
+// 		self.commands().ui_builder(self.commands().spawn(bundle).id())
+// 	}
+// }
+//
+// impl UiBuilder<'_, Entity> {
+// 	pub fn id(&self) -> Entity {
+// 		self.context().get_id()
+// 	}
+//
+// 	pub fn entity_commands(&mut self) -> EntityCommands {
+// 		self.commands().entity(self.id())
+// 	}
+//
+// 	/// This allows for using the `EntityCommands` of the builder, and also returning the UiBuilder with context
+// 	/// intact for further processing
+// 	pub fn entity_commands_inplace(&mut self, entity_commands_fn: impl FnOnce(&mut EntityCommands)) -> &mut Self {
+// 		entity_commands_fn(&mut self.entity_commands());
+// 		self
+// 	}
+//
+// 	pub fn spawn(&mut self, bundle: impl Bundle) -> UiBuilder<Entity> {
+// 		let mut new_entity: Entity = Entity::PLACEHOLDER;
+// 		let entity: Entity = self.id();
+// 		self.commands().entity(entity).with_children(|parent| {
+// 			new_entity = parent.spawn(bundle).id();
+// 		});
+// 		self.commands().ui_builder(new_entity)
+// 	}
+//
+// 	pub fn insert(&mut self, bundle: impl Bundle) -> &mut Self {
+// 		self.entity_commands().insert(bundle);
+// 		self
+// 	}
+//
+// 	pub fn observe<E: Event, B: Bundle, M>(&mut self, system: impl IntoObserverSystem<E, B, M>) -> &mut Self {
+// 		self.entity_commands().observe(system);
+// 		self
+// 	}
+// }
+//
+// pub trait UiBuilderExt {
+// 	fn ui_builder<T>(&mut self, context: T) -> UiBuilder<T>;
+// }
+//
+// impl UiBuilderExt for Commands<'_, '_> {
+// 	fn ui_builder<T>(&mut self, context: T) -> UiBuilder<T> {
+// 		UiBuilder {
+// 			commands: self.reborrow(),
+// 			context,
+// 		}
+// 	}
+// }
+//
+// impl UiBuilderExt for EntityCommands<'_> {
+// 	fn ui_builder<T>(&mut self, context: T) -> UiBuilder<T> {
+// 		UiBuilder {
+// 			commands: self.commands(),
+// 			context,
+// 		}
+// 	}
+// }

@@ -12,16 +12,8 @@ use {
 
 ///8 is the max number of players for each player to have 6 cards in a 52-card deck
 pub const MAX_PLAYERS: u8 = 8;
-///4 is the arbitrary min number of players that can play a bevy_game.
+///4 is the arbitrary min number of players that can play a game.
 pub const MIN_PLAYERS: u8 = 4;
-///Not sure how many the server can handle, so I'll use a small number for now.
-pub const MAX_SERVER_CLIENTS: u32 = 1000;
-
-#[derive(Encode, Decode, PartialEq)]
-pub struct Version(u8, u8, u8);
-impl Version {
-	pub const LATEST: Version = Version(0, 1, 0);
-}
 
 #[repr(u8)]
 #[derive(Encode, Decode, Clone, Debug)]
@@ -50,7 +42,17 @@ impl std::error::Error for ServerError {}
 
 #[repr(u8)]
 #[derive(Encode, Decode, Debug)]
-pub enum ClientError {IO, Serialization, NotConnected, Runtime, EndOfStream, NullPtr, WrongVersion, InvalidUsernameOrPassword, BadRequest}
+pub enum ClientError {
+	IO,
+	Serialization,
+	NotConnected,
+	Runtime,
+	EndOfStream,
+	NullPtr,
+	WrongVersion,
+	InvalidUsernameOrPassword,
+	BadRequest
+}
 impl Display for ClientError {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {write!(f, "{:?}", self)}
 }

@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ui;
+mod components;
 
 use {
 	crate::ui::UIPlugin,
@@ -72,10 +73,10 @@ enum SceneType {
 	Settings
 }
 
-///Game state which stores the relation between the player and the type of bevy_game they're playing.
+///Game state which stores the relation between the player and the type of game they're playing.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 enum HostType {
-	///Not in a bevy_game.
+	///Not in a game.
 	#[default]
 	None,
 	Singleplayer,

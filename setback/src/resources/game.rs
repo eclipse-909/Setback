@@ -230,9 +230,9 @@ impl Game {
 	
 	///Validates the bid and updates game state. Returns early if the bid was invalid. Call [Self::next_turn] after this.
 	pub fn validate_bid(&mut self, bid: u8) -> bool {
+		if bid == 0 {return true;}
 		if bid == 1 || bid > 4 || bid <= self.highest_bid {return false;}
-		let index: u8 = self.game_data.turn_index;
-		self.highest_bidder = index;
+		self.highest_bidder = self.game_data.turn_index;
 		self.highest_bid = bid;
 		if bid == 4 {
 			self.game_data.turn_number = 1;
@@ -329,7 +329,6 @@ impl Game {
 			}
 		}
 		if bid <= 1 || bid <= self.highest_bid {bid = 0;}
-		self.validate_bid(bid);
 		bid
 	}
 	
@@ -341,7 +340,6 @@ impl Game {
 		if self.game_data.turn_number == 1 && self.pile.is_empty() {
 			let (suit, _) = self.ai_eval_bid();//Suit of highest bid should not have changed, so we will just recalculate it instead of storing it
 			let highest: Card = player.hand.iter().filter(|card| {card.suit == suit}).max_by(|card1, card2| {card1.number.cmp(&card2.number)}).unwrap().clone();
-			assert!(self.validate_card(highest.clone()));
 			return highest;
 		}
 		let playable_card: Vec<Card> = if !self.pile.is_empty() && player.can_follow(self.game_data.lead.clone()) {
@@ -378,7 +376,6 @@ impl Game {
 		*/
 		
 		let card: Card = playable_card[index].clone();
-		assert!(self.validate_card(card.clone()));
 		card
 	}
 }

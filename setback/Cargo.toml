@@ -1,5 +1,5 @@
 [package]
-name = "resources"
+name = "setback"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,3 +8,4 @@ bincode = "2.0.0-rc.3"
 tokio = { version = "1.42.0", features = ["full"] }
 rand = "0.9.0-beta.1"
 serde = { version = "1.0.216", features = ["derive"] }
+#awc = "3.5.1"

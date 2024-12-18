@@ -35,6 +35,7 @@ impl SetupUIPlugin {
 	const PLAYER_ANIM_SPEED: f32 = 10.;
 	
 	fn spawn(mut commands: Commands, host: Res<State<HostType>>, asset_server: Res<AssetServer>) {
+		commands.spawn().with_children(|parent| {});
 		//UI scene root node
 		let mut ui_root: UiBuilder<Entity> = commands.ui_builder(RootUINode).spawn(NodeBundle {
 			style: Style {

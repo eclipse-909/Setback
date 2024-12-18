@@ -36,11 +36,11 @@ pub struct Player {
 	pub card_rx: Option<Receiver<Card>>
 }
 impl Player {
-	pub async fn new_client(client: Arc<RwLock<Client>>, host: bool, team_id: u8) -> Self {
+	pub fn new_client(client: Arc<RwLock<Client>>, host: bool, team_id: u8) -> Self {
 		let (bid_tx, bid_rx) = channel::<u8>(1);
 		let (card_tx, card_rx) = channel::<Card>(1);
 		Self {
-			player_type: PlayerType::Client(PlayerClient::new(client, host).await),
+			player_type: PlayerType::Client(PlayerClient::new(client, host)),
 			team_id,
 			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
 			bid_tx: Some(bid_tx),
@@ -152,7 +152,7 @@ pub struct PlayerClient {
 	pub ready: bool
 }
 impl PlayerClient {
-	pub async fn new(client: Arc<RwLock<Client>>, host: bool) -> Self {
+	pub fn new(client: Arc<RwLock<Client>>, host: bool) -> Self {
 		Self {client: Some(client), account_id: 0, host, ready: false}
 	}
 }

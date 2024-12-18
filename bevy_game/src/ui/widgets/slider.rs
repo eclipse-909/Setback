@@ -1,18 +1,15 @@
 use {
-	crate::ui::widgets::UiBuilder,
 	bevy::{
 		prelude::*,
 		ui::RelativeCursorPosition
-	}
+	},
+	super::pick_bg_color
 };
 
 #[derive(Component)]
 struct SliderHandle {
 	value: f32,
-	step: f32,
-	min_value: f32,
-	max_value: f32,
-	value_label: Entity
+	value_entity: Entity
 }
 
 #[derive(Component)]
@@ -22,92 +19,85 @@ struct SliderBar;
 struct Slider;
 
 pub trait SliderExt {
-	fn slider(&mut self, label: &str, value: f32, step: f32, min_value: f32, max_value: f32) -> UiBuilder<Entity>;
+	fn slider(&mut self, label: &str, value: f32, step: f32, precision: usize, min_value: f32, max_value: f32) -> &mut Self;
 }
-impl SliderExt for UiBuilder<Entity> {
-	///Only horizontal sliders are possible right now
-	fn slider(&mut self, label: &str, value: f32, step: f32, min_value: f32, max_value: f32) -> UiBuilder<Entity> {
-		let mut slider: UiBuilder<Entity> = self.spawn((Name::new("Slider"), Slider, NodeBundle {
-			style: Style {
+impl SliderExt for ChildBuilder {
+	///Horizontal slider
+	fn slider(&mut self, label: &str, value: f32, step: f32, precision: usize, min_value: f32, max_value: f32) -> &mut Self {
+		let mut root: EntityCommands = self.spawn((
+			Slider,
+			Node {
 				flex_direction: FlexDirection::Row,
 				justify_content: JustifyContent::FlexStart,
 				align_items: AlignItems::FlexStart,
 				..default()
-			},
-			..default()
-		}));
-		//Label
-		slider.spawn(TextBundle::from_section(label, TextStyle::default()).with_style(Style {
-			margin: UiRect::right(Val::Px(5.)),
-			..default()
-		}));
-		//value
-		let value_label: Entity = slider.spawn(TextBundle::from_section(value.to_string(), TextStyle::default()).with_style(Style {
-			margin: UiRect::right(Val::Px(5.)),
-			..default()
-		})).id();
-		//slider bar
-		slider.spawn((SliderBar, RelativeCursorPosition::default(), NodeBundle {
-			style: Style {
-				height: Val::Px(7.5),
-				width: Val::Percent(100.),
-				align_items: AlignItems::Center,
-				..default()
-			},
-			background_color: BackgroundColor(Color::srgb_u8(0xC0, 0xC0, 0xC0)),
-			border_radius: BorderRadius::all(Val::Percent(20.)),
-			..default()
-		}))
-			//slider handle
-			.spawn((SliderHandle {value, step, min_value, max_value, value_label}, RelativeCursorPosition::default(), ButtonBundle {
-				style: Style {
-					height: Val::Px(30.),
-					width: Val::Px(20.),
-					position_type: PositionType::Absolute,
-					left: Val::Percent(100. * ((value - min_value) / (max_value - min_value)).clamp(0., 1.)),
+			}
+		));
+		root.with_children(|parent| {
+			//Label
+			parent.spawn((
+				Node {
+					margin: UiRect::right(Val::Px(5.)),
 					..default()
 				},
-				background_color: BackgroundColor(Color::srgb_u8(0xFF, 0xCC, 0x00)),
-				border_radius: BorderRadius::all(Val::Percent(20.)),
-				..default()
-			}))
-				.observe(|trigger: Trigger<Pointer<Out>>, mut bg_colors: Query<&mut BackgroundColor>| {
-					*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0xFF, 0xCC, 0x00);
-				})
-				.observe(|trigger: Trigger<Pointer<Over>>, mut bg_colors: Query<&mut BackgroundColor>| {
-					*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0xEE, 0xBB, 0x00);
-				})
-				// .observe(|trigger: Trigger<Pointer<Move>>, mut bg_colors: Query<&mut BackgroundColor>| {
-				// 	*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0xEE, 0xBB, 0x00);
-				// })
-				// .observe(|trigger: Trigger<Pointer<Up>>, mut bg_colors: Query<&mut BackgroundColor>| {
-				// 	if trigger.button != PointerButton::Primary {return;}
-				// 	*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0xEE, 0xBB, 0x00);
-				// })
-				// .observe(|trigger: Trigger<Pointer<DragEnd>>, mut bg_colors: Query<&mut BackgroundColor>| {
-				// 	if trigger.button != PointerButton::Primary {return;}
-				// 	*bg_colors.get_mut(trigger.entity()) = Color::srgb_u8(0xEE, 0xBB, 0x00);
-				// })
-				.observe(|
-					trigger: Trigger<Pointer<Drag>>,
-					mut slider_handles: Query<(&mut SliderHandle, &mut Style, &mut BackgroundColor, &Parent)>,
-					mut slider_bars: Query<&RelativeCursorPosition, With<SliderBar>>,
-					mut texts: Query<&mut Text>
-				| {
-					if trigger.button != PointerButton::Primary {return;}
-					let (mut handle, mut handle_style, mut bg_color, Parent(parent)) = slider_handles
-						.get_mut(trigger.entity())
-						.expect("Entity should have SliderHandle and Style components");
-					*bg_color = BackgroundColor(Color::srgb_u8(0xCC, 0xAA, 0x00));
-					if trigger.distance.y == 0. {return;}
-					let RelativeCursorPosition {normalized: Some(bar_cursor_pos), ..} = slider_bars
-						.get(*parent)
-						.expect("Parent slider bar should have style component") else {return;};
-					todo!("Fix this equation");
-					handle.value = min_value + (((min_value + bar_cursor_pos.x.clamp(0., 1.) * (max_value - min_value)) - min_value) / step).round() * step;
-					texts.get_mut(handle.value_label).expect("Handle should hold a valid entity with a Text component").sections[0].value = handle.value.to_string();
-					handle_style.left = Val::Percent(bar_cursor_pos.x.clamp(0., 1.) * 100.);
-				});
-		slider
+				Text::new(label)
+			));
+			//value
+			let value_label: EntityCommands = parent.spawn((
+				Node {
+					margin: UiRect::right(Val::Px(5.)),
+					..default()
+				},
+				Text::new(format!("{:.1$}", value, precision))
+			));
+			let value_entity: Entity = value_label.id();
+			//slider bar
+			let mut slider_bar: EntityCommands = parent.spawn((
+				Node {
+					height: Val::Px(7.5),
+					width: Val::Percent(100.),
+					align_items: AlignItems::Center,
+					..default()
+				},
+				BackgroundColor(Color::srgb_u8(0xC0, 0xC0, 0xC0)),
+				BorderRadius::all(Val::Percent(20.)),
+				SliderBar,
+				RelativeCursorPosition::default(),
+			));
+			slider_bar.with_children(|bar| {
+				//slider handle
+				bar.spawn((
+					SliderHandle {value, value_entity},
+					Button::default(),
+					Node {
+						height: Val::Px(30.),
+						width: Val::Px(20.),
+						position_type: PositionType::Absolute,
+						left: Val::Percent(100. * ((value - min_value) / (max_value - min_value)).clamp(0., 1.)),
+						..default()
+					},
+					BackgroundColor(Color::srgb_u8(0xFF, 0xCC, 0x00)),
+					BorderRadius::all(Val::Percent(20.)),
+				))
+					.observe(pick_bg_color::<Out>(Color::srgb_u8(0xFF, 0xCC, 0x00)))
+					.observe(pick_bg_color::<Over>(Color::srgb_u8(0xEE, 0xBB, 0x00)))
+					.observe(pick_bg_color::<Down>(Color::srgb_u8(0xCC, 0xAA, 0x00)))
+					.observe(pick_bg_color::<Up>(Color::srgb_u8(0xEE, 0xBB, 0x00)))
+					.observe(|
+						trigger: Trigger<Pointer<Drag>>,
+						mut slider_handles: Query<(&mut SliderHandle, &mut Node, &Parent)>,
+						mut slider_bars: Query<&RelativeCursorPosition, With<SliderBar>>,
+						mut texts: Query<&mut Text>
+					| {
+						if trigger.button != PointerButton::Primary || trigger.distance.y == 0. {return;}
+						let (mut handle, mut handle_node, Parent(parent)) = slider_handles.get_mut(trigger.entity()).unwrap();
+						let RelativeCursorPosition {normalized: Some(bar_cursor_pos), ..} = slider_bars.get(*parent).unwrap() else {return;};
+						handle.value = (((min_value + bar_cursor_pos.x.clamp(0., 1.) * (max_value - min_value)) / step).round() * step).clamp(min_value, max_value);
+						**texts.get_mut(handle.value_entity).unwrap() = format!("{:.1$}", handle.value, precision).to_string();
+						handle_node.left = Val::Percent(bar_cursor_pos.x.clamp(0., 1.) * 100.);
+					});
+			});
+		});
+		self
 	}
 }

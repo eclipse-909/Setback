@@ -15,13 +15,11 @@ pub struct GameEventLoop {
 	senders: Vec<(mpsc::Sender<u8>, mpsc::Sender<Card>)>
 }
 
+impl Default for GameEventLoop {
+	fn default() -> Self {Self {game: Game::default(), senders: Vec::new()}}
+}
+
 impl GameEventLoop {
-	pub fn new_game() -> Self {
-		let game: Game = Game::default();
-		let num_players: usize = game.players.len();
-		Self{game, senders: Vec::with_capacity(num_players)}
-	}
-	
 	pub fn add_player(&mut self, human: bool, team_id: u8) {
 		self.game.players.push(if human {Player::new_human(team_id)} else {Player::new_ai(team_id)});
 	}
@@ -38,7 +36,7 @@ impl GameEventLoop {
 	
 	///Removes a player from the list, and reinserts it at the given index, sliding the remaining players if necessary.
 	///Do not call this after starting the game.
-	pub async fn re_insert_player(&mut self, init_index: u8, new_index: u8) {
+	pub fn re_insert_player(&mut self, init_index: u8, new_index: u8) {
 		let player: Player = self.game.players.remove(init_index as usize);
 		self.game.players.insert(new_index as usize, player);
 	}
@@ -56,7 +54,7 @@ impl GameEventLoop {
 	///[scores_callback] Notifies you when the round has ended and what the scores of the round are. It will already be the next player's turn when you receive this.
 	///[game_over_callback] Notifies you when the game is over.
 	///[error_callback] Notifies you if there's an unrecoverable error during the game loop.
-	pub async fn start_game(
+	pub fn start_game(
 		mut self,
 		prompt_bid_callback: fn(hand: &Vec<Card>, sender: &mpsc::Sender<u8>),
 		prompt_card_callback: fn(hand: &Vec<Card>, sender: &mpsc::Sender<Card>),
@@ -78,23 +76,27 @@ impl GameEventLoop {
 		Some((tokio::spawn(async move {tokio::select! {
 			_ = async move {
 				let mut turn_result: Result<TurnResult, ServerError> = Ok(TurnResult::NextTurn);
+				next_turn_callback(self.game.game_data.turn_index, self.game.game_data.turn_number == 0);
 				loop {
 					match turn_result {
 						Ok(TurnResult::NextTurn) => {
 							let index: u8 = self.game.game_data.turn_index;
 							let ai: bool = self.game.is_ai_turn();
 							if self.game.game_data.turn_number == 0 {
-								if ai {
-									self.senders[index as usize].0.send(self.game.ai_bid()).await.unwrap();
+								let bid: u8 = if ai {
+									let b: u8 = self.game.ai_bid();
+									assert!(self.game.validate_bid(b));
+									b
 								} else {
 									prompt_bid_callback(&self.game.players[index as usize].hand, &self.senders[index as usize].0);
-								}
-								let mut bid: u8 = self.game.players[index as usize].bid_rx.as_mut().unwrap().recv().await.unwrap();
-								while !self.game.validate_bid(bid) {
-									error_callback(ServerError::InvalidBid);
-									prompt_bid_callback(&self.game.players[index as usize].hand, &self.senders[index as usize].0);
-									bid = self.game.players[index as usize].bid_rx.as_mut().unwrap().recv().await.unwrap();
-								}
+									let mut b: u8 = self.game.players[index as usize].bid_rx.as_mut().unwrap().recv().await.unwrap();
+									while !self.game.validate_bid(b) {
+										error_callback(ServerError::InvalidBid);
+										prompt_bid_callback(&self.game.players[index as usize].hand, &self.senders[index as usize].0);
+										b = self.game.players[index as usize].bid_rx.as_mut().unwrap().recv().await.unwrap();
+									}
+									b
+								};
 								turn_result = self.game.next_turn();
 								bid_callback(index, bid);
 							} else {
