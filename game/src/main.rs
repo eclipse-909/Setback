@@ -4,8 +4,7 @@ use slint::SharedString;
 use {
 	shared::{
 		game::GameBuilder,
-		client::GameClient,
-		RoundScores, ServerError
+		ServerConnection, RoundScores, ServerError
 	},
 	std::f32::consts::PI,
 	tokio::{
@@ -71,7 +70,7 @@ async fn main() -> Result<(), slint::PlatformError> {
 #[derive(Default)]
 struct SetbackGame {
 	scene_type: Scene,
-	host_type: Host
+	host_type: Host<'_>
 }
 
 impl SetbackGame {
@@ -102,16 +101,16 @@ enum Scene {
 ///Game state which stores the relation between the player and the type of game they're playing.
 #[derive(Default)]
 #[repr(u8)]
-enum Host {
+enum Host<'multiplayer> {
 	///Not in a game.
 	#[default]
 	None,
 	SingleplayerSetup(GameBuilder),
 	SingleplayerPlaying(JoinHandle<()>, CancellationToken),
 	///Created a multiplayer game as the host.
-	Host(GameClient),
+	Host(&'multiplayer ServerConnection),
 	///Joined a multiplayer game as a client.
-	Client(GameClient)
+	Client(&'multiplayer ServerConnection)
 }
 
 fn on_exit() {std::process::exit(0);}

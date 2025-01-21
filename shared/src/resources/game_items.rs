@@ -1,12 +1,14 @@
 use {
 	super::{
-		connection::ServerConnection,
-		util::{ServerError, MAX_PLAYERS}
+		connection::{ServerConnection, SetbackConnection},
+		util::{ServerError, ClientError, MAX_PLAYERS},
+		ssp::{Protocol, Ssp}
 	},
 	std::{
 		mem,
 		array::IntoIter,
-		fmt::{Display, Debug, Formatter}
+		fmt::{Display, Debug, Formatter},
+		io::Error
 	},
 	tokio::sync::mpsc::{Sender, Receiver, channel},
 	bincode::{
@@ -53,19 +55,20 @@ impl Player {
 	}
 	///Self in multiplayer.
 	///account_id and username must come from server.
-	pub fn new_self(client: ServerConnection, account_id: u32, username: String, team_id: u8) -> Self {
+	pub async fn new_self(ssp_callback: fn(message: Result<Ssp, ClientError>), team_id: u8, username: &str, password: &str) -> Option<Self> {
 		let (bid_tx, bid_rx) = channel::<u8>(1);
 		let (card_tx, card_rx) = channel::<Card>(1);
-		Self {
-			player_type: PlayerType::Human(Some(PlayerClient {connection: Some(client), account_id, ready: false})),
-			username,
+		let (server_connection, account_id) = ServerConnection::new_connection(username, password, ssp_callback).await?;
+		Some(Self {
+			player_type: PlayerType::Human(Some(Connection {server_connection: Some(server_connection), account_id, ready: false})),
+			username: String::from(username),
 			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
 			bid_tx: Some(bid_tx),
 			bid_rx: Some(bid_rx),
 			card_tx: Some(card_tx),
 			card_rx: Some(card_rx),
 			team_id
-		}
+		})
 	}
 	pub fn new_ai(team_id: u8) -> Self {
 		let (bid_tx, bid_rx) = channel::<u8>(1);
@@ -117,19 +120,7 @@ impl Player {
 
 impl Encode for Player {
 	fn encode<__E: Encoder>(&self, encoder: &mut __E) -> Result<(), EncodeError> {
-		match &self.player_type {
-			PlayerType::Human(Some(player_client)) => {
-				Encode::encode(&0b01u8, encoder)?;
-				Encode::encode(&player_client.account_id, encoder)?;
-				Encode::encode(&player_client.ready, encoder)?;
-			}
-			PlayerType::Human(None) => {
-				Encode::encode(&0b00u8, encoder)?;
-			}
-			PlayerType::AI => {
-				Encode::encode(&0b10u8, encoder)?;
-			}
-		}
+		Encode::encode(&self.player_type, encoder)?;
 		Encode::encode(&self.username, encoder)?;
 		Encode::encode(&self.hand, encoder)?;
 		//Don't encode bid or card senders and receivers
@@ -139,14 +130,8 @@ impl Encode for Player {
 }
 impl Decode for Player {
 	fn decode<__D: Decoder>(decoder: &mut __D) -> Result<Self, DecodeError> {
-		let code: u8 = Decode::decode(decoder)?;
 		Ok(Self {
-			player_type: match code {
-				0b01 => {PlayerType::Human(Some(PlayerClient {connection: None, account_id: Decode::decode(decoder)?, ready: Decode::decode(decoder)?}))}
-				0b00 => {PlayerType::Human(None)}
-				0b10 => {PlayerType::AI}
-				_ => {unreachable!()}
-			},
+			player_type: Decode::decode(decoder)?,
 			username: Decode::decode(decoder)?,
 			hand: Decode::decode(decoder)?,
 			bid_tx: None,
@@ -159,14 +144,8 @@ impl Decode for Player {
 }
 impl<'__de> BorrowDecode<'__de> for Player {
 	fn borrow_decode<__D: BorrowDecoder<'__de>>(decoder: &mut __D) -> Result<Self, DecodeError> {
-		let code: u8 = BorrowDecode::borrow_decode(decoder)?;
 		Ok(Self {
-			player_type: match code {
-				0b01 => {PlayerType::Human(Some(PlayerClient {connection: None, account_id: BorrowDecode::borrow_decode(decoder)?, ready: BorrowDecode::borrow_decode(decoder)?}))}
-				0b00 => {PlayerType::Human(None)}
-				0b10 => {PlayerType::AI}
-				_ => {unreachable!()}
-			},
+			player_type: BorrowDecode::borrow_decode(decoder)?,
 			username: BorrowDecode::borrow_decode(decoder)?,
 			hand: BorrowDecode::borrow_decode(decoder)?,
 			bid_tx: None,
@@ -179,17 +158,89 @@ impl<'__de> BorrowDecode<'__de> for Player {
 }
 
 #[repr(u8)]
+#[derive(Encode, Decode)]
 pub enum PlayerType {
 	///Human(None) = self in singleplayer or another connected player in multiplayer, Human(Some) = self in mutliplayer.
 	///(ServerConnection, account_id, ready)
-	Human(Option<PlayerClient>),
+	Human(Option<Connection>),
 	AI
 }
 
-pub struct PlayerClient {
-	connection: Option<ServerConnection>,
+pub struct Connection {
+	server_connection: Option<ServerConnection>,
 	account_id: u32,
 	ready: bool
+}
+
+impl Connection {
+	pub async fn send_client_error(&mut self, err: ClientError) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::ClientErr(err), self.account_id)).await
+	}
+	
+	pub async fn send_create_game(&mut self) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::CreateGame, self.account_id)).await
+	}
+	
+	pub async fn send_join_game(&mut self, code: u32) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::JoinGame(code), self.account_id)).await
+	}
+	
+	pub async fn send_search_games(&mut self, filter: GameFilter) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id)).await
+	}
+	
+	///Host-only
+	pub async fn send_game_meta(&mut self, meta_data: GameMeta) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::GameMeta(meta_data), self.account_id)).await
+	}
+	
+	///Host-only
+	pub async fn send_player(&mut self, player: Player, index: u8) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Player(player, index), self.account_id)).await
+	}
+	
+	///Host-only
+	pub async fn send_players(&mut self, players: Vec<Player>) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Players(players), self.account_id)).await
+	}
+	
+	pub async fn send_ready(&mut self, is_ready: bool) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Ready(is_ready), self.account_id)).await
+	}
+	
+	pub async fn send_bid(&mut self, amount: u8) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Bid(amount), self.account_id)).await
+	}
+	
+	pub async fn send_play_card(&mut self, card: Card) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::PlayCard(card), self.account_id)).await
+	}
+}
+
+impl Encode for Connection {
+	fn encode<__E: Encoder>(&self, encoder: &mut __E) -> Result<(), EncodeError> {
+		Encode::encode(&self.account_id, encoder)?;
+		Encode::encode(&self.ready, encoder)?;
+		Ok(())
+	}
+}
+impl Decode for Connection {
+	fn decode<__D: Decoder>(decoder: &mut __D) -> Result<Self, DecodeError> {
+		Ok(Self {
+			server_connection: None,
+			account_id: Decode::decode(decoder)?,
+			ready: Decode::decode(decoder)?
+		})
+	}
+}
+impl<'__de> BorrowDecode<'__de> for Connection {
+	fn borrow_decode<__D: BorrowDecoder<'__de>>(decoder: &mut __D) -> Result<Self, DecodeError> {
+		Ok(Self {
+			server_connection: None,
+			account_id: BorrowDecode::borrow_decode(decoder)?,
+			ready: BorrowDecode::borrow_decode(decoder)?,
+		})
+	}
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Debug)]
@@ -207,7 +258,7 @@ impl Display for Card {
 }
 
 #[repr(u8)]
-#[derive(Encode, Decode, Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Encode, Decode, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Suit {Hearts, Clubs, Diamonds, Spades}
 impl Suit {
 	pub fn iter() -> IntoIter<Self, 4> {[Self::Hearts, Self::Clubs, Self::Diamonds, Self::Spades].into_iter()}

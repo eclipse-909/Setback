@@ -15,7 +15,7 @@ async fn main() {
 	for i in 1..8 {
 		game.add_player(false, i % 2);
 	}
-	let (game_loop, _terminator) = game.start_game(
+	let (game_loop, _cancel_token) = game.start_game(
 		prompt_bid,
 		prompt_play_card,
 		signal_bid,

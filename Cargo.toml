@@ -1,28 +1,30 @@
 [workspace]
 members = [
-#	"bevy_game",
-	"shared",
+	"game",
 	"server",
+	"shared",
 	"terminal_game",
-	"website",
-	"game"
+	"website"
 ]
 resolver = "2"
+
+[profile.game-debug]
+inherits = "dev"
+lto = "off"
+debug = true
+debug-assertions = true
+overflow-checks = true
+opt-level = 0
+incremental = true
 
 [profile.dev]
 opt-level = 1
 
 [profile.dev.package."terminal_game"]
-debug = true
-debug-assertions = true
-overflow-checks = true
-opt-level = 0
+inherits = "game-debug"
 
 [profile.dev.package."shared"]
-debug = true
-debug-assertions = true
-overflow-checks = true
-opt-level = 0
+inherits = "game-debug"
 
 [profile.dev.package."*"]
 opt-level = 3
@@ -31,17 +33,3 @@ opt-level = 3
 codegen-units = 1
 opt-level = 3
 lto = "fat"
-
-[profile.wasm-release]
-inherits = "release"
-strip = "debuginfo"
-
-[profile.wasm-dev]
-inherits = "dev"
-opt-level = 1
-
-[profile.server-dev]
-inherits = "dev"
-
-[profile.android-dev]
-inherits = "dev"

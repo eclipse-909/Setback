@@ -84,7 +84,8 @@ impl GameBuilder {
 		if self.game.deal_cards().is_err() {return None;}
 		let token: CancellationToken = CancellationToken::new();
 		let cloned_token: CancellationToken = token.clone();
-		Some((tokio::spawn(async move {tokio::select! {
+		//spawn_local because self.game doesn't implement Send
+		Some((tokio::task::spawn_local(async move {tokio::select! {
 			_ = async move {
 				let mut turn_result: Result<TurnResult, ServerError> = Ok(TurnResult::NextTurn);
 				next_turn_callback(self.game.game_data.turn_index, self.game.game_data.turn_number == 0);
