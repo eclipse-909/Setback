@@ -1,26 +1,18 @@
-use {
-	super::{
-		ssp::Ssp,
-		util::{ServerError}
-	},
-	tokio::{
-		sync::mpsc::UnboundedSender,
-		net::TcpStream,
-		io::{AsyncWriteExt, AsyncReadExt}
-	},
-	bincode::{Decode, Encode, config::standard},
-	serde::{Deserialize, Serialize}
-};
+//TODO rewrite this whole thing
 
-pub struct Client {
+use bincode::config::standard;
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::UnboundedSender;
+use shared::{ServerError, Ssp};
+
+pub struct TcpClient {
 	tcp_stream: TcpStream,
-	///transmitter to propagate messages to the main server or bevy_game server in a thread-safe manner
-	pub owner_tx: UnboundedSender<Ssp>,
-	pub account_id: u32
+	///transmitter to propagate messages to the server in a thread-safe manner
+	pub owner_tx: UnboundedSender<Ssp>
 }
 
-impl Client {
-	pub const fn new(tcp_stream: TcpStream, owner_tx: UnboundedSender<Ssp>) -> Self {Self {tcp_stream, owner_tx, account_id: 0}}
+impl TcpClient {
+	pub const fn new(tcp_stream: TcpStream, owner_tx: UnboundedSender<Ssp>) -> Self {Self {tcp_stream, owner_tx}}
 	///Sends a Ssp message over TCP to this client on their end device. The first 2 bytes is a u16 representing the length of the rest of the message.
 	pub async fn message_client(&mut self, ssp: &Ssp) -> Result<(), ServerError> {
 		match bincode::encode_to_vec(ssp, standard()) {
@@ -45,15 +37,3 @@ impl Client {
 	}
 	pub async fn shutdown(&mut self) {let _ = self.tcp_stream.shutdown().await;}
 }
-
-#[derive(Encode, Decode, Serialize, Deserialize, Debug)]
-pub struct AccountData {
-	///alias for rowid in sqlite
-	pub account_id: u32,
-	pub username: String,
-	pub password: String,
-	pub last_active: String
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct AccountResponse {pub account_id: u32}

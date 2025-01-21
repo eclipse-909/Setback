@@ -1,10 +1,9 @@
 use {
 	super::{
-		client::Client,
+		connection::ServerConnection,
 		util::{ServerError, MAX_PLAYERS}
 	},
 	std::{
-		sync::{Arc, RwLock},
 		mem,
 		array::IntoIter,
 		fmt::{Display, Debug, Formatter}
@@ -25,28 +24,47 @@ pub const A: u8 = 14;
 pub const CARDS_PER_PLAYER: u8 = 6;
 pub const MAX_GAME_METAS: u8 = 253;
 
-// #[derive(Clone)]
 pub struct Player {
 	pub player_type: PlayerType,
-	pub team_id: u8,
+	pub username: String,
 	pub hand: Vec<Card>,
 	pub bid_tx: Option<Sender<u8>>,
 	pub bid_rx: Option<Receiver<u8>>,
 	pub card_tx: Option<Sender<Card>>,
-	pub card_rx: Option<Receiver<Card>>
+	pub card_rx: Option<Receiver<Card>>,
+	pub team_id: u8
 }
 impl Player {
-	pub fn new_client(client: Arc<RwLock<Client>>, host: bool, team_id: u8) -> Self {
+	///Self in singleplayer, or another connected player in multiplayer.
+	///username must come from server or be an empty string.
+	pub fn new_human(username: String, team_id: u8) -> Self {
 		let (bid_tx, bid_rx) = channel::<u8>(1);
 		let (card_tx, card_rx) = channel::<Card>(1);
 		Self {
-			player_type: PlayerType::Client(PlayerClient::new(client, host)),
-			team_id,
+			player_type: PlayerType::Human(None),
+			username,
 			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
 			bid_tx: Some(bid_tx),
 			bid_rx: Some(bid_rx),
 			card_tx: Some(card_tx),
-			card_rx: Some(card_rx)
+			card_rx: Some(card_rx),
+			team_id
+		}
+	}
+	///Self in multiplayer.
+	///account_id and username must come from server.
+	pub fn new_self(client: ServerConnection, account_id: u32, username: String, team_id: u8) -> Self {
+		let (bid_tx, bid_rx) = channel::<u8>(1);
+		let (card_tx, card_rx) = channel::<Card>(1);
+		Self {
+			player_type: PlayerType::Human(Some(PlayerClient {connection: Some(client), account_id, ready: false})),
+			username,
+			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
+			bid_tx: Some(bid_tx),
+			bid_rx: Some(bid_rx),
+			card_tx: Some(card_tx),
+			card_rx: Some(card_rx),
+			team_id
 		}
 	}
 	pub fn new_ai(team_id: u8) -> Self {
@@ -54,155 +72,124 @@ impl Player {
 		let (card_tx, card_rx) = channel::<Card>(1);
 		Self {
 			player_type: PlayerType::AI,
-			team_id,
+			username: String::from("Bot"),//TODO come up with generic name for AI
 			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
 			bid_tx: Some(bid_tx),
 			bid_rx: Some(bid_rx),
 			card_tx: Some(card_tx),
-			card_rx: Some(card_rx)
+			card_rx: Some(card_rx),
+			team_id
 		}
 	}
-	pub fn new_human(team_id: u8) -> Self {
-		let (bid_tx, bid_rx) = channel::<u8>(1);
-		let (card_tx, card_rx) = channel::<Card>(1);
-		Self {
-			player_type: PlayerType::Human,
-			team_id,
-			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
-			bid_tx: Some(bid_tx),
-			bid_rx: Some(bid_rx),
-			card_tx: Some(card_tx),
-			card_rx: Some(card_rx)
-		}
-	}
+	
 	///When decoding a player, that player's player_type, bid_rx, and card_rx will be invalid,
-	///so you need to use this function to move the values from the decoded player in order to update this player.
-	pub fn update_player(&mut self, other: &Self, update_client_info: bool) -> Result<Option<PlayerType>, ServerError> {
+	///so you need to use this function to move the values from the decoded player into this player to update it.
+	///# Return
+	///Ok(None) success
+	///Ok(Some) success, and PlayerType is the old info of the player
+	///Err(ServerError) error
+	pub fn update_player(&mut self, other: Self, update_client_info: bool) -> Result<Option<PlayerType>, ServerError> {
+		self.username = other.username;
+		self.hand = other.hand;
 		self.team_id = other.team_id;
-		self.hand.clone_from(&other.hand);
-		if let PlayerType::Client(this_client) = &mut self.player_type {
-			if let PlayerType::Client(other_client) = &other.player_type {
-				if update_client_info {
-					this_client.account_id = other_client.account_id;
-					this_client.host = other_client.host;
-					this_client.ready = other_client.ready;
+		match &mut self.player_type {
+			PlayerType::Human(Some(this_client)) => {
+				if let PlayerType::Human(Some(other_client)) = other.player_type {
+					if update_client_info {
+						this_client.account_id = other_client.account_id;
+						this_client.ready = other_client.ready;
+					}
+					Ok(None)
+				} else {
+					Ok(Some(mem::replace(&mut self.player_type, other.player_type)))
 				}
+			}
+			PlayerType::AI => {
+				self.player_type = other.player_type;
 				Ok(None)
-			} else {
-				Ok(Some(mem::replace(&mut self.player_type, other.player_type.clone())))
 			}
-		} else if let PlayerType::Client(_) = &other.player_type {
-			Err(ServerError::ClientNotFound)
-		} else {
-			self.player_type = other.player_type.clone();
-			Ok(None)
+			PlayerType::Human(None) => {unreachable!("You should not be using the network in a singleplayer game")}
 		}
 	}
-	pub fn can_follow(&self, lead: Suit) -> bool {
-		for card in self.hand.iter() {
-			if card.suit == lead {
-				return true;
-			}
-		}
-		false
-	}
+	
+	pub fn can_follow(&self, lead: Suit) -> bool { self.hand.iter().any(|card| {card.suit == lead}) }
 }
 
 impl Encode for Player {
 	fn encode<__E: Encoder>(&self, encoder: &mut __E) -> Result<(), EncodeError> {
-		Encode::encode(&self.player_type, encoder)?;
-		Encode::encode(&self.team_id, encoder)?;
+		match &self.player_type {
+			PlayerType::Human(Some(player_client)) => {
+				Encode::encode(&0b01u8, encoder)?;
+				Encode::encode(&player_client.account_id, encoder)?;
+				Encode::encode(&player_client.ready, encoder)?;
+			}
+			PlayerType::Human(None) => {
+				Encode::encode(&0b00u8, encoder)?;
+			}
+			PlayerType::AI => {
+				Encode::encode(&0b10u8, encoder)?;
+			}
+		}
+		Encode::encode(&self.username, encoder)?;
 		Encode::encode(&self.hand, encoder)?;
 		//Don't encode bid or card senders and receivers
+		Encode::encode(&self.team_id, encoder)?;
 		Ok(())
 	}
 }
 impl Decode for Player {
 	fn decode<__D: Decoder>(decoder: &mut __D) -> Result<Self, DecodeError> {
+		let code: u8 = Decode::decode(decoder)?;
 		Ok(Self {
-			player_type: Decode::decode(decoder)?,
-			team_id: Decode::decode(decoder)?,
+			player_type: match code {
+				0b01 => {PlayerType::Human(Some(PlayerClient {connection: None, account_id: Decode::decode(decoder)?, ready: Decode::decode(decoder)?}))}
+				0b00 => {PlayerType::Human(None)}
+				0b10 => {PlayerType::AI}
+				_ => {unreachable!()}
+			},
+			username: Decode::decode(decoder)?,
 			hand: Decode::decode(decoder)?,
 			bid_tx: None,
 			bid_rx: None,
 			card_tx: None,
-			card_rx: None
+			card_rx: None,
+			team_id: Decode::decode(decoder)?,
 		})
 	}
 }
 impl<'__de> BorrowDecode<'__de> for Player {
 	fn borrow_decode<__D: BorrowDecoder<'__de>>(decoder: &mut __D) -> Result<Self, DecodeError> {
+		let code: u8 = BorrowDecode::borrow_decode(decoder)?;
 		Ok(Self {
-			player_type: BorrowDecode::borrow_decode(decoder)?,
-			team_id: BorrowDecode::borrow_decode(decoder)?,
+			player_type: match code {
+				0b01 => {PlayerType::Human(Some(PlayerClient {connection: None, account_id: BorrowDecode::borrow_decode(decoder)?, ready: BorrowDecode::borrow_decode(decoder)?}))}
+				0b00 => {PlayerType::Human(None)}
+				0b10 => {PlayerType::AI}
+				_ => {unreachable!()}
+			},
+			username: BorrowDecode::borrow_decode(decoder)?,
 			hand: BorrowDecode::borrow_decode(decoder)?,
 			bid_tx: None,
 			bid_rx: None,
 			card_tx: None,
-			card_rx: None
-		})
-	}
-}
-
-//#[derive(Encode, Decode, Clone)] //implemented manually because of Arc
-pub struct PlayerClient {
-	pub client: Option<Arc<RwLock<Client>>>,
-	pub account_id: u32,
-	pub host: bool,
-	pub ready: bool
-}
-impl PlayerClient {
-	pub fn new(client: Arc<RwLock<Client>>, host: bool) -> Self {
-		Self {client: Some(client), account_id: 0, host, ready: false}
-	}
-}
-impl Clone for PlayerClient {
-	fn clone(&self) -> Self {
-		Self {
-			client: None,
-			account_id: self.account_id,
-			host: self.host,
-			ready: self.ready
-		}
-	}
-}
-impl Encode for PlayerClient {
-	fn encode<__E: Encoder>(&self, encoder: &mut __E) -> Result<(), EncodeError> {
-		//Encode::encode(&self.client, encoder)?; //don't encode the pointer
-		Encode::encode(&self.account_id, encoder)?;
-		Encode::encode(&self.host, encoder)?;
-		Encode::encode(&self.ready, encoder)?;
-		Ok(())
-	}
-}
-impl Decode for PlayerClient {
-	fn decode<__D: Decoder>(decoder: &mut __D) -> Result<Self, DecodeError> {
-		Ok(Self {
-			client: None,//Decode::decode(decoder)?,
-			account_id: Decode::decode(decoder)?,
-			host: Decode::decode(decoder)?,
-			ready: Decode::decode(decoder)?,
-		})
-	}
-}
-impl<'__de> BorrowDecode<'__de> for PlayerClient {
-	fn borrow_decode<__D: BorrowDecoder<'__de>>(decoder: &mut __D) -> Result<Self, DecodeError> {
-		Ok(Self {
-			client: None,//BorrowDecode::borrow_decode(decoder)?,
-			account_id: BorrowDecode::borrow_decode(decoder)?,
-			host: BorrowDecode::borrow_decode(decoder)?,
-			ready: BorrowDecode::borrow_decode(decoder)?,
+			card_rx: None,
+			team_id: BorrowDecode::borrow_decode(decoder)?,
 		})
 	}
 }
 
 #[repr(u8)]
-#[derive(Encode, Decode, Clone)]
 pub enum PlayerType {
-	///Represents an empty slot in multiplayer, or the human in singleplayer
-	Human,
-	Client(PlayerClient),
+	///Human(None) = self in singleplayer or another connected player in multiplayer, Human(Some) = self in mutliplayer.
+	///(ServerConnection, account_id, ready)
+	Human(Option<PlayerClient>),
 	AI
+}
+
+pub struct PlayerClient {
+	connection: Option<ServerConnection>,
+	account_id: u32,
+	ready: bool
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Debug)]
@@ -239,13 +226,14 @@ impl Default for GameMeta {
 
 #[derive(Encode, Decode)]
 pub struct GameFilter {
-	pub max_players_cmp: Comparison,
-	pub max_players_value: u8,
 	pub std_team_mode: bool,
+	pub win_by_2: bool,
+	pub negative_scores: bool,
+	pub dealer_override: bool,
 	pub max_score_cmp: Comparison,
 	pub max_score_value: i8,
-	pub win_by_2: bool,
-	pub negative_scores: bool
+	pub max_players_cmp: Comparison,
+	pub max_players_value: u8
 }
 
 #[repr(u8)]

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-setback = { path = "../setback" }
+shared = { path = "../shared" }
 bevy = { version = "0.15.0", default-features = false, features = [
 	#"android-game-activity",
 	"bevy_asset",

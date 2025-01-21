@@ -1,15 +1,16 @@
 use {
-	setback::{
-		game::GameEventLoop,
+	shared::{
+		game::GameBuilder,
 		Card, RoundScores, ServerError
 	},
 	std::io::{Write, stdout, stdin},
 	tokio::sync::mpsc::Sender
 };
 
+///This is essentially an integration test
 #[tokio::main]
 async fn main() {
-	let mut game: GameEventLoop = GameEventLoop::default();
+	let mut game: GameBuilder = GameBuilder::default();
 	game.add_player(true, 0);
 	for i in 1..8 {
 		game.add_player(false, i % 2);

@@ -1,8 +1,7 @@
 use {
-	setback::{
-		Ssp, Protocol, Player, PlayerType, PlayerClient, GameMeta, GameData, GameFilter, ServerError, MAX_GAME_METAS, MAX_PLAYERS,
-		game::{Game, TurnResult},
-		client::Client
+	shared::{
+		Ssp, Protocol, Player, PlayerType, PlayerClient, GameMeta, GameData, GameFilter, ServerError, TcpClient, MAX_GAME_METAS, MAX_PLAYERS,
+		game::{Game, TurnResult}
 	},
 	std::{
 		sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard},
@@ -204,7 +203,7 @@ impl MPGame {
 								}
 								//update state and broadcast
 								//store client_ids and client pointers for later
-								let mut client_arcs: HashMap<u32, Arc<RwLock<Client>>> = HashMap::with_capacity(MAX_PLAYERS as usize);
+								let mut client_arcs: HashMap<u32, Arc<RwLock<TcpClient>>> = HashMap::with_capacity(MAX_PLAYERS as usize);
 								for player in game_guard.sp_game.players.iter_mut() {
 									let PlayerType::Client(player_client) = &mut player.player_type else {continue;};
 									let Some(client) = player_client.client.take() else {continue;};
@@ -359,7 +358,7 @@ impl MPGame {
 		Some((player_client, index))
 	}
 	
-	fn get_client(&mut self, account_id: u32) -> Option<(&mut Arc<RwLock<Client>>, u8)> {
+	fn get_client(&mut self, account_id: u32) -> Option<(&mut Arc<RwLock<TcpClient>>, u8)> {
 		let (player_client, index) = self.get_player_client(account_id)?;
 		Some((player_client.client.as_mut()?, index))
 	}
@@ -367,7 +366,7 @@ impl MPGame {
 	///To add a client to a bevy_game, the server must remove the client from its hashmap, and move it into this function.
 	///Called when a player creates or joins a bevy_game.
 	///Call [Self::can_add_player] before this function to determine if a client can be added.
-	pub async fn add_client(&mut self, c: Arc<RwLock<Client>>, h: bool) {
+	pub async fn add_client(&mut self, c: Arc<RwLock<TcpClient>>, h: bool) {
 		//Get the index of where this client will be added, and the client_id that this client will get
 		let mut next_index: Option<u8> = None;
 		for (index, player) in self.sp_game.players.iter_mut().enumerate() {
@@ -376,7 +375,7 @@ impl MPGame {
 			}
 		}
 		//put the client in the list and update it's and Sender
-		let mut client_guard: RwLockWriteGuard<Client> = c.write().unwrap();
+		let mut client_guard: RwLockWriteGuard<TcpClient> = c.write().unwrap();
 		client_guard.owner_tx = self.game_tx.clone();
 		if let Some(index) = next_index {
 			self.client_id_to_index.insert(client_guard.account_id, index);

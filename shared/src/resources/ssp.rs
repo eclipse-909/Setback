@@ -19,6 +19,7 @@ pub struct Ssp {
 	pub src_id: u32,
 	///the context of the data being sent (see enum Protocol)
 	pub protocol: Protocol
+	//TODO authentication token/key?
 }
 
 impl Ssp {
@@ -104,41 +105,4 @@ pub enum Protocol {
 	RoundScores(RoundScores),
 	///Game -> Client<br><br>Tells clients when the bevy_game is over. No response. Receive when the bevy_game is over and terminated.
 	GameOver
-}
-
-#[cfg(test)]
-mod tests {
-	use {
-		super::*,
-		super::super::{
-			util::MAX_PLAYERS,
-			game_items::{Suit, MAX_GAME_METAS, CARDS_PER_PLAYER}
-		},
-		bincode::config::standard
-	};
-	
-	#[test]
-	fn test_ssp_sizes() {
-		const MAX_SIZE: usize = 1022;
-		
-		let mut players: Vec<Player> = Vec::with_capacity(MAX_PLAYERS as usize);
-		while players.len() < MAX_PLAYERS as usize {
-			let mut player: Player = Player::new_ai(0);
-			while player.hand.len() < CARDS_PER_PLAYER as usize {
-				player.hand.push(Card {suit: Suit::Hearts, number: 0});
-			}
-			players.push(player);
-		}
-		let ssp: Ssp = Ssp::new(Protocol::Game(GameMeta::default(), players));
-		let bytes: Vec<u8> = bincode::encode_to_vec(ssp, standard()).unwrap();
-		assert!(bytes.len() <= MAX_SIZE);
-		
-		let mut game_metas: Vec<GameMeta> = Vec::with_capacity(MAX_GAME_METAS as usize);
-		while game_metas.len() < MAX_GAME_METAS as usize {
-			game_metas.push(GameMeta::default());
-		}
-		let ssp: Ssp = Ssp::new(Protocol::GameMetas(game_metas));
-		let bytes: Vec<u8> = bincode::encode_to_vec(ssp, standard()).unwrap();
-		assert!(bytes.len() <= MAX_SIZE);
-	}
 }

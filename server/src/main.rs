@@ -1,6 +1,6 @@
 use {
 	crate::mp_game::{MPGame, Games, MAX_GAMES},
-	setback::{client::Client, Ssp, Protocol, Version, Player, ServerError, ClientError, spawn_async, spawn_sync},
+	shared::{TcpClient, Ssp, Protocol, Version, Player, ServerError, ClientError, spawn_async, spawn_sync},
 	std::{
 		collections::HashMap,
 		sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard}
@@ -15,8 +15,9 @@ use {
 };
 
 mod mp_game;
+mod client_connection;
 
-type Clients = Arc<RwLock<HashMap<u32, Arc<RwLock<Client>>>>>;
+type Clients = Arc<RwLock<HashMap<u32, Arc<RwLock<TcpClient>>>>>;
 
 const SOCKET: &str = if cfg!(debug_assertions) {"127.0.0.1:42069"} else {"0.0.0.0:42069"};
 const MIN_CLIENTS: usize = 20;
@@ -102,13 +103,13 @@ async fn main() {
 			
 			//Wait for the client to send the account_id
 			let tx: mpsc::UnboundedSender<Ssp> = client_tx.clone();
-			let client: Arc<RwLock<Client>> = Arc::new(RwLock::new(Client::new(tcp_stream, tx)));
+			let client: Arc<RwLock<TcpClient>> = Arc::new(RwLock::new(TcpClient::new(tcp_stream, tx)));
 			//The client has 3 seconds to send a SyncID protocol before it is automatically disconnected.
 			let mut interval: Interval = time::interval(Duration::from_secs(3));
 			interval.tick().await;
 			let mut buf: Vec<u8> = vec![0; 1024];
 			let mut id: u32 = 0;
-			let mut client_guard: RwLockWriteGuard<Client> = client.write().unwrap();
+			let mut client_guard: RwLockWriteGuard<TcpClient> = client.write().unwrap();
 			if !tokio::select! {
 				_ = interval.tick() => {false}
 				result = client_guard.read(&mut buf) => {
@@ -135,8 +136,8 @@ async fn main() {
 			drop(client_guard);
 
 			//manage client in concurrent task
-			let client_clone: Arc<RwLock<Client>> = client.clone();
-			let client_clone1: Arc<RwLock<Client>> = client.clone();
+			let client_clone: Arc<RwLock<TcpClient>> = client.clone();
+			let client_clone1: Arc<RwLock<TcpClient>> = client.clone();
 			clients.write().unwrap().insert(id, client);
 			let server_term_rx: watch::Receiver<()> = server_terminator_rx.clone();
 			let clients_clone: Clients = clients.clone();
@@ -144,7 +145,7 @@ async fn main() {
 				//listen for messages and send them to the server/bevy_game
 				spawn_sync(server_term_rx, async move {
 					loop {
-						let mut client_guard: RwLockWriteGuard<Client> = client_clone.write().unwrap();
+						let mut client_guard: RwLockWriteGuard<TcpClient> = client_clone.write().unwrap();
 						match client_guard.read(&mut buf).await {
 							Ok(0) | Err(_) => {break;}
 							Ok(n) => {
@@ -164,7 +165,7 @@ async fn main() {
 						}//4
 					}//5
 					//occasionally shrink HashMap capacity when client leaves to clean up unused memory
-					let mut clients_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<Client>>>> = clients_clone.write().unwrap();
+					let mut clients_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> = clients_clone.write().unwrap();
 					if (clients_guard.len() as f32) < f32::max(clients_guard.capacity() as f32 * 0.1, MIN_CLIENTS as f32) {
 						let num_clients: usize = clients_guard.len();
 						clients_guard.shrink_to(usize::max(num_clients * 5, MIN_CLIENTS));
@@ -172,7 +173,7 @@ async fn main() {
 				}).await;
 
 				//remove the client from the HashMap before the task ends, and shutdown the TcpStream
-				let mut client_guard1: RwLockWriteGuard<Client> = client_clone1.write().unwrap();
+				let mut client_guard1: RwLockWriteGuard<TcpClient> = client_clone1.write().unwrap();
 				let _ = client_guard1.shutdown().await;
 				let _ = client_guard1.owner_tx.send(Ssp::new_with_src(Protocol::Disconnect, client_guard1.account_id));
 			});
@@ -182,7 +183,7 @@ async fn main() {
 }
 
 async fn send_message(clients: &Clients, ssp: &Ssp, dest_id: u32) {
-	let clients_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<Client>>>> = clients.write().unwrap();
+	let clients_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> = clients.write().unwrap();
 	let Some(client) = clients_guard.get(&dest_id) else {return;};
 	if client.write().unwrap().message_client(ssp).await.is_err() {
 		remove_player(clients, dest_id).await;
@@ -190,7 +191,7 @@ async fn send_message(clients: &Clients, ssp: &Ssp, dest_id: u32) {
 }
 
 async fn send_error_back(clients: &Clients, src_id: u32, err: ServerError) {
-	let client_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<Client>>>> = clients.write().unwrap();
+	let client_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> = clients.write().unwrap();
 	let Some(client) = client_guard.get(&src_id) else {return;};
 	if client.write().unwrap().message_client(&Ssp::new(Protocol::ServerErr(err))).await.is_err() {
 		remove_player(clients, src_id).await;

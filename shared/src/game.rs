@@ -5,33 +5,37 @@ use {
 		util::ServerError
 	},
 	tokio::{
-		sync::{oneshot, mpsc},
+		sync::mpsc::Sender,
 		task::JoinHandle
-	}
+	},
+	tokio_util::sync::CancellationToken
 };
 
-pub struct GameEventLoop {
+///A struct to hold game state and communication with players.
+///
+///[GameBuilder::start_game] moves this into the function and starts the event loop.
+pub struct GameBuilder {
 	game: Game,
-	senders: Vec<(mpsc::Sender<u8>, mpsc::Sender<Card>)>
+	senders: Vec<(Sender<u8>, Sender<Card>)>
 }
 
-impl Default for GameEventLoop {
+impl Default for GameBuilder {
 	fn default() -> Self {Self {game: Game::default(), senders: Vec::new()}}
 }
 
-impl GameEventLoop {
+impl GameBuilder {
 	pub fn add_player(&mut self, human: bool, team_id: u8) {
-		self.game.players.push(if human {Player::new_human(team_id)} else {Player::new_ai(team_id)});
+		self.game.players.push(if human {Player::new_human(String::new(), team_id)} else {Player::new_ai(team_id)});
 	}
 	
 	///Updates a player's status as AI or human.
 	pub fn set_player(&mut self, index: u8, human: bool) {
-		self.game.players[index as usize].player_type = if human {PlayerType::Human} else {PlayerType::AI};
+		self.game.players[index as usize].player_type = if human {PlayerType::Human(None)} else {PlayerType::AI};
 	}
 	
 	///Makes this player type a networked client.
 	pub fn set_client(&mut self, index: u8) {
-		//TODO
+		todo!()
 	}
 	
 	///Removes a player from the list, and reinserts it at the given index, sliding the remaining players if necessary.
@@ -42,30 +46,35 @@ impl GameEventLoop {
 	}
 	
 	///Initializes any remaining data and starts the game loop.
-	///You should not call [add_player] or [clear_players] after this has been called.
-	///Returns whether it is successful. If it returns false, the caller should treat
-	///it as an error. If it returns true, all other communication should be handled in the callbacks.
+	///If it returns Some, all other communication should be handled in the callbacks.
+	///The return value is the join handle to the task the event loop is running on, so you can await it, and a cancellation token.
 	///
 	///[prompt_bid_callback] Blocking sync function where the player is given the bid sender to make a bid. Also informs them of the cards in their hand.
+	///
 	///[prompt_card_callback] Blocking sync function where the player is given the card sender to play a card. Also informs them of the cards in their hand.
+	///
 	///[bid_callback] Notifies you what an AI has bid. It will already be the next player's turn when you receive this.
+	///
 	///[play_card_callback] Notifies you what card an AI has played. It will already be the next player's turn when you receive this.
+	///
 	///[next_turn_callback] Notifies you whose turn it is and whether they're bidding.
+	///
 	///[scores_callback] Notifies you when the round has ended and what the scores of the round are. It will already be the next player's turn when you receive this.
+	///
 	///[game_over_callback] Notifies you when the game is over.
+	///
 	///[error_callback] Notifies you if there's an unrecoverable error during the game loop.
 	pub fn start_game(
 		mut self,
-		prompt_bid_callback: fn(hand: &Vec<Card>, sender: &mpsc::Sender<u8>),
-		prompt_card_callback: fn(hand: &Vec<Card>, sender: &mpsc::Sender<Card>),
+		prompt_bid_callback: fn(hand: &Vec<Card>, sender: &Sender<u8>),
+		prompt_card_callback: fn(hand: &Vec<Card>, sender: &Sender<Card>),
 		bid_callback: fn(index: u8, bid: u8),
 		play_card_callback: fn(index: u8, card: Card),
 		next_turn_callback: fn(index: u8, bidding: bool),
 		scores_callback: fn(scores: RoundScores),
 		game_over_callback: fn(),
 		error_callback: fn(error: ServerError)
-	) -> Option<(JoinHandle<()>, oneshot::Sender<()>)> {
-		let (terminator, terminator_rx) = oneshot::channel::<()>();
+	) -> Option<(JoinHandle<()>, CancellationToken)> {
 		if !self.game.start_game() {return None;}
 		for player in self.game.players.iter_mut() {
 			let Some(bid_tx) = player.bid_tx.take() else {return None;};
@@ -73,6 +82,8 @@ impl GameEventLoop {
 			self.senders.push((bid_tx, card_tx));
 		}
 		if self.game.deal_cards().is_err() {return None;}
+		let token: CancellationToken = CancellationToken::new();
+		let cloned_token: CancellationToken = token.clone();
 		Some((tokio::spawn(async move {tokio::select! {
 			_ = async move {
 				let mut turn_result: Result<TurnResult, ServerError> = Ok(TurnResult::NextTurn);
@@ -139,7 +150,7 @@ impl GameEventLoop {
 					}
 				}
 			} => {}
-			_ = terminator_rx => {}
-		}}), terminator))
+			_ = cloned_token.cancelled() => {}
+		}}), token))
 	}
 }

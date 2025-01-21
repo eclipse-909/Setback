@@ -1,0 +1,712 @@
+import {SpinBox,Slider} from "std-widgets.slint";
+
+///Game state which stores what scene is currently active.
+export enum SceneType {
+	MainMenu,
+	Setup,
+	Multiplayer,
+	Game,
+	Settings
+}
+
+enum PlayerType {
+	Human,
+	AI
+}
+
+enum HostType {
+	///Not in a game.
+	None,
+	SingleplayerSetup,
+	SingleplayerPlaying,
+	///Created a multiplayer game as the host.
+	Host,
+	///Joined a multiplayer game as a client.
+	Client
+}
+
+export struct Player {
+	username: string,
+	player_type: PlayerType,
+	team: int,
+	local: bool
+}
+
+enum Suit {
+	Hearts,
+	Clubs,
+	Diamonds,
+	Spades
+}
+
+struct Card {
+	suit: Suit,
+	number: int
+}
+
+enum Comparison {
+	Equal,
+	LessOrEqual,
+	GreaterOrEqual,
+	Less,
+	Greater,
+	NotEqual
+}
+
+struct GameFilter {
+    max_score_cmp: Comparison,
+    max_players_cmp: Comparison,
+    max_score_value: int,
+    max_players_value: int,
+	std_team_mode: bool,
+    win_by_2: bool,
+    negative_scores: bool,
+    dealer_override: bool
+}
+
+global Palette {
+	out property <color> Green: #04F06A;
+	out property <color> Blue: #2F52E0;
+	out property <color> Yellow: #F9CB40;
+	out property <color> Orange: #FF715B;
+	out property <color> Gray: #4C5B5C;
+}
+
+export global GameState {
+	in property <SceneType> scene: SceneType.MainMenu;
+	in property <HostType> host: HostType.None;
+//	in property <[Player]> players;//TODO swap back after doing the preview
+	in property <[Player]> players: [
+		{username: "Player 1 (me)", player_type: PlayerType.Human, team: 0, human: true, local: true},
+		{username: "Player 2", player_type: PlayerType.AI, team: 1, human: false, local: false},
+		{username: "Player 3", player_type: PlayerType.AI, team: 0, human: false, local: false},
+        {username: "Player 4", player_type: PlayerType.AI, team: 1, human: false, local: false},
+        {username: "Player 5", player_type: PlayerType.AI, team: 0, human: false, local: false},
+        {username: "Player 6", player_type: PlayerType.AI, team: 1, human: false, local: false},
+        {username: "Player 7", player_type: PlayerType.AI, team: 0, human: false, local: false},
+        {username: "Player 8", player_type: PlayerType.AI, team: 1, human: false, local: false}
+	];
+
+	callback exit();
+
+	callback bid(int);
+	callback play_card(Card);
+
+	callback send_create_game();
+	callback send_join(string);
+	callback send_search_games(GameFilter);
+	callback send_game_meta();//TODO find out how to pass complex values
+	callback send_player(Player);
+	callback send_players([Player]);
+	callback send_ready(bool);
+
+	callback logout();
+	callback get_account();
+
+	callback fetch_players() -> [Player];
+	callback fetch_games();
+
+	callback calc_player_pos(int) -> {x: length, y: length};
+}
+
+component MenuButton inherits TouchArea {
+	in property <string> label;
+	in property <float> fontScale: 1;
+
+	width: 450px;
+
+	btnLabel := Text {
+		text: label;
+		font-size: fontScale * 10px;
+		font-weight: 900;
+		color: Palette.Orange;
+		stroke: Palette.Gray;
+		stroke-width: fontScale * 1px;
+		horizontal-alignment: center;
+
+		animate color { duration: 32ms; }
+	}
+
+	states [
+		pressed when root.pressed: {
+			btnLabel.color: Palette.Orange.darker(0.4);
+		}
+		hover when root.has-hover: {
+			btnLabel.color: Palette.Orange.darker(0.2);
+			root.mouse-cursor: pointer;
+		}
+	]
+}
+
+component CheckBox inherits HorizontalLayout {
+	in property <string> text;
+	in property <bool> enabled;
+	in-out property <bool> checked;
+	in property <int> scale: 1;
+
+	callback toggled(bool);
+
+	spacing: 10px;
+	alignment: start;
+
+	checkBG := Rectangle {
+		background: #18181840;
+		width: scale * 20px;
+		height: scale * 20px;
+		border-width: 4px;
+		border-color: Palette.Orange;
+		border-radius: 10px;
+
+		touchArea := TouchArea {
+			width: scale * 20px;
+            height: scale * 20px;
+
+			checkmark := Image {
+				source: @image-url("../assets/images/checkmark.png");
+				image-fit: contain;
+				width: scale * 15px;
+                height: scale * 15px;
+			}
+
+			clicked => {
+				root.checked = !root.checked;
+				root.toggled(root.checked);
+			}
+		}
+
+		animate background { duration: 32ms; }
+
+		states [
+            hover when touchArea.has-hover: {
+                checkBG.background: #18181880;
+                touchArea.mouse-cursor: pointer;
+            }
+            pressed when touchArea.pressed: {
+                checkBG.background: #181818c0;
+                touchArea.mouse-cursor: pointer;
+            }
+        ]
+	}
+
+	Text {
+		text: root.text;
+		font-size: scale * 10px;
+        font-weight: 900;
+        color: Palette.Orange;
+        stroke: Palette.Gray;
+        stroke-width: scale * 1px;
+        vertical-alignment: center;
+	}
+
+	states [
+        checked when self.checked: {
+            checkmark.visible: true;
+        }
+        unchecked when !self.checked: {
+            checkmark.visible: false;
+        }
+    ]
+}
+
+component SetupPlayer inherits HorizontalLayout {
+	in property <string> username;
+	in property <bool> human;
+	in property <int> team;
+	in property <bool> humanVisible;
+	in property <bool> teamVisible;
+
+    height: 256px;
+
+	touchArea := TouchArea {
+		width: 256px;
+        height: 256px;
+
+		Image {
+			width: 256px;
+			height: 256px;
+			source: root.human ? @image-url("../assets/images/personIcon.png") : @image-url("../assets/images/botIcon.png");
+			colorize: #000000;
+			image-fit: contain;
+		}
+
+		states [
+			pressed when self.pressed: {
+				touchArea.mouse-cursor: grabbing;
+			}
+			hover when self.has-hover: {
+				touchArea.mouse-cursor: grab;
+			}
+		]
+	}
+
+	VerticalLayout {
+		alignment: start;
+		spacing: 10px;
+
+		xBG := Rectangle {
+            background: #18181840;
+            width: 30px;
+            height: 30px;
+            border-width: 4px;
+            border-color: Palette.Orange;
+            border-radius: 10px;
+
+            xTouchArea := TouchArea {
+                width: 30px;
+                height: 30px;
+
+                checkmark := Image {
+                    source: @image-url("../assets/images/x.png");
+                    image-fit: contain;
+                    width: 18px;
+                    height: 18px;
+                }
+
+                clicked => {
+                    //TODO delete this player
+                }
+            }
+
+            animate background { duration: 32ms; }
+
+            states [
+                hover when xTouchArea.has-hover: {
+                    xBG.background: #18181880;
+                    xTouchArea.mouse-cursor: pointer;
+                }
+                pressed when xTouchArea.pressed: {
+                    xBG.background: #181818c0;
+                    xTouchArea.mouse-cursor: pointer;
+                }
+            ]
+        }
+		Text {
+			text: username;
+			font-size: 20px;
+            font-weight: 900;
+            color: Palette.Orange;
+            stroke: Palette.Gray;
+            stroke-width: 2px;
+		}
+		if humanVisible: CheckBox {
+			text: "Human";
+			enabled: human;
+			scale: 2;
+		}
+		HorizontalLayout {
+			Text {
+				text: "Team Number:";
+				font-size: 20px;
+                font-weight: 900;
+                color: Palette.Orange;
+                stroke: Palette.Gray;
+                stroke-width: 2px;
+			}
+			if teamVisible: SpinBox {//TODO reimplement SpinBox
+				value: team;
+				minimum: 0;
+				maximum: 7;
+			}
+		}
+	}
+}
+
+component Settings {
+	//TODO Settings
+    //audio
+        //master volume
+        //music volume
+        //ui volume
+    //video
+        //resolution
+        //framerate
+        //refresh setting
+    //keybindings
+        //when bidding
+            //0 & 2-4 = bid
+        //when playing card
+            //1-6 = play card
+        //esc = toggle settings menu
+    //display version
+}
+
+component BackButton inherits MenuButton {
+	in property <SceneType> goto_scene;
+
+	clicked => {GameState.scene = self.goto_scene;}
+
+	label: "Back";
+	fontScale: 4;
+	width: 150px;
+	height: 65px;
+	x: 25px;
+	y: 25px;
+}
+
+component DarkScreen inherits Rectangle {
+	visible: false;
+    background: #00000080;
+    width: 100%;
+    height: 100%;
+}
+
+export component MainWindow inherits Window {
+	width: 1920px;
+	height: 1080px;
+	title: "Setback";
+	icon: @image-url("../assets/images/cardsIcon.png");
+
+	//Main Menu
+	if GameState.scene == SceneType.MainMenu : Rectangle {
+		width: 100%;
+		height: 100%;
+		background: Palette.Green;
+
+		Text {
+			text: "Setback";
+			font-size: 200px;
+			font-weight: 900;
+			color: Palette.Orange;
+			stroke: Palette.Gray;
+			stroke-width: 10px;
+			horizontal-alignment: center;
+			y: 40px;
+		}
+
+		VerticalLayout {
+			y: 100px;
+			spacing: 40px;
+			alignment: center;
+			width: 450px;
+
+			singleplayer := MenuButton {
+				label: "Play";//TODO change to "Singleplayer" when multiplayer is added
+				fontScale: 7;
+				clicked => {
+					GameState.scene = SceneType.Setup;
+					GameState.host = HostType.SingleplayerSetup;
+				}
+			}
+
+//			multiplayer := MenuButton {
+//				label: "Multiplayer";
+//				fontScale: 7;
+//				clicked => {
+//					darkScreenMainMenu.visible = true;
+//					multiplayerPopup.visible = true;
+//					options.visible = true;
+//					create.visible = false;
+//					join.visible = false;
+//				}
+//			}
+
+			settings := MenuButton {
+				label: "Settings";
+				fontScale: 7;
+				clicked => {GameState.scene = SceneType.Settings;}
+			}
+
+			exit := MenuButton {
+				label: "Exit";
+				fontScale: 7;
+				clicked => {GameState.exit();}
+			}
+		}
+
+		darkScreenMainMenu := DarkScreen {}
+
+		multiplayerPopup := Rectangle {
+			visible: false;
+			y: 300px;
+			width: 500px;
+			height: 600px;
+			background: Palette.Green;
+			border-color: Palette.Gray;
+			border-width: 10px;
+
+			options := VerticalLayout {
+				spacing: 80px;
+				alignment: center;
+				width: 450px;
+
+				MenuButton {
+					label: "Create Game";
+					fontScale: 5;
+					clicked => {
+						options.visible = false;
+						singleplayer.enabled = false;
+//						multiplayer.enabled = false;//TODO enable with multiplayer
+						settings.enabled = false;
+						exit.enabled = false;
+						GameState.scene = SceneType.Setup;
+						GameState.host = HostType.Host;
+					}
+				}
+
+				MenuButton {
+					label: "Join With Code";
+					fontScale: 5;
+					clicked => {
+						options.visible = false;
+						join.visible = true;
+						singleplayer.enabled = false;
+//                        multiplayer.enabled = false;//TODO enable with multiplayer
+                        settings.enabled = false;
+                        exit.enabled = false;
+					}
+				}
+
+				MenuButton {
+                    label: "Search Games";
+                    fontScale: 5;
+                    clicked => {
+                        GameState.scene = SceneType.Multiplayer;
+                        //TODO fetch public multiplayer games
+                    }
+                }
+
+				MenuButton {
+					label: "Close";
+					fontScale: 5;
+					clicked => {
+						darkScreenMainMenu.visible = false;
+						multiplayerPopup.visible = false;
+						singleplayer.enabled = true;
+//                        multiplayer.enabled = true;//TODO enable with multiplayer
+                        settings.enabled = true;
+                        exit.enabled = true;
+					}
+				}
+			}
+
+			join := VerticalLayout {
+				visible: false;
+				spacing: 80px;
+				alignment: center;
+
+				states [
+					focus when input.has-focus && input.text != "": {
+						preview.visible: false;
+					}
+					notFocus when !input.has-focus || input.text == "": {
+						preview.visible: true;
+					}
+				]
+
+				Rectangle {
+					width: 400px;
+					height: 80px;
+					x: 50px;
+					border-width: 5px;
+					border-color: Palette.Gray;
+					background: white.darker(0.1);
+
+					preview := Text {
+						text: "Enter game code...";
+						font-size: 30px;
+						font-weight: 900;
+						stroke: Palette.Gray;
+						stroke-width: 3px;
+						color: Palette.Orange.darker(0.1);
+						vertical-alignment: center;
+						x: 15px;
+					}
+
+					input := TextInput {
+						horizontal-alignment: center;
+						vertical-alignment: center;
+						font-size: 40px;
+						font-weight: 900;
+						color: Palette.Orange;
+
+						edited => {
+							//TODO don't allow the user to enter too many characters
+						}
+					}
+				}
+
+				MenuButton {
+					label: "Join";
+					fontScale: 5;
+					clicked => {
+						GameState.send_join(input.text);//TODO does this function need to return anything?
+						darkScreenMainMenu.visible = false;
+                        multiplayerPopup.visible = false;
+                        singleplayer.enabled = true;
+//                        multiplayer.enabled = true;//TODO enable with multiplayer
+                        settings.enabled = true;
+                        exit.enabled = true;
+						options.visible = false;
+                        exit.enabled = false;
+						GameState.host = HostType.Client;
+					}
+				}
+
+				MenuButton {
+					label: "Back";
+					fontScale: 5;
+					clicked => {
+						join.visible = false;
+						options.visible = true;
+					}
+				}
+			}
+		}
+	}
+
+	//Setup
+	if GameState.scene == SceneType.Setup : Rectangle {
+		width: 100%;
+		height: 100%;
+		background: Palette.Green;
+
+		BackButton {
+            goto_scene: SceneType.MainMenu;
+        }
+
+        MenuButton {
+            label: "Start";//TODO make it say "Ready" when in multiplayer
+            fontScale: 10;
+            width: 340px;
+            height: 125px;
+            x: parent.width - self.width - 25px;
+            y: parent.height - self.height - 25px;
+
+            clicked => {
+                //TODO start game for singleplayer - start countdown for multiplayer
+            }
+        }
+
+        Rectangle {
+			background: #00000080;
+			width: 500px;
+			height: 550px;
+			x: parent.width - self.width - 25px;
+			y: 25px;
+
+			VerticalLayout {
+				alignment: center;
+				spacing: 25px;
+				padding: 25px;
+
+				//TODO hovering over the label should show a PopupWindow with a description of the setting
+				//Or there should be an information icon like (i)
+
+				CheckBox {
+					checked: true;
+					text: "Standard Teams";
+					scale: 3;
+				}
+				CheckBox {
+					checked: false;
+					text: "Win By 2";
+					scale: 3;
+				}
+				CheckBox {
+	                checked: true;
+	                text: "Negative Scores";
+	                scale: 3;
+	            }
+				CheckBox {
+	                checked: false;
+	                text: "Dealer Override 4 Bid";
+	                scale: 3;
+	            }
+	            VerticalLayout {
+	                in-out property <float> max_score <=> slider.value;//we have to do this because Slider.step is broken
+	                in property <int> display_score: max_score;
+
+	                Text {
+	                    text: "Max Score: \{display_score}";
+	                    font-size: 30px;
+	                    font-weight: 900;
+	                    color: Palette.Orange;
+	                    stroke: Palette.Gray;
+	                    stroke-width: 3px;
+	                    vertical-alignment: center;
+	                    horizontal-alignment: left;
+	                }
+	                slider := Slider {
+	                    value: 21;
+	                    minimum: 4;
+	                    maximum: 64;
+	                }
+	            }
+	            MenuButton {
+	                label: "Add Player";
+	                fontScale: 4;
+
+	                clicked => {
+	                    //TODO add a player
+	                }
+	            }
+			}
+        }
+
+        init => {
+//			GameState.players = GameState.fetch_players();//TODO uncomment after preview
+        }
+
+		for player[index] in GameState.players: SetupPlayer {
+			username: player.username;
+			human: player.player_type == PlayerType.Human;
+			team: player.team;
+			humanVisible: GameState.host != HostType.SingleplayerSetup && !player.local;
+			//TODO
+
+			animate x {
+				duration: 32ms;
+				easing: ease-out-expo;
+			}
+		}
+
+//		callback calc_player_pos(int) -> {x: length, y: length};
+
+		function calc_player_pos(index: int) {
+
+		}
+	}
+
+	//Multiplayer
+	if GameState.scene == SceneType.Multiplayer : Rectangle {
+		width: 100%;
+		height: 100%;
+		background: Palette.Green;
+
+		BackButton {
+            goto_scene: SceneType.MainMenu;
+        }
+
+		//TODO Multiplayer
+		//use the fetched public multiplayer games and display them
+		//make games filterable
+	}
+
+	//Game
+	if GameState.scene == SceneType.Game : Rectangle {
+		width: 100%;
+		height: 100%;
+		background: Palette.Green;
+
+		//TODO Game
+		//table
+		//players
+		//cards, deck, hands, pile
+		//bid selection menu
+		//card selection menu (or drag and drop cards onto pile?)
+		//settings menu - with close button
+	}
+
+	//Settings
+	if GameState.scene == SceneType.Settings : Rectangle {
+		width: 100%;
+		height: 100%;
+		background: Palette.Green;
+
+		BackButton {
+            goto_scene: SceneType.MainMenu;
+        }
+
+		Settings {}
+	}
+}
