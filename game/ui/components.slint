@@ -1,0 +1,723 @@
+// game/ui/components.slint
+
+export global Palette {
+	out property <color> Green: #04F06A;
+	out property <color> Blue: #2F52E0;
+	out property <color> Yellow: #F9CB40;
+	out property <color> Orange: #FF715B;
+	out property <color> Gray: #4C5B5C;
+}
+
+// Base text style used throughout the app
+export component BaseText {
+    in property <string> text;
+    in property <length> font-size: 16px;
+	in property <bool> bold: false;
+    in property <int> font-weight: root.bold ? 900 : 400;
+    in property <TextHorizontalAlignment> horizontal-alignment: TextHorizontalAlignment.left;
+    in property <TextVerticalAlignment> vertical-alignment: TextVerticalAlignment.top;
+    in property <bool> wrap: false;
+
+    Text {
+        text: root.text;
+        font-size: root.font-size;
+        font-weight: root.font-weight;
+        color: Palette.Orange;
+        stroke: Palette.Gray;
+        stroke-width: root.font-size / 20px * 1px;
+        horizontal-alignment: root.horizontal-alignment;
+        vertical-alignment: root.vertical-alignment;
+        wrap: root.wrap ? TextWrap.word-wrap : TextWrap.no-wrap;
+    }
+}
+
+// Enhanced version of your existing MenuButton with more customization
+export component StylizedButton {
+    in property <string> text;
+    in property <length> font-size: 16px;
+    in property <length> button_width: 450px;
+    in property <length> button_height: font-size * 2;
+    in property <bool> enabled: true;
+    callback clicked;
+
+    Rectangle {
+        width: root.button_width;
+        height: root.button_height;
+        background: root.enabled ? #18181840 : #18181820;
+        border-radius: root.button_height / 4;
+        border-width: 2px;
+
+        border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
+
+        touchArea := TouchArea {
+            enabled: root.enabled;
+            width: 100%;
+            height: 100%;
+
+            clicked => {
+                if (root.enabled) { root.clicked(); }
+            }
+
+            BaseText {
+                text: root.text;
+                font-size: root.font-size;
+                bold: true;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+
+        animate background { duration: 100ms; }
+        animate border-color { duration: 100ms; }
+
+        states [
+            pressed when root.enabled && touchArea.pressed: {
+                background: #18181880;
+                border-color: Palette.Orange.darker(0.2);
+            }
+            hover when root.enabled && touchArea.has-hover: {
+                background: #18181860;
+                touchArea.mouse-cursor: pointer;
+            }
+        ]
+    }
+}
+
+// Enhanced checkbox with animation and custom styling
+export component StylizedCheckbox {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in-out property <bool> checked;
+    in property <length> size: 24px;
+    callback toggled(bool);
+
+    HorizontalLayout {
+        spacing: size / 2;
+        alignment: start;
+
+        Rectangle {
+            width: root.size;
+            height: root.size;
+            background: root.enabled ? #18181840 : #18181820;
+            border-radius: size / 4;
+            border-width: 2px;
+            border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
+
+            touchArea := TouchArea {
+                enabled: root.enabled;
+                clicked => {
+                    if (root.enabled) {
+                        root.checked = !root.checked;
+                        root.toggled(root.checked);
+                    }
+                }
+            }
+
+            Image {
+                visible: root.checked;
+                source: @image-url("../assets/images/checkmark.png");
+                width: parent.width * 0.8;
+                height: parent.height * 0.8;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+
+            animate background { duration: 100ms; }
+            animate border-color { duration: 100ms; }
+
+            states [
+                pressed when root.enabled && touchArea.pressed: {
+                    background: #18181880;
+                    border-color: Palette.Orange.darker(0.2);
+                }
+                hover when root.enabled && touchArea.has-hover: {
+                    background: #18181860;
+                    touchArea.mouse-cursor: pointer;
+                }
+            ]
+        }
+
+        BaseText {
+            text: root.text;
+            font-size: root.size;
+            vertical-alignment: center;
+        }
+    }
+}
+
+// Custom slider with better visual feedback
+export component StylizedSlider {
+    in property <float> minimum: 0;
+    in property <float> maximum: 100;
+    in property <float> step: 1;
+    in-out property <float> value;
+    in property <length> slider_width: 200px;
+    in property <length> slider_height: 24px;
+    in property <bool> enabled: true;
+    callback changed(float);
+
+    Rectangle {
+        width: root.slider_width;
+        height: root.slider_height;
+
+        // Track
+        Rectangle {
+            y: (parent.height - self.height) / 2;
+            width: parent.width;
+            height: 4px;
+            background: root.enabled ? Palette.Gray : Palette.Gray.darker(0.3);
+            border-radius: self.height / 2;
+        }
+
+        // Handle
+        handle := Rectangle {
+            width: root.slider_height;
+            height: root.slider_height;
+            x: (root.value - root.minimum) / (root.maximum - root.minimum) 
+                * (parent.width - self.width);
+            background: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
+            border-radius: self.height / 2;
+
+            touch := TouchArea {
+                enabled: root.enabled;
+                
+                moved => {
+                    if (self.enabled && self.pressed) {
+                        // Calculate new value based on mouse position
+                        root.value = Math.max(root.minimum, 
+                            Math.min(root.maximum, 
+                                root.minimum + (self.mouse-x / handle.width) 
+                                * (root.maximum - root.minimum)
+                            )
+                        );
+                        // Round to nearest step
+                        root.value = round(root.value / root.step) * root.step;
+                        root.changed(root.value);
+                    }
+                }
+            }
+
+            animate x { duration: 100ms; easing: ease; }
+        }
+    }
+}
+
+// Custom dropdown with animation and styling
+export component StylizedDropdown {
+    in property <[string]> choices;
+    in property <string> selected;
+    in property <bool> enabled: true;
+    in property <length> dropdown_width: 200px;
+    in property <length> dropdown_height: 32px;
+    callback selected-changed(string);
+
+    Rectangle {
+        width: root.dropdown_width;
+        height: root.dropdown_height + (popup.visible ? popup.height + 4px : 0px);
+
+        // Main button
+        Rectangle {
+            width: root.dropdown_width;
+            height: root.dropdown_height;
+            background: root.enabled ? #18181840 : #18181820;
+            border-radius: self.height / 4;
+            border-width: 2px;
+
+            border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
+
+            HorizontalLayout {
+                padding: root.dropdown_height / 4;
+                spacing: root.dropdown_height / 4;
+
+                BaseText {
+                    text: root.selected;
+                    font-size: root.dropdown_height * 0.6;
+                    vertical-alignment: center;
+                }
+
+                Rectangle {
+                    width: root.dropdown_height / 2;
+                    Image {
+                        source: @image-url("../assets/images/dropdown-arrow.png");
+                        width: parent.width;
+                        height: parent.width;
+                        rotation-angle: popup.visible ? 180deg : 0deg;
+                        animate rotation-angle { duration: 200ms; easing: ease; }
+                    }
+                }
+            }
+
+            touchArea := TouchArea {
+                enabled: root.enabled;
+                clicked => {
+                    popup.visible = !popup.visible;
+                }
+            }
+
+
+            states [
+                pressed when root.enabled && touchArea.pressed: {
+                    background: #18181880;
+                    border-color: Palette.Orange.darker(0.2);
+                }
+                hover when root.enabled && touchArea.has-hover: {
+                    background: #18181860;
+                    touchArea.mouse-cursor: pointer;
+                }
+            ]
+        }
+
+        // Dropdown popup
+        popup := Rectangle {
+            visible: false;
+            y: root.dropdown_height + 4px;
+            width: root.dropdown_width;
+            height: choices.length * 32px;
+            background: #181818e0;
+            border-radius: 8px;
+            border-width: 2px;
+            border-color: Palette.Orange;
+            clip: true;
+
+            for choice[index] in root.choices : Rectangle {
+                y: index * 32px;
+                width: parent.width;
+                height: 32px;
+                background: ta.has-hover ? #18181880 : transparent;
+
+                BaseText {
+                    text: choice;
+                    font-size: 16px;
+                    x: root.dropdown_height / 4;
+                    vertical-alignment: center;
+                }
+
+                ta := TouchArea {
+                    clicked => {
+                        root.selected-changed(choice);
+                        popup.visible = false;
+                    }
+
+                    mouse-cursor: pointer;
+                }
+            }
+        }
+    }
+}
+
+// Tab view component for settings
+export component StylizedTabView {
+    in property <[string]> tabs;
+    in property <int> active-tab: 0;
+    callback tab-changed(int);
+
+    VerticalLayout {
+        // Tab headers
+        HorizontalLayout {
+            height: 40px;
+            spacing: 2px;
+
+            for tab[index] in tabs : Rectangle {
+                width: 120px;
+                background: index == active-tab ? #18181880 : #18181840;
+                border-width: 2px;
+                border-color: index == active-tab ? Palette.Orange : Palette.Orange.darker(0.3);
+                border-radius: 8px;
+
+                BaseText {
+                    text: tab;
+                    font-size: 16px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                touchArea := TouchArea {
+                    clicked => {
+                        root.tab-changed(index);
+                    }
+
+                    mouse-cursor: pointer;
+                }
+
+                states [
+                    hover when index != active-tab && touchArea.has-hover: {
+                        background: #18181860;
+                    }
+                ]
+            }
+        }
+
+        // Content area
+        Rectangle {
+            background: #18181880;
+            border-width: 2px;
+            border-color: Palette.Orange;
+            border-radius: 8px;
+
+            @children
+        }
+    }
+}
+
+// Custom number input (spinbox replacement)
+export component StylizedSpinBox {
+	in property <length> spin_box_height;
+    in property <int> minimum;
+    in property <int> maximum;
+    in property <int> step: 1;
+    in-out property <int> value;
+    in property <bool> enabled: true;
+    callback changed(int);
+
+
+    HorizontalLayout {
+        spacing: 2px;
+
+        // Decrease button
+        Rectangle {
+            width: root.spin_box_height;
+            height: root.spin_box_height;
+            background: root.enabled ? #18181840 : #18181820;
+            border-radius: self.height / 4;
+            border-width: 2px;
+            border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
+
+            BaseText {
+                text: "-";
+                font-size: root.spin_box_height * 0.6;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            decreaseTouchArea := TouchArea {
+                enabled: root.enabled && root.value > root.minimum;
+                clicked => {
+                    root.value = max(root.minimum, root.value - root.step);
+                    root.changed(root.value);
+                }
+            }
+
+
+            states [
+                pressed when root.enabled && decreaseTouchArea.pressed: {
+                    background: #18181880;
+                    border-color: Palette.Orange.darker(0.2);
+
+                }
+                hover when root.enabled && decreaseTouchArea.has-hover: {
+                    background: #18181860;
+                    decreaseTouchArea.mouse-cursor: pointer;
+                }
+            ]
+        }
+
+        // Value display
+        Rectangle {
+            width: 60px;
+            background: root.enabled ? #18181840 : #18181820;
+            border-radius: self.height / 4;
+            border-width: 2px;
+            border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
+
+            BaseText {
+                text: root.value;
+                font-size: root.spin_box_height * 0.6;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // Increase button
+        Rectangle {
+            width: root.spin_box_height;
+            height: root.spin_box_height;
+            background: root.enabled ? #18181840 : #18181820;
+            border-radius: self.height / 4;
+            border-width: 2px;
+            border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
+
+            BaseText {
+                text: "+";
+                font-size: root.spin_box_height * 0.6;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            increaseTouchArea := TouchArea {
+                enabled: root.enabled && root.value < root.maximum;
+                clicked => {
+                    root.value = min(root.maximum, root.value + root.step);
+                    root.changed(root.value);
+                }
+            }
+
+            states [
+                pressed when root.enabled && increaseTouchArea.pressed: {
+                    background: #18181880;
+                    border-color: Palette.Orange.darker(0.2);
+                }
+                hover when root.enabled && increaseTouchArea.has-hover: {
+                    background: #18181860;
+                    increaseTouchArea.mouse-cursor: pointer;
+                }
+            ]
+        }
+    }
+}
+
+// Card component for displaying and interacting with playing cards
+export component Card {
+    in property <int> number;  // 2-14 (14=Ace)
+    in property <int> suit;    // 0=Hearts, 1=Clubs, 2=Diamonds, 3=Spades
+    in property <bool> face-up: true;
+    in property <bool> enabled: true;
+    in property <bool> draggable: false;
+    in property <length> card_width: 100px;
+    callback clicked;
+    callback drag-started;
+    callback drag-ended;
+
+    Rectangle {
+        width: root.card_width;
+        height: root.card_width * 1.4;
+
+        // Card face
+        if root.face-up : Image {
+            width: parent.width;
+            height: parent.height;
+            // We need to handle each card individually
+            source: {
+                if (root.suit == 0) { // Hearts
+                    if (root.number == 2) { @image-url("../assets/images/cards/hearts/2.png") }
+                    else if (root.number == 3) { @image-url("../assets/images/cards/hearts/3.png") }
+                    else if (root.number == 4) { @image-url("../assets/images/cards/hearts/4.png") }
+                    else if (root.number == 5) { @image-url("../assets/images/cards/hearts/5.png") }
+                    else if (root.number == 6) { @image-url("../assets/images/cards/hearts/6.png") }
+                    else if (root.number == 7) { @image-url("../assets/images/cards/hearts/7.png") }
+                    else if (root.number == 8) { @image-url("../assets/images/cards/hearts/8.png") }
+                    else if (root.number == 9) { @image-url("../assets/images/cards/hearts/9.png") }
+                    else if (root.number == 10) { @image-url("../assets/images/cards/hearts/10.png") }
+                    else if (root.number == 11) { @image-url("../assets/images/cards/hearts/11.png") }
+                    else if (root.number == 12) { @image-url("../assets/images/cards/hearts/12.png") }
+                    else if (root.number == 13) { @image-url("../assets/images/cards/hearts/13.png") }
+                    else { @image-url("../assets/images/cards/hearts/14.png") }
+                } else if (root.suit == 1) { // Clubs
+                    if (root.number == 2) { @image-url("../assets/images/cards/clubs/2.png") }
+                    else if (root.number == 3) { @image-url("../assets/images/cards/clubs/3.png") }
+                    else if (root.number == 4) { @image-url("../assets/images/cards/clubs/4.png") }
+                    else if (root.number == 5) { @image-url("../assets/images/cards/clubs/5.png") }
+                    else if (root.number == 6) { @image-url("../assets/images/cards/clubs/6.png") }
+                    else if (root.number == 7) { @image-url("../assets/images/cards/clubs/7.png") }
+                    else if (root.number == 8) { @image-url("../assets/images/cards/clubs/8.png") }
+                    else if (root.number == 9) { @image-url("../assets/images/cards/clubs/9.png") }
+                    else if (root.number == 10) { @image-url("../assets/images/cards/clubs/10.png") }
+                    else if (root.number == 11) { @image-url("../assets/images/cards/clubs/11.png") }
+                    else if (root.number == 12) { @image-url("../assets/images/cards/clubs/12.png") }
+                    else if (root.number == 13) { @image-url("../assets/images/cards/clubs/13.png") }
+                    else { @image-url("../assets/images/cards/clubs/14.png") }
+                } else if (root.suit == 2) { // Diamonds
+                    if (root.number == 2) { @image-url("../assets/images/cards/diamonds/2.png") }
+                    else if (root.number == 3) { @image-url("../assets/images/cards/diamonds/3.png") }
+                    else if (root.number == 4) { @image-url("../assets/images/cards/diamonds/4.png") }
+                    else if (root.number == 5) { @image-url("../assets/images/cards/diamonds/5.png") }
+                    else if (root.number == 6) { @image-url("../assets/images/cards/diamonds/6.png") }
+                    else if (root.number == 7) { @image-url("../assets/images/cards/diamonds/7.png") }
+                    else if (root.number == 8) { @image-url("../assets/images/cards/diamonds/8.png") }
+                    else if (root.number == 9) { @image-url("../assets/images/cards/diamonds/9.png") }
+                    else if (root.number == 10) { @image-url("../assets/images/cards/diamonds/10.png") }
+                    else if (root.number == 11) { @image-url("../assets/images/cards/diamonds/11.png") }
+                    else if (root.number == 12) { @image-url("../assets/images/cards/diamonds/12.png") }
+                    else if (root.number == 13) { @image-url("../assets/images/cards/diamonds/13.png") }
+                    else { @image-url("../assets/images/cards/diamonds/14.png") }
+                } else { // Spades
+                    if (root.number == 2) { @image-url("../assets/images/cards/spades/2.png") }
+                    else if (root.number == 3) { @image-url("../assets/images/cards/spades/3.png") }
+                    else if (root.number == 4) { @image-url("../assets/images/cards/spades/4.png") }
+                    else if (root.number == 5) { @image-url("../assets/images/cards/spades/5.png") }
+                    else if (root.number == 6) { @image-url("../assets/images/cards/spades/6.png") }
+                    else if (root.number == 7) { @image-url("../assets/images/cards/spades/7.png") }
+                    else if (root.number == 8) { @image-url("../assets/images/cards/spades/8.png") }
+                    else if (root.number == 9) { @image-url("../assets/images/cards/spades/9.png") }
+                    else if (root.number == 10) { @image-url("../assets/images/cards/spades/10.png") }
+                    else if (root.number == 11) { @image-url("../assets/images/cards/spades/11.png") }
+                    else if (root.number == 12) { @image-url("../assets/images/cards/spades/12.png") }
+                    else if (root.number == 13) { @image-url("../assets/images/cards/spades/13.png") }
+                    else { @image-url("../assets/images/cards/spades/14.png") }
+                }
+            }
+        }
+        
+        // Card back
+        if !root.face-up : Image {
+            width: parent.width;
+            height: parent.height;
+            source: @image-url("../assets/images/cards/back.png");
+        }
+        
+        touchArea := TouchArea {
+            enabled: root.enabled;
+
+            pointer-event(event) => {
+                if (root.draggable) {
+                    if (event.kind == PointerEventKind.down) {
+                        root.drag-started();
+                    } else if (event.kind == PointerEventKind.up) {
+                        root.drag-ended();
+                    }
+                }
+            }
+            
+            clicked => {
+                if (!root.draggable) {
+                    root.clicked();
+                }
+            }
+        }
+        
+        states [
+            hover when root.enabled && touchArea.has-hover: {
+                y: -10px;
+                touchArea.mouse-cursor: root.draggable ? grab : pointer;
+            }
+            dragging when root.enabled && touchArea.pressed && root.draggable: {
+                touchArea.mouse-cursor: grabbing;
+            }
+        ]
+        
+        animate y { duration: 100ms; easing: ease; }
+    }
+}
+
+// Player display component for setup and game
+export component PlayerDisplay {
+    in property <string> username;
+    in property <bool> is-human;
+    in property <int> team;
+    in property <bool> is-local;
+    in property <bool> is-ready;
+    in property <bool> is-current-turn;
+    in property <bool> is-setup-mode;
+    in property <bool> can-edit;
+    in property <length> size: 256px;
+    
+    callback remove;
+    callback team-changed(int);
+    callback drag-started;
+    callback drag-ended;
+    callback position-changed(length, length);
+    
+    Rectangle {
+        width: root.size;
+        height: root.size * 1.5;
+        
+        VerticalLayout {
+            padding: root.size / 16;
+            spacing: root.size / 16;
+            
+            // Player icon
+            Rectangle {
+                height: root.size;
+                
+                Image {
+                    width: parent.width;
+                    height: parent.width;
+                    source: root.is-human ? 
+                        @image-url("../assets/images/personIcon.png") : 
+                        @image-url("../assets/images/botIcon.png");
+                    colorize: Palette.Orange;
+                }
+                
+                // Ready indicator
+                if root.is-ready: Image {
+                    x: parent.width - self.width - 4px;
+                    y: 4px;
+                    width: parent.width / 4;
+                    height: self.width;
+                    source: @image-url("../assets/images/checkmark.png");
+                }
+                
+                // Current turn indicator
+                if root.is-current-turn: Rectangle {
+                    width: parent.width + 8px;
+                    height: parent.height + 8px;
+                    x: -4px;
+                    y: -4px;
+                    border-width: 4px;
+                    border-radius: 8px;
+                    border-color: Palette.Orange;
+                    animate border-color { duration: 500ms; }
+                }
+                
+                touchArea := TouchArea {
+                    enabled: root.is-setup-mode && root.can-edit;
+                    
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.down) {
+                            root.drag-started();
+                        } else if (event.kind == PointerEventKind.up) {
+                            root.drag-ended();
+                        }
+                    }
+                }
+            }
+            
+            // Player info
+            if !root.is-local || root.is-setup-mode: VerticalLayout {
+                spacing: 4px;
+                
+                // Username
+                BaseText {
+                    text: root.username;
+                    font-size: root.size / 8;
+                    horizontal-alignment: center;
+                }
+                
+                // Team number (in setup mode or when teams are custom)
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    
+                    BaseText {
+                        text: "Team:";
+                        font-size: root.size / 10;
+                        vertical-alignment: center;
+                    }
+                    
+                    if root.is-setup-mode && root.can-edit: StylizedSpinBox {
+                        height: root.size / 8;
+                        value: root.team;
+                        minimum: 0;
+                        maximum: 7;
+                        changed(value) => {
+                            root.team-changed(value);
+                        }
+                    }
+					
+					if !root.is-setup-mode || !root.can-edit: BaseText {
+                        text: root.team;
+                        font-size: root.size / 10;
+                        vertical-alignment: center;
+                    }
+                }
+                
+                // Remove button (only in setup)
+                if root.is-setup-mode && root.can-edit: StylizedButton {
+                    width: root.size / 2;
+                    height: root.size / 8;
+                    text: "Remove";
+                    font-size: root.size / 10;
+                    clicked => { root.remove(); }
+                }
+            }
+        }
+        
+        states [
+            hover when root.is-setup-mode && root.can-edit && touchArea.has-hover: {
+                touchArea.mouse-cursor: grab;
+            }
+            dragging when root.is-setup-mode && root.can-edit && touchArea.pressed: {
+                touchArea.mouse-cursor: grabbing;
+            }
+        ]
+    }
+}

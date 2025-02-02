@@ -27,7 +27,7 @@ async fn main() {
 	).unwrap();
 	game_loop.await.unwrap();
 }
-fn prompt_bid(hand: &Vec<Card>, sender: &Sender<u8>) {
+fn prompt_bid(hand: &[Card], sender: &Sender<u8>) {
 	loop {
 		println!("Cards in hand:");
 		for (index, card) in hand.iter().enumerate() {
@@ -42,7 +42,7 @@ fn prompt_bid(hand: &Vec<Card>, sender: &Sender<u8>) {
 		return;
 	}
 }
-fn prompt_play_card(hand: &Vec<Card>, sender: &Sender<Card>) {
+fn prompt_play_card(hand: &[Card], sender: &Sender<Card>) {
 	loop {
 		println!("Cards in hand:");
 		for (index, card) in hand.iter().enumerate() {

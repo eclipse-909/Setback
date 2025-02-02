@@ -1,79 +1,80 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use slint::SharedString;
 use {
 	shared::{
 		game::GameBuilder,
-		ServerConnection, RoundScores, ServerError
+		ServerConnection
 	},
-	std::f32::consts::PI,
-	tokio::{
-		task::JoinHandle,
-		sync::mpsc
+	std::{
+		f32::consts::PI,
+		rc::Rc,
+		cell::RefCell
 	},
+	tokio::task::JoinHandle,
 	tokio_util::sync::CancellationToken,
-	slint::ModelRc
+	slint::{ModelRc, SharedString}
 };
 
 slint::include_modules!();
 
 macro_rules! set_callbacks {
-    ($main_window:ident, $setback_game:ident, {$($set_callback:stmt),* $(,)?}) => {
-	    $(set_callbacks!($set_callback)),*
+	($main_window:ident, $setback_game:ident, {$($callback:ident $(< $game:ident)? $(< ($($arg:ident),*))?),*}) => {
+	    $(set_callbacks!($main_window, $callback $(, $game)? $(, ($($arg),*))?));*
     };
-	($callback:ident) => {
+	($main_window:ident, $callback:ident) => {
 		//no args
-		main_window.global::<GameState>().$callback($callback);
+		$main_window.global::<GameState>().$callback($callback);
 	};
-	($callback:ident < $game:ident) => {
+	($main_window:ident, $callback:ident, $game:ident) => {
 		//capture game
-		main_window.global::<GameState>().$callback(||$callback(&mut $game));
+		$main_window.global::<GameState>().$callback({let g:Rc<RefCell<SetbackGame>>=$game.clone();move||$callback(g.clone())});
 	};
-	($callback:ident < ($($arg:ident),* $(,)?)) => {
+	($main_window:ident, $callback:ident, ($($arg:ident),*)) => {
 		//args
-		main_window.global::<GameState>().$callback(|$($arg),* |$callback($($arg),* ));
+		$main_window.global::<GameState>().$callback(|$($arg),*|$callback($($arg),*));
 	};
-	($callback:ident < $game:ident < ($($arg:ident),* $(,)?)) => {
+	($main_window:ident, $callback:ident, $game:ident, ($($arg:ident),*)) => {
 		//capture game and args
-		main_window.global::<GameState>().$callback(|$($arg),* |$callback(&mut $game, $($arg),* ));
+		$main_window.global::<GameState>().$callback({let g:Rc<RefCell<SetbackGame>>=$game.clone();move|$($arg),*|$callback(g.clone(), $($arg),*)});
 	};
 }
 
+//ellipse for player positions in setup
 const ELLIPSE_RADIUS: f32 = 525.;
 const ELLIPSE_HEIGHT_RATIO: f32 = 0.625;
 
 #[tokio::main]
 async fn main() -> Result<(), slint::PlatformError> {
-	let mut setback_game: SetbackGame = SetbackGame::default();
+	let game: Rc<RefCell<SetbackGame>> = Rc::new(RefCell::new(SetbackGame::default()));
 	let main_window: MainWindow = MainWindow::new()?;
-	set_callbacks!(main_window, setback_game, {
+	set_callbacks!(main_window, game, {
 		on_exit,
-		on_bid < setback_game < (bid),
-		on_play_card < setback_game,
-		on_send_create_game < setback_game,
-		on_send_join < setback_game < (code),
-		on_send_search_games < setback_game < (filter),
-		on_send_game_meta < setback_game,
-		on_send_player < setback_game < (player),
-		on_send_players < setback_game < (players),
-		on_send_ready < setback_game < (ready),
-		on_logout < setback_game,
-		on_get_account < setback_game,
-		on_fetch_players < setback_game,
-		on_fetch_games < setback_game,
-		on_calc_player_pos < setback_game < (index)
+		on_bid < game < (bid),
+		on_play_card < game < (card),
+		on_send_create_game < game,
+		on_send_join < game < (code),
+		on_send_search_games < game < (filter),
+		on_send_game_meta < game,
+		on_send_player < game < (player),
+		on_send_players < game < (players),
+		on_send_ready < game < (ready),
+		on_logout < game,
+		on_get_account < game,
+		on_fetch_players < game,
+		on_fetch_games < game,
+		on_calc_player_pos < game < (index)
 	});
 	main_window.run()
 }
 
 ///Game state for the app
 #[derive(Default)]
-struct SetbackGame {
+struct SetbackGame<'multiplayer> {
 	scene_type: Scene,
-	host_type: Host<'_>
+	host_type: Host<'multiplayer>
 }
 
-impl SetbackGame {
+impl<'multiplayer> SetbackGame<'multiplayer> {
 	fn fetch_players(&self) -> Vec<shared::Player> {
 		match &self.host_type {
 			Host::None => {unreachable!()}
@@ -115,23 +116,23 @@ enum Host<'multiplayer> {
 
 fn on_exit() {std::process::exit(0);}
 
-fn on_bid(setback_game: &mut SetbackGame, bid: i32) {todo!()}
-fn on_play_card(setback_game: &mut SetbackGame, card: Card) {todo!()}
+fn on_bid(setback_game: Rc<RefCell<SetbackGame>>, bid: i32) {todo!()}
+fn on_play_card(setback_game: Rc<RefCell<SetbackGame>>, card: Card) {todo!()}
 
-fn on_send_create_game(setback_game: &mut SetbackGame) {todo!()}
-fn on_send_join(setback_game: &mut SetbackGame, code: slint::SharedString) {todo!()}
-fn on_send_search_games(setback_game: &mut SetbackGame, filter: GameFilter) {todo!()}
-fn on_send_game_meta(setback_game: &mut SetbackGame) {todo!()}//TODO find out how to pass GameMeta
-fn on_send_player(setback_game: &mut SetbackGame, player: Player) {todo!()}
-fn on_send_players(setback_game: &mut SetbackGame, players: ModelRc<Player>) {todo!()}
-fn on_send_ready(setback_game: &mut SetbackGame, ready: bool) {todo!()}
+fn on_send_create_game(setback_game: Rc<RefCell<SetbackGame>>) {todo!()}
+fn on_send_join(setback_game: Rc<RefCell<SetbackGame>>, code: slint::SharedString) {todo!()}
+fn on_send_search_games(setback_game: Rc<RefCell<SetbackGame>>, filter: GameFilter) {todo!()}
+fn on_send_game_meta(setback_game: Rc<RefCell<SetbackGame>>) {todo!()}//TODO find out how to pass GameMeta
+fn on_send_player(setback_game: Rc<RefCell<SetbackGame>>, player: Player) {todo!()}
+fn on_send_players(setback_game: Rc<RefCell<SetbackGame>>, players: ModelRc<Player>) {todo!()}
+fn on_send_ready(setback_game: Rc<RefCell<SetbackGame>>, ready: bool) {todo!()}
 
-fn on_logout(setback_game: &mut SetbackGame) {todo!()}
-fn on_get_account(setback_game: &mut SetbackGame) {todo!()}
+fn on_logout(setback_game: Rc<RefCell<SetbackGame>>) {todo!()}
+fn on_get_account(setback_game: Rc<RefCell<SetbackGame>>) {todo!()}
 
-fn on_fetch_players(setback_game: &mut SetbackGame) -> ModelRc<Player> {
+fn on_fetch_players(setback_game: Rc<RefCell<SetbackGame>>) -> ModelRc<Player> {
 	ModelRc::from(
-		setback_game.fetch_players()
+		setback_game.borrow().fetch_players()
 			// .as_slice()
 			.iter()
 			.map(|player| {
@@ -149,13 +150,14 @@ fn on_fetch_players(setback_game: &mut SetbackGame) -> ModelRc<Player> {
 					username: SharedString::from(&player.username),
 				}
 			})
-			.collect()
+			.collect::<Vec<Player>>()
+			.as_slice()
 	)
 }
-fn on_fetch_games(setback_game: &mut SetbackGame) {todo!()}
+fn on_fetch_games(setback_game: Rc<RefCell<SetbackGame>>) {todo!()}
 
-fn on_calc_player_pos(setback_game: &mut SetbackGame, index: i32) -> (f32, f32) {
-	let theta: f32 = 2. * PI * index as f32 / setback_game.fetch_num_players() as f32 + 3. * PI / 2.;
+fn on_calc_player_pos(setback_game: Rc<RefCell<SetbackGame>>, index: i32) -> (f32, f32) {
+	let theta: f32 = 2. * PI * index as f32 / setback_game.borrow().fetch_num_players() as f32 + 3. * PI / 2.;
 	(theta.cos() * ELLIPSE_RADIUS, ELLIPSE_HEIGHT_RATIO * theta.sin() * ELLIPSE_RADIUS)
 }
 

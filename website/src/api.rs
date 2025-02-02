@@ -7,7 +7,7 @@ use {
 	shared::AccountData,
 	actix_web::{post, get, patch, delete, web, HttpResponse},
 	actix_session::Session,
-	serde::{Deserialize},
+	serde::Deserialize,
 	jsonwebtoken::{decode, Validation}
 };
 
@@ -113,7 +113,7 @@ async fn renew_session(session: Session) -> HttpResponse {
 async fn renew_jwt(refresh_token: web::Json<String>) -> HttpResponse {
 	let token_data = decode::<Claims>(
 		&refresh_token.into_inner(),
-		&*DECODING_KEY,
+		&DECODING_KEY,
 		&Validation::default()
 	);
 	match token_data {

@@ -14,13 +14,10 @@ use {
 ///A struct to hold game state and communication with players.
 ///
 ///[GameBuilder::start_game] moves this into the function and starts the event loop.
+#[derive(Default)]
 pub struct GameBuilder {
 	game: Game,
 	senders: Vec<(Sender<u8>, Sender<Card>)>
-}
-
-impl Default for GameBuilder {
-	fn default() -> Self {Self {game: Game::default(), senders: Vec::new()}}
 }
 
 impl GameBuilder {
@@ -66,8 +63,8 @@ impl GameBuilder {
 	///[error_callback] Notifies you if there's an unrecoverable error during the game loop.
 	pub fn start_game(
 		mut self,
-		prompt_bid_callback: fn(hand: &Vec<Card>, sender: &Sender<u8>),
-		prompt_card_callback: fn(hand: &Vec<Card>, sender: &Sender<Card>),
+		prompt_bid_callback: fn(hand: &[Card], sender: &Sender<u8>),
+		prompt_card_callback: fn(hand: &[Card], sender: &Sender<Card>),
 		bid_callback: fn(index: u8, bid: u8),
 		play_card_callback: fn(index: u8, card: Card),
 		next_turn_callback: fn(index: u8, bidding: bool),
@@ -77,8 +74,8 @@ impl GameBuilder {
 	) -> Option<(JoinHandle<()>, CancellationToken)> {
 		if !self.game.start_game() {return None;}
 		for player in self.game.players.iter_mut() {
-			let Some(bid_tx) = player.bid_tx.take() else {return None;};
-			let Some(card_tx) = player.card_tx.take() else {return None;};
+			let bid_tx: Sender<u8> = player.bid_tx.take()?;
+			let card_tx: Sender<Card> = player.card_tx.take()?;
 			self.senders.push((bid_tx, card_tx));
 		}
 		if self.game.deal_cards().is_err() {return None;}

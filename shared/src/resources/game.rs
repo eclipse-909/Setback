@@ -141,7 +141,7 @@ impl Game {
 		let mut game_index: Option<u8> = None;
 		let mut team_game_scores: Vec<u8> = Vec::with_capacity(MAX_PLAYERS as usize);
 		for (team_index, team) in self.game_data.teams.iter().enumerate() {
-			let (h, l, j, g) = calc_points(&team.pile, self.game_data.trump.clone());
+			let (h, l, j, g) = calc_points(&team.pile, self.game_data.trump);
 			if h > highest {
 				highest = h;
 				highest_index = team_index as u8;
@@ -250,14 +250,14 @@ impl Game {
 			self.pile_owner = self.game_data.turn_index;
 			self.game_data.lead_index = self.game_data.turn_index;
 			self.highest_card = card.clone();
-			self.game_data.lead = card.suit.clone();
+			self.game_data.lead = card.suit;
 			if self.game_data.turn_number == 1 {
 				//first card played of the round
-				self.game_data.trump = card.suit.clone();
+				self.game_data.trump = card.suit;
 			}
 		} else {
 			//verify legality of card
-			if card.suit != self.game_data.trump && card.suit != self.game_data.lead && player.can_follow(self.game_data.lead.clone()) {return false;}
+			if card.suit != self.game_data.trump && card.suit != self.game_data.lead && player.can_follow(self.game_data.lead) {return false;}
 			//calculate if new owner and update game data
 			if (card.suit == self.highest_card.suit && card.number > self.highest_card.number) || (self.highest_card.suit != self.game_data.trump && card.suit == self.game_data.trump) {
 				self.highest_card = card.clone();
@@ -296,7 +296,7 @@ impl Game {
 			}
 		}
 		let (suit, num) = suit_points.iter().max_by(|(_, num1), (_, num2)| {num1.cmp(num2)}).unwrap();
-		(suit.clone(), *num)
+		(*suit, *num)
 	}
 	
 	///Uses a card-scoring system, the turn order, and the game score to determine the bid
@@ -342,7 +342,7 @@ impl Game {
 			let highest: Card = player.hand.iter().filter(|card| {card.suit == suit}).max_by(|card1, card2| {card1.number.cmp(&card2.number)}).unwrap().clone();
 			return highest;
 		}
-		let playable_card: Vec<Card> = if !self.pile.is_empty() && player.can_follow(self.game_data.lead.clone()) {
+		let playable_card: Vec<Card> = if !self.pile.is_empty() && player.can_follow(self.game_data.lead) {
 			player.hand.iter().filter(|card| {card.suit == self.game_data.lead || card.suit == self.game_data.trump}).cloned().collect()
 		} else {
 			player.hand.clone()

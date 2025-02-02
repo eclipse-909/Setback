@@ -39,7 +39,7 @@ impl Ssp {
 	}
 	//Decodes the SSP from a &mut [u8], which is NOT prefixed with the 2-byte length.
 	pub fn decode(buffer: &mut [u8]) -> Result<Ssp, DecodeError> {
-		bincode::decode_from_slice::<Ssp, Configuration>(&buffer, standard()).map(|(ssp, _)| {ssp})
+		bincode::decode_from_slice::<Ssp, Configuration>(buffer, standard()).map(|(ssp, _)| {ssp})
 	}
 }
 

@@ -162,14 +162,8 @@ async fn main() {
 									}//1
 								}//2
 							}//3
-						}//4
-					}//5
-					//occasionally shrink HashMap capacity when client leaves to clean up unused memory
-					let mut clients_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> = clients_clone.write().unwrap();
-					if (clients_guard.len() as f32) < f32::max(clients_guard.capacity() as f32 * 0.1, MIN_CLIENTS as f32) {
-						let num_clients: usize = clients_guard.len();
-						clients_guard.shrink_to(usize::max(num_clients * 5, MIN_CLIENTS));
-					}
+						}//4 - I wonder what will come next...
+					}//5 - OMG, five!
 				}).await;
 
 				//remove the client from the HashMap before the task ends, and shutdown the TcpStream

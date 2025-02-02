@@ -1,4 +1,8 @@
-import {SpinBox,Slider} from "std-widgets.slint";
+import {SpinBox,Slider,ScrollView} from "std-widgets.slint";
+import { 
+	BaseText, StylizedButton, StylizedCheckbox, StylizedSlider, 
+	StylizedDropdown, StylizedTabView, StylizedSpinBox, Card, PlayerDisplay, Palette
+} from "components.slint";
 
 ///Game state which stores what scene is currently active.
 export enum SceneType {
@@ -64,27 +68,19 @@ struct GameFilter {
     dealer_override: bool
 }
 
-global Palette {
-	out property <color> Green: #04F06A;
-	out property <color> Blue: #2F52E0;
-	out property <color> Yellow: #F9CB40;
-	out property <color> Orange: #FF715B;
-	out property <color> Gray: #4C5B5C;
-}
-
 export global GameState {
 	in property <SceneType> scene: SceneType.MainMenu;
 	in property <HostType> host: HostType.None;
 //	in property <[Player]> players;//TODO swap back after doing the preview
 	in property <[Player]> players: [
-		{username: "Player 1 (me)", player_type: PlayerType.Human, team: 0, human: true, local: true},
-		{username: "Player 2", player_type: PlayerType.AI, team: 1, human: false, local: false},
-		{username: "Player 3", player_type: PlayerType.AI, team: 0, human: false, local: false},
-        {username: "Player 4", player_type: PlayerType.AI, team: 1, human: false, local: false},
-        {username: "Player 5", player_type: PlayerType.AI, team: 0, human: false, local: false},
-        {username: "Player 6", player_type: PlayerType.AI, team: 1, human: false, local: false},
-        {username: "Player 7", player_type: PlayerType.AI, team: 0, human: false, local: false},
-        {username: "Player 8", player_type: PlayerType.AI, team: 1, human: false, local: false}
+		{username: "Player 1 (me)", player_type: PlayerType.Human, team: 0, local: true},
+		{username: "Player 2", player_type: PlayerType.AI, team: 1, local: false},
+		{username: "Player 3", player_type: PlayerType.AI, team: 0, local: false},
+        {username: "Player 4", player_type: PlayerType.AI, team: 1, local: false},
+        {username: "Player 5", player_type: PlayerType.AI, team: 0, local: false},
+        {username: "Player 6", player_type: PlayerType.AI, team: 1, local: false},
+        {username: "Player 7", player_type: PlayerType.AI, team: 0, local: false},
+        {username: "Player 8", player_type: PlayerType.AI, team: 1, local: false}
 	];
 
 	callback exit();
@@ -106,7 +102,7 @@ export global GameState {
 	callback fetch_players() -> [Player];
 	callback fetch_games();
 
-	callback calc_player_pos(int) -> {x: length, y: length};
+	pure callback calc_player_pos(int) -> {x: length, y: length};
 }
 
 component MenuButton inherits TouchArea {
@@ -311,23 +307,322 @@ component SetupPlayer inherits HorizontalLayout {
 	}
 }
 
+// Settings component that can be reused in both the settings scene and game popup
 component Settings {
-	//TODO Settings
-    //audio
-        //master volume
-        //music volume
-        //ui volume
-    //video
-        //resolution
-        //framerate
-        //refresh setting
-    //keybindings
-        //when bidding
-            //0 & 2-4 = bid
-        //when playing card
-            //1-6 = play card
-        //esc = toggle settings menu
-    //display version
+    in property <bool> show-back-button: true;
+    callback back;
+    
+    VerticalLayout {
+        padding: 20px;
+        spacing: 20px;
+
+        // Settings tabs
+        settings-tabs := StylizedTabView {
+            tabs: ["Audio", "Video", "Keybinds"];
+            
+            // Audio Settings
+            if settings-tabs.active-tab == 0 : VerticalLayout {
+                padding: 40px;
+                spacing: 30px;
+                
+                HorizontalLayout {
+                    spacing: 20px;
+                    Image {
+                        source: @image-url("../assets/images/volume-high.png");
+                        width: 32px;
+                        height: 32px;
+                    }
+                    BaseText {
+                        text: "Master Volume";
+                        font-size: 24px;
+                        vertical-alignment: center;
+                    }
+                    StylizedSlider {
+                        width: 300px;
+                        height: 32px;
+                        value: 100;
+                    }
+                }
+                
+                HorizontalLayout {
+                    spacing: 20px;
+                    Image {
+                        source: @image-url("../assets/images/volume-high.png");
+                        width: 32px;
+                        height: 32px;
+                    }
+                    BaseText {
+                        text: "Music Volume";
+                        font-size: 24px;
+                        vertical-alignment: center;
+                    }
+                    StylizedSlider {
+                        width: 300px;
+                        height: 32px;
+                        value: 100;
+                    }
+                }
+                
+                HorizontalLayout {
+                    spacing: 20px;
+                    Image {
+                        source: @image-url("../assets/images/volume-high.png");
+                        width: 32px;
+                        height: 32px;
+                    }
+                    BaseText {
+                        text: "UI Volume";
+                        font-size: 24px;
+                        vertical-alignment: center;
+                    }
+                    StylizedSlider {
+                        width: 300px;
+                        height: 32px;
+                        value: 100;
+                    }
+                }
+            }
+            
+            // Video Settings
+            if settings-tabs.active-tab == 1 : VerticalLayout {
+                padding: 40px;
+                spacing: 30px;
+                
+                HorizontalLayout {
+                    spacing: 20px;
+                    BaseText {
+                        text: "Resolution";
+                        font-size: 24px;
+                        vertical-alignment: center;
+                    }
+                    StylizedDropdown {
+                        width: 200px;
+                        height: 32px;
+                        choices: ["1920x1080", "1600x900", "1280x720"];
+                        selected: "1920x1080";
+                    }
+                }
+                
+                HorizontalLayout {
+                    spacing: 20px;
+                    BaseText {
+                        text: "Framerate";
+                        font-size: 24px;
+                        vertical-alignment: center;
+                    }
+                    StylizedDropdown {
+                        width: 200px;
+                        height: 32px;
+                        choices: ["60 FPS", "144 FPS", "Unlimited"];
+                        selected: "60 FPS";
+                    }
+                }
+                
+                HorizontalLayout {
+                    spacing: 20px;
+                    BaseText {
+                        text: "VSync";
+                        font-size: 24px;
+                        vertical-alignment: center;
+                    }
+                    StylizedCheckbox {
+                        checked: true;
+                    }
+                }
+                
+                HorizontalLayout {
+                    spacing: 20px;
+                    BaseText {
+                        text: "Triple Buffering";
+                        font-size: 24px;
+                        vertical-alignment: center;
+                    }
+                    StylizedCheckbox {
+                        checked: false;
+                    }
+                }
+            }
+            
+            // Keybinds Settings
+            if settings-tabs.active-tab == 2 : VerticalLayout {
+                padding: 40px;
+                spacing: 30px;
+                
+                // Bidding Keybinds
+                Rectangle {
+                    background: #18181840;
+                    border-radius: 8px;
+                    padding: 20px;
+                    
+                    VerticalLayout {
+                        spacing: 15px;
+                        
+                        BaseText {
+                            text: "Bidding";
+                            font-size: 28px;
+                            font-weight: 700;
+                        }
+                        
+                        for bind[i] in [
+                            { name: "Pass", key: "0" },
+                            { name: "Bid 2", key: "2" },
+                            { name: "Bid 3", key: "3" },
+                            { name: "Bid 4", key: "4" },
+                            { name: "Bid 5", key: "5" }
+                        ] : HorizontalLayout {
+                            spacing: 20px;
+                            BaseText {
+                                text: bind.name;
+                                font-size: 24px;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                width: 100px;
+                                height: 32px;
+                                background: #ffffff20;
+                                border-radius: 4px;
+                                
+                                BaseText {
+                                    text: bind.key;
+                                    font-size: 20px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                
+                                TouchArea {
+                                    clicked => {
+                                        // TODO: Implement key binding logic
+                                    }
+                                }
+                            }
+                            StylizedButton {
+                                text: "Reset";
+                                width: 80px;
+                                height: 32px;
+                                font-size: 16px;
+                            }
+                        }
+                    }
+                }
+                
+                // Playing Cards Keybinds
+                Rectangle {
+                    background: #18181840;
+                    border-radius: 8px;
+                    padding: 20px;
+                    
+                    VerticalLayout {
+                        spacing: 15px;
+                        
+                        BaseText {
+                            text: "Playing Cards";
+                            font-size: 28px;
+                            font-weight: 700;
+                        }
+                        
+                        for bind[i] in [
+                            { name: "Play Card 1", key: "1" },
+                            { name: "Play Card 2", key: "2" },
+                            { name: "Play Card 3", key: "3" },
+                            { name: "Play Card 4", key: "4" },
+                            { name: "Play Card 5", key: "5" },
+                            { name: "Play Card 6", key: "6" }
+                        ] : HorizontalLayout {
+                            spacing: 20px;
+                            BaseText {
+                                text: bind.name;
+                                font-size: 24px;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                width: 100px;
+                                height: 32px;
+                                background: #ffffff20;
+                                border-radius: 4px;
+                                
+                                BaseText {
+                                    text: bind.key;
+                                    font-size: 20px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                
+                                TouchArea {
+                                    clicked => {
+                                        // TODO: Implement key binding logic
+                                    }
+                                }
+                            }
+                            StylizedButton {
+                                text: "Reset";
+                                width: 80px;
+                                height: 32px;
+                                font-size: 16px;
+                            }
+                        }
+                    }
+                }
+                
+                // Other Keybinds
+                Rectangle {
+                    background: #18181840;
+                    border-radius: 8px;
+                    padding: 20px;
+                    
+                    VerticalLayout {
+                        spacing: 15px;
+                        
+                        BaseText {
+                            text: "Other";
+                            font-size: 28px;
+                            font-weight: 700;
+                        }
+                        
+                        HorizontalLayout {
+                            spacing: 20px;
+                            BaseText {
+                                text: "Toggle Settings";
+                                font-size: 24px;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                width: 100px;
+                                height: 32px;
+                                background: #ffffff20;
+                                border-radius: 4px;
+                                
+                                BaseText {
+                                    text: "Escape";
+                                    font-size: 20px;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                                
+                                TouchArea {
+                                    clicked => {
+                                        // TODO: Implement key binding logic
+                                    }
+                                }
+                            }
+                            StylizedButton {
+                                text: "Reset";
+                                width: 80px;
+                                height: 32px;
+                                font-size: 16px;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Version display
+        BaseText {
+            text: "Version 1.0.0"; // TODO: Make this configurable
+            font-size: 16px;
+            horizontal-alignment: center;
+        }
+    }
 }
 
 component BackButton inherits MenuButton {
@@ -350,69 +645,133 @@ component DarkScreen inherits Rectangle {
     height: 100%;
 }
 
+// Confirmation popup component
+component ConfirmationPopup {
+    in property <string> message;
+    callback confirmed;
+    callback cancelled;
+    
+    Rectangle {
+        background: #00000080;
+        width: 100%;
+        height: 100%;
+        
+        Rectangle {
+            width: 400px;
+            height: 200px;
+            background: Palette.Green;
+            border-radius: 16px;
+            border-width: 2px;
+            border-color: Palette.Gray;
+            
+            VerticalLayout {
+                padding: 20px;
+                spacing: 20px;
+                
+                BaseText {
+                    text: root.message;
+                    font-size: 24px;
+                    horizontal-alignment: center;
+                    wrap: true;
+                }
+                
+                HorizontalLayout {
+                    alignment: space-around;
+                    
+                    StylizedButton {
+                        text: "Yes";
+                        width: 120px;
+                        height: 40px;
+                        font-size: 20px;
+                        clicked => { root.confirmed(); }
+                    }
+                    
+                    StylizedButton {
+                        text: "No";
+                        width: 120px;
+                        height: 40px;
+                        font-size: 20px;
+                        clicked => { root.cancelled(); }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component MainWindow inherits Window {
 	width: 1920px;
 	height: 1080px;
 	title: "Setback";
 	icon: @image-url("../assets/images/cardsIcon.png");
 
-	//Main Menu
+	// Main Menu Scene
 	if GameState.scene == SceneType.MainMenu : Rectangle {
 		width: 100%;
 		height: 100%;
 		background: Palette.Green;
 
-		Text {
-			text: "Setback";
-			font-size: 200px;
-			font-weight: 900;
-			color: Palette.Orange;
-			stroke: Palette.Gray;
-			stroke-width: 10px;
-			horizontal-alignment: center;
-			y: 40px;
+		// Title and Logo
+		VerticalLayout {
+			y: 75px;
+			spacing: 10px;
+			alignment: start;
+
+			BaseText {
+				text: "Setback";
+				font-size: 200px;
+				horizontal-alignment: center;
+			}
+
+			Image {
+				source: @image-url("../assets/images/cardsIcon.png");
+				height: 128px;
+				horizontal-alignment: center;
+			}
 		}
 
+		// Menu Buttons
 		VerticalLayout {
-			y: 100px;
-			spacing: 40px;
+			y: 150px;
+			spacing: 100px;
 			alignment: center;
 			width: 450px;
 
-			singleplayer := MenuButton {
-				label: "Play";//TODO change to "Singleplayer" when multiplayer is added
-				fontScale: 7;
+			singleplayer := StylizedButton {
+				text: "Singleplayer";
+				font-size: 42px;
 				clicked => {
 					GameState.scene = SceneType.Setup;
 					GameState.host = HostType.SingleplayerSetup;
 				}
 			}
 
-//			multiplayer := MenuButton {
-//				label: "Multiplayer";
-//				fontScale: 7;
-//				clicked => {
-//					darkScreenMainMenu.visible = true;
-//					multiplayerPopup.visible = true;
-//					options.visible = true;
-//					create.visible = false;
-//					join.visible = false;
-//				}
-//			}
-
-			settings := MenuButton {
-				label: "Settings";
-				fontScale: 7;
-				clicked => {GameState.scene = SceneType.Settings;}
+			multiplayer := StylizedButton {
+				text: "Multiplayer";
+				font-size: 42px;
+				clicked => {
+					darkScreenMainMenu.visible = true;
+					multiplayerPopup.visible = true;
+					options.visible = true;
+					// create.visible = false;
+					join.visible = false;
+				}
 			}
 
-			exit := MenuButton {
-				label: "Exit";
-				fontScale: 7;
-				clicked => {GameState.exit();}
+			settings := StylizedButton {
+				text: "Settings";
+				font-size: 42px;
+				clicked => { GameState.scene = SceneType.Settings; }
+			}
+
+			exit := StylizedButton {
+				text: "Exit";
+				font-size: 42px;
+				clicked => { GameState.exit(); }
 			}
 		}
 
+		// Multiplayer Popup
 		darkScreenMainMenu := DarkScreen {}
 
 		multiplayerPopup := Rectangle {
@@ -423,19 +782,21 @@ export component MainWindow inherits Window {
 			background: Palette.Green;
 			border-color: Palette.Gray;
 			border-width: 10px;
+			border-radius: 16px;
 
+			// Main Options
 			options := VerticalLayout {
 				spacing: 80px;
 				alignment: center;
 				width: 450px;
 
-				MenuButton {
-					label: "Create Game";
-					fontScale: 5;
+				StylizedButton {
+					text: "Create Game";
+					font-size: 32px;
 					clicked => {
 						options.visible = false;
 						singleplayer.enabled = false;
-//						multiplayer.enabled = false;//TODO enable with multiplayer
+						multiplayer.enabled = false;
 						settings.enabled = false;
 						exit.enabled = false;
 						GameState.scene = SceneType.Setup;
@@ -443,108 +804,93 @@ export component MainWindow inherits Window {
 					}
 				}
 
-				MenuButton {
-					label: "Join With Code";
-					fontScale: 5;
+				StylizedButton {
+					text: "Join With Code";
+					font-size: 32px;
 					clicked => {
 						options.visible = false;
 						join.visible = true;
 						singleplayer.enabled = false;
-//                        multiplayer.enabled = false;//TODO enable with multiplayer
-                        settings.enabled = false;
-                        exit.enabled = false;
+						multiplayer.enabled = false;
+						settings.enabled = false;
+						exit.enabled = false;
 					}
 				}
 
-				MenuButton {
-                    label: "Search Games";
-                    fontScale: 5;
-                    clicked => {
-                        GameState.scene = SceneType.Multiplayer;
-                        //TODO fetch public multiplayer games
-                    }
-                }
+				StylizedButton {
+					text: "Search Games";
+					font-size: 32px;
+					clicked => {
+						GameState.scene = SceneType.Multiplayer;
+					}
+				}
 
-				MenuButton {
-					label: "Close";
-					fontScale: 5;
+				StylizedButton {
+					text: "Close";
+					font-size: 32px;
 					clicked => {
 						darkScreenMainMenu.visible = false;
 						multiplayerPopup.visible = false;
 						singleplayer.enabled = true;
-//                        multiplayer.enabled = true;//TODO enable with multiplayer
-                        settings.enabled = true;
-                        exit.enabled = true;
+						multiplayer.enabled = true;
+						settings.enabled = true;
+						exit.enabled = true;
 					}
 				}
 			}
 
+			// Join Game Interface
 			join := VerticalLayout {
 				visible: false;
 				spacing: 80px;
 				alignment: center;
-
-				states [
-					focus when input.has-focus && input.text != "": {
-						preview.visible: false;
-					}
-					notFocus when !input.has-focus || input.text == "": {
-						preview.visible: true;
-					}
-				]
+				padding: 20px;
 
 				Rectangle {
 					width: 400px;
 					height: 80px;
-					x: 50px;
 					border-width: 5px;
 					border-color: Palette.Gray;
+					border-radius: 8px;
 					background: white.darker(0.1);
 
-					preview := Text {
+					preview := BaseText {
 						text: "Enter game code...";
-						font-size: 30px;
-						font-weight: 900;
-						stroke: Palette.Gray;
-						stroke-width: 3px;
-						color: Palette.Orange.darker(0.1);
+						font-size: 24px;
 						vertical-alignment: center;
 						x: 15px;
+						opacity: input.text == "" ? 0.5 : 0;
 					}
 
 					input := TextInput {
+						width: 100%;
+						height: 100%;
 						horizontal-alignment: center;
 						vertical-alignment: center;
-						font-size: 40px;
-						font-weight: 900;
+						font-size: 32px;
 						color: Palette.Orange;
-
-						edited => {
-							//TODO don't allow the user to enter too many characters
-						}
 					}
 				}
 
-				MenuButton {
-					label: "Join";
-					fontScale: 5;
+				StylizedButton {
+					text: "Join";
+					font-size: 32px;
+					enabled: input.text != "";
 					clicked => {
-						GameState.send_join(input.text);//TODO does this function need to return anything?
+						GameState.send_join(input.text);
 						darkScreenMainMenu.visible = false;
-                        multiplayerPopup.visible = false;
-                        singleplayer.enabled = true;
-//                        multiplayer.enabled = true;//TODO enable with multiplayer
-                        settings.enabled = true;
-                        exit.enabled = true;
-						options.visible = false;
-                        exit.enabled = false;
+						multiplayerPopup.visible = false;
+						singleplayer.enabled = true;
+						multiplayer.enabled = true;
+						settings.enabled = true;
+						exit.enabled = true;
 						GameState.host = HostType.Client;
 					}
 				}
 
-				MenuButton {
-					label: "Back";
-					fontScale: 5;
+				StylizedButton {
+					text: "Back";
+					font-size: 32px;
 					clicked => {
 						join.visible = false;
 						options.visible = true;
@@ -560,110 +906,214 @@ export component MainWindow inherits Window {
 		height: 100%;
 		background: Palette.Green;
 
-		BackButton {
-            goto_scene: SceneType.MainMenu;
-        }
-
-        MenuButton {
-            label: "Start";//TODO make it say "Ready" when in multiplayer
-            fontScale: 10;
-            width: 340px;
-            height: 125px;
-            x: parent.width - self.width - 25px;
-            y: parent.height - self.height - 25px;
-
-            clicked => {
-                //TODO start game for singleplayer - start countdown for multiplayer
-            }
-        }
-
-        Rectangle {
-			background: #00000080;
-			width: 500px;
-			height: 550px;
-			x: parent.width - self.width - 25px;
+		// Back button with confirmation
+		StylizedButton {
+			text: "Back";
+			width: 150px;
+			height: 50px;
+			x: 25px;
 			y: 25px;
-
-			VerticalLayout {
-				alignment: center;
-				spacing: 25px;
-				padding: 25px;
-
-				//TODO hovering over the label should show a PopupWindow with a description of the setting
-				//Or there should be an information icon like (i)
-
-				CheckBox {
-					checked: true;
-					text: "Standard Teams";
-					scale: 3;
-				}
-				CheckBox {
-					checked: false;
-					text: "Win By 2";
-					scale: 3;
-				}
-				CheckBox {
-	                checked: true;
-	                text: "Negative Scores";
-	                scale: 3;
-	            }
-				CheckBox {
-	                checked: false;
-	                text: "Dealer Override 4 Bid";
-	                scale: 3;
-	            }
-	            VerticalLayout {
-	                in-out property <float> max_score <=> slider.value;//we have to do this because Slider.step is broken
-	                in property <int> display_score: max_score;
-
-	                Text {
-	                    text: "Max Score: \{display_score}";
-	                    font-size: 30px;
-	                    font-weight: 900;
-	                    color: Palette.Orange;
-	                    stroke: Palette.Gray;
-	                    stroke-width: 3px;
-	                    vertical-alignment: center;
-	                    horizontal-alignment: left;
-	                }
-	                slider := Slider {
-	                    value: 21;
-	                    minimum: 4;
-	                    maximum: 64;
-	                }
-	            }
-	            MenuButton {
-	                label: "Add Player";
-	                fontScale: 4;
-
-	                clicked => {
-	                    //TODO add a player
-	                }
-	            }
-			}
-        }
-
-        init => {
-//			GameState.players = GameState.fetch_players();//TODO uncomment after preview
-        }
-
-		for player[index] in GameState.players: SetupPlayer {
-			username: player.username;
-			human: player.player_type == PlayerType.Human;
-			team: player.team;
-			humanVisible: GameState.host != HostType.SingleplayerSetup && !player.local;
-			//TODO
-
-			animate x {
-				duration: 32ms;
-				easing: ease-out-expo;
+			font-size: 24px;
+			clicked => {
+				confirmLeave.visible = true;
 			}
 		}
 
-//		callback calc_player_pos(int) -> {x: length, y: length};
+		// Player arrangement area
+		Rectangle {
+			x: 100px;
+			y: 100px;
+			width: parent.width - 500px;
+			height: parent.height - 200px;
+			
+			for player[i] in GameState.players : PlayerDisplay {
+				property <{x: length, y: length}> pos: GameState.calc_player_pos(i);
+				x: pos.x + (parent.width - self.width) / 2;
+				y: pos.y + (parent.height - self.height) / 2;
+				
+				username: player.username;
+				is-human: player.player_type == PlayerType.Human;
+				team: player.team;
+				is-local: player.local;
+				is-ready: false; // TODO: Add ready state to Player struct
+				is-current-turn: false;
+				is-setup-mode: true;
+				can-edit: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+				size: 200px;
+				
+				remove => {
+					// TODO: Implement player removal
+				}
+				
+				team-changed(new-team) => {
+					// TODO: Implement team change
+				}
+				
+				drag-started => {
+					// TODO: Implement drag start
+				}
+				
+				drag-ended => {
+					// TODO: Implement drag end
+				}
+				
+				animate x { duration: 300ms; easing: ease; }
+				animate y { duration: 300ms; easing: ease; }
+			}
+		}
 
-		function calc_player_pos(index: int) {
+		// Settings panel
+		Rectangle {
+			x: parent.width - 450px;
+			width: 400px;
+			height: parent.height;
+			background: #18181840;
+			padding: 20px;
+			
+			VerticalLayout {
+				spacing: 20px;
+				
+				BaseText {
+					text: "Settings";
+					font-size: 32px;
+					horizontal-alignment: center;
+				}
+				
+				// Team Mode
+				HorizontalLayout {
+					spacing: 10px;
+					
+					BaseText {
+						text: "Team Mode:";
+						font-size: 20px;
+						vertical-alignment: center;
+					}
+					
+					StylizedDropdown {
+						width: 200px;
+						height: 32px;
+						choices: ["Standard", "Custom"];
+						selected: "Standard";
+						enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+					}
+				}
+				
+				// Win by 2
+				StylizedCheckbox {
+					text: "Win by 2";
+					checked: false;
+					enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+				}
+				
+				// Negative Scores
+				StylizedCheckbox {
+					text: "Negative Scores";
+					checked: false;
+					enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+				}
+				
+				// Dealer Override
+				StylizedCheckbox {
+					text: "Dealer Override";
+					checked: false;
+					enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+				}
+				
+				// Max Score
+				HorizontalLayout {
+					spacing: 10px;
+					
+					BaseText {
+						text: "Max Score:";
+						font-size: 20px;
+						vertical-alignment: center;
+					}
+					
+					StylizedSpinBox {
+						value: 11;
+						minimum: 1;
+						maximum: 99;
+						enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+					}
+				}
+				
+				// Max Players
+				HorizontalLayout {
+					spacing: 10px;
+					
+					BaseText {
+						text: "Max Players:";
+						font-size: 20px;
+						vertical-alignment: center;
+					}
+					
+					StylizedSpinBox {
+						value: 4;
+						minimum: 2;
+						maximum: 8;
+						enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+					}
+				}
+				
+				// Add Player button
+				if GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host : StylizedButton {
+					text: "Add Player";
+					font-size: 24px;
+					clicked => {
+						// TODO: Implement add player
+					}
+				}
+				
+				Rectangle { height: 20px; } // Spacer
+				
+				// Start/Ready button
+				StylizedButton {
+					text: GameState.host == HostType.SingleplayerSetup ? "Start" : "Ready";
+					font-size: 32px;
+					clicked => {
+						if (GameState.host == HostType.SingleplayerSetup) {
+							GameState.host = HostType.SingleplayerPlaying;
+							GameState.scene = SceneType.Game;
+						} else {
+							// TODO: Implement ready state toggle
+						}
+					}
+				}
+				
+				// Countdown timer (only visible in multiplayer when all players ready)
+				if GameState.host != HostType.SingleplayerSetup : HorizontalLayout {
+					alignment: center;
+					spacing: 10px;
+					
+					BaseText {
+						text: "Starting in:";
+						font-size: 24px;
+						vertical-alignment: center;
+					}
+					
+					BaseText {
+						text: "10"; // TODO: Implement countdown timer
+						font-size: 24px;
+						vertical-alignment: center;
+					}
+				}
+			}
+		}
 
+		// Leave confirmation popup
+		confirmLeave := ConfirmationPopup {
+			visible: false;
+			message: "Are you sure you want to leave the game setup?";
+			
+			confirmed => {
+				GameState.scene = SceneType.MainMenu;
+				GameState.host = HostType.None;
+				confirmLeave.visible = false;
+			}
+			
+			cancelled => {
+				confirmLeave.visible = false;
+			}
 		}
 	}
 
@@ -672,14 +1122,296 @@ export component MainWindow inherits Window {
 		width: 100%;
 		height: 100%;
 		background: Palette.Green;
-
-		BackButton {
-            goto_scene: SceneType.MainMenu;
-        }
-
-		//TODO Multiplayer
-		//use the fetched public multiplayer games and display them
-		//make games filterable
+		
+		// Back button
+		StylizedButton {
+			text: "Back";
+			width: 150px;
+			height: 50px;
+			x: 25px;
+			y: 25px;
+			font-size: 24px;
+			clicked => {
+				GameState.scene = SceneType.MainMenu;
+			}
+		}
+		
+		// Main layout
+		HorizontalLayout {
+			padding: 80px;
+			spacing: 40px;
+			
+			// Game list (left side)
+			Rectangle {
+				width: 70%;
+				background: #18181840;
+				border-radius: 16px;
+				
+				VerticalLayout {
+					padding: 20px;
+					spacing: 20px;
+					
+					// Header
+					HorizontalLayout {
+						height: 40px;
+						
+						for header in [
+							{ text: "Players", width: 120px },
+							{ text: "Team Mode", width: 120px },
+							{ text: "Win by 2", width: 100px },
+							{ text: "Neg. Scores", width: 120px },
+							{ text: "Dealer Override", width: 140px },
+							{ text: "", width: 100px } // Join button column
+						] : Rectangle {
+							width: header.width;
+							
+							BaseText {
+								text: header.text;
+								font-size: 20px;
+								font-weight: 700;
+								horizontal-alignment: center;
+								vertical-alignment: center;
+							}
+						}
+					}
+					
+					// Game list
+					ScrollView {
+						viewport-height: games.preferred-height;
+						
+						games := VerticalLayout {
+							spacing: 10px;
+							
+							// Sample game entries (replace with actual data)
+							for game in [
+								{
+									players: "2/4",
+									team-mode: "Standard",
+									win-by-2: true,
+									neg-scores: false,
+									dealer-override: true
+								},
+								{
+									players: "3/6",
+									team-mode: "Custom",
+									win-by-2: false,
+									neg-scores: true,
+									dealer-override: false
+								}
+							] : Rectangle {
+								height: 50px;
+								background: #ffffff20;
+								border-radius: 8px;
+								
+								HorizontalLayout {
+									padding: 10px;
+									
+									// Players
+									Rectangle {
+										width: 120px;
+										BaseText {
+											text: game.players;
+											font-size: 18px;
+											horizontal-alignment: center;
+											vertical-alignment: center;
+										}
+									}
+									
+									// Team Mode
+									Rectangle {
+										width: 120px;
+										BaseText {
+											text: game.team-mode;
+											font-size: 18px;
+											horizontal-alignment: center;
+											vertical-alignment: center;
+										}
+									}
+									
+									// Win by 2
+									Rectangle {
+										width: 100px;
+										Image {
+											source: game.win-by-2 ? 
+												@image-url("../assets/images/checkmark.png") : 
+												@image-url("../assets/images/x.png");
+											width: 24px;
+											height: 24px;
+											x: (parent.width - self.width) / 2;
+											y: (parent.height - self.height) / 2;
+										}
+									}
+									
+									// Negative Scores
+									Rectangle {
+										width: 120px;
+										Image {
+											source: game.neg-scores ? 
+												@image-url("../assets/images/checkmark.png") : 
+												@image-url("../assets/images/x.png");
+											width: 24px;
+											height: 24px;
+											x: (parent.width - self.width) / 2;
+											y: (parent.height - self.height) / 2;
+										}
+									}
+									
+									// Dealer Override
+									Rectangle {
+										width: 140px;
+										Image {
+											source: game.dealer-override ? 
+												@image-url("../assets/images/checkmark.png") : 
+												@image-url("../assets/images/x.png");
+											width: 24px;
+											height: 24px;
+											x: (parent.width - self.width) / 2;
+											y: (parent.height - self.height) / 2;
+										}
+									}
+									
+									// Join button
+									StylizedButton {
+										text: "Join";
+										width: 80px;
+										height: 30px;
+										font-size: 16px;
+										clicked => {
+											GameState.scene = SceneType.Setup;
+											GameState.host = HostType.Client;
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			
+			// Filters panel (right side)
+			Rectangle {
+				width: 30%;
+				background: #18181840;
+				border-radius: 16px;
+				
+				VerticalLayout {
+					padding: 20px;
+					spacing: 20px;
+					
+					BaseText {
+						text: "Active Filters";
+						font-size: 24px;
+						font-weight: 700;
+						horizontal-alignment: center;
+					}
+					
+					// Team Mode filter
+					VerticalLayout {
+						spacing: 10px;
+						
+						StylizedCheckbox {
+							text: "Team Mode";
+							checked: false;
+						}
+						
+						StylizedDropdown {
+							width: 100%;
+							height: 32px;
+							choices: ["Standard", "Custom"];
+							selected: "Standard";
+							enabled: false;
+						}
+					}
+					
+					// Win by 2 filter
+					StylizedCheckbox {
+						text: "Win by 2";
+						checked: false;
+					}
+					
+					// Negative Scores filter
+					StylizedCheckbox {
+						text: "Negative Scores";
+						checked: false;
+					}
+					
+					// Dealer Override filter
+					StylizedCheckbox {
+						text: "Dealer Override";
+						checked: false;
+					}
+					
+					// Max Score filter
+					VerticalLayout {
+						spacing: 10px;
+						
+						StylizedCheckbox {
+							text: "Max Score";
+							checked: false;
+						}
+						
+						HorizontalLayout {
+							spacing: 10px;
+							
+							StylizedDropdown {
+								width: 40%;
+								height: 32px;
+								choices: ["=", "≤", "≥", "<", ">", "≠"];
+								selected: "=";
+								enabled: false;
+							}
+							
+							StylizedSpinBox {
+								width: 60%;
+								value: 11;
+								minimum: 1;
+								maximum: 99;
+								enabled: false;
+							}
+						}
+					}
+					
+					// Max Players filter
+					VerticalLayout {
+						spacing: 10px;
+						
+						StylizedCheckbox {
+							text: "Max Players";
+							checked: false;
+						}
+						
+						HorizontalLayout {
+							spacing: 10px;
+							
+							StylizedDropdown {
+								width: 40%;
+								height: 32px;
+								choices: ["=", "≤", "≥", "<", ">", "≠"];
+								selected: "=";
+								enabled: false;
+							}
+							
+							StylizedSpinBox {
+								width: 60%;
+								value: 4;
+								minimum: 2;
+								maximum: 8;
+								enabled: false;
+							}
+						}
+					}
+					
+					// Refresh button
+					StylizedButton {
+						text: "Refresh";
+						font-size: 24px;
+						clicked => {
+							GameState.fetch-games();
+						}
+					}
+				}
+			}
+		}
 	}
 
 	//Game
@@ -687,14 +1419,433 @@ export component MainWindow inherits Window {
 		width: 100%;
 		height: 100%;
 		background: Palette.Green;
-
-		//TODO Game
-		//table
-		//players
-		//cards, deck, hands, pile
-		//bid selection menu
-		//card selection menu (or drag and drop cards onto pile?)
-		//settings menu - with close button
+		
+		// Settings button
+		Rectangle {
+			width: 48px;
+			height: 48px;
+			x: 25px;
+			y: 25px;
+			
+			Image {
+				source: @image-url("../assets/images/gear.png");
+				width: parent.width;
+				height: parent.height;
+			}
+			
+			gameTouchArea := TouchArea {
+				clicked => {
+					darkScreenGame.visible = true;
+					gameMenu.visible = true;
+				}
+			}
+			
+			states [
+				hover when gameTouchArea.has-hover: {
+					gameTouchArea.mouse-cursor: pointer;
+				}
+			]
+		}
+		
+		// Game information display
+		HorizontalLayout {
+			y: 25px;
+			padding-left: 100px;
+			padding-right: 100px;
+			spacing: 40px;
+			
+			// Round number
+			Rectangle {
+				width: 150px;
+				height: 48px;
+				background: #18181840;
+				border-radius: 8px;
+				
+				BaseText {
+					text: "Round 1"; // TODO: Get from game state
+					font-size: 24px;
+					horizontal-alignment: center;
+					vertical-alignment: center;
+				}
+			}
+			
+			// Team scores
+			Rectangle {
+				width: 300px;
+				height: 48px;
+				background: #18181840;
+				border-radius: 8px;
+				
+				HorizontalLayout {
+					padding: 10px;
+					spacing: 20px;
+					
+					BaseText {
+						text: "Team 1: 0"; // TODO: Get from game state
+						font-size: 24px;
+						vertical-alignment: center;
+					}
+					
+					BaseText {
+						text: "Team 2: 0"; // TODO: Get from game state
+						font-size: 24px;
+						vertical-alignment: center;
+					}
+				}
+			}
+			
+			// Trump suit
+			Rectangle {
+				width: 150px;
+				height: 48px;
+				background: #18181840;
+				border-radius: 8px;
+				
+				HorizontalLayout {
+					padding: 10px;
+					spacing: 10px;
+					
+					BaseText {
+						text: "Trump:";
+						font-size: 24px;
+						vertical-alignment: center;
+					}
+					
+					Image {
+						width: 24px;
+						height: 24px;
+						source: @image-url("../assets/images/suits/hearts.png"); // TODO: Get from game state
+						y: (parent.height - self.height) / 2;
+					}
+				}
+			}
+			
+			// Lead suit
+			Rectangle {
+				width: 150px;
+				height: 48px;
+				background: #18181840;
+				border-radius: 8px;
+				
+				HorizontalLayout {
+					padding: 10px;
+					spacing: 10px;
+					
+					BaseText {
+						text: "Lead:";
+						font-size: 24px;
+						vertical-alignment: center;
+					}
+					
+					Image {
+						width: 24px;
+						height: 24px;
+						source: @image-url("../assets/images/suits/clubs.png"); // TODO: Get from game state
+						y: (parent.height - self.height) / 2;
+					}
+				}
+			}
+			
+			// Highest bid
+			Rectangle {
+				width: 150px;
+				height: 48px;
+				background: #18181840;
+				border-radius: 8px;
+				
+				BaseText {
+					text: "Bid: 3"; // TODO: Get from game state
+					font-size: 24px;
+					horizontal-alignment: center;
+					vertical-alignment: center;
+				}
+			}
+		}
+		
+		// Player arrangement and game area
+		Rectangle {
+			y: 100px;
+			width: parent.width;
+			height: parent.height - 100px;
+			
+			// Other players
+			for player[i] in GameState.players : PlayerDisplay {
+				visible: !player.local;
+				property <{x: length, y: length}> pos: GameState.calc_player_pos(i);
+				x: pos.x + (parent.width - self.width) / 2;
+				y: pos.y + (parent.height - self.height) / 2;
+				
+				username: player.username;
+				is-human: player.player_type == PlayerType.Human;
+				team: player.team;
+				is-local: player.local;
+				is-ready: false;
+				is-current-turn: false; // TODO: Get from game state
+				is-setup-mode: false;
+				can-edit: false;
+				size: 150px;
+			}
+			
+			// Center pile
+			Rectangle {
+				x: (parent.width - self.width) / 2;
+				y: (parent.height - self.height) / 2;
+				width: 140px;
+				height: 200px;
+				
+				// Last played card
+				Card {
+					number: 10; // TODO: Get from game state
+					suit: 0; // TODO: Get from game state
+					face-up: true;
+					enabled: false;
+					width: parent.width;
+				}
+				
+				// Pile owner label
+				BaseText {
+					text: "Player 2's Pile"; // TODO: Get from game state
+					font-size: 20px;
+					horizontal-alignment: center;
+					y: parent.height + 10px;
+				}
+			}
+			
+			// Deck
+			Rectangle {
+				x: parent.width - self.width - 100px;
+				y: (parent.height - self.height) / 2;
+				width: 140px;
+				height: 200px;
+				
+				Card {
+					face-up: false;
+					enabled: false;
+					width: parent.width;
+				}
+				
+				BaseText {
+					text: "Deck";
+					font-size: 20px;
+					horizontal-alignment: center;
+					y: parent.height + 10px;
+				}
+			}
+			
+			// Local player's hand
+			Rectangle {
+				x: (parent.width - self.width) / 2;
+				y: parent.height - self.height - 50px;
+				width: 600px;
+				height: 200px;
+				
+				HorizontalLayout {
+					spacing: -50px;
+					
+					for card[i] in [
+						{number: 2, suit: 0},
+						{number: 7, suit: 1},
+						{number: 10, suit: 2},
+						{number: 14, suit: 3},
+						{number: 11, suit: 0},
+						{number: 4, suit: 2}
+					] : Card {
+						number: card.number;
+						suit: card.suit;
+						face-up: true;
+						enabled: true;
+						draggable: true;
+						width: 140px;
+						
+						clicked => {
+							// TODO: Handle card click
+						}
+						
+						drag-started => {
+							// TODO: Handle drag start
+						}
+						
+						drag-ended => {
+							// TODO: Handle drag end
+						}
+					}
+				}
+			}
+		}
+		
+		// Bid prompt overlay
+		Rectangle {
+			visible: false; // TODO: Show when bidding
+			background: #00000080;
+			width: 100%;
+			height: 100%;
+			
+			VerticalLayout {
+				padding: 200px;
+				spacing: 40px;
+				
+				BaseText {
+					text: "Make Your Bid";
+					font-size: 48px;
+					horizontal-alignment: center;
+				}
+				
+				HorizontalLayout {
+					alignment: center;
+					spacing: 20px;
+					
+					for bid in [0, 2, 3, 4, 5] : StylizedButton {
+						text: bid == 0 ? "Pass" : bid;
+						width: 100px;
+						height: 60px;
+						font-size: 32px;
+						enabled: bid == 0 || bid > 3; // TODO: Check against highest bid
+						clicked => {
+							GameState.bid(bid);
+						}
+					}
+				}
+			}
+		}
+		
+		// Round summary overlay
+		Rectangle {
+			visible: false; // TODO: Show at end of round
+			background: #00000080;
+			width: 100%;
+			height: 100%;
+			
+			Rectangle {
+				width: 600px;
+				height: 400px;
+				background: Palette.Green;
+				border-radius: 16px;
+				border-width: 2px;
+				border-color: Palette.Gray;
+				
+				VerticalLayout {
+					padding: 40px;
+					spacing: 20px;
+					
+					BaseText {
+						text: "Round Summary";
+						font-size: 32px;
+						horizontal-alignment: center;
+					}
+					
+					for score in [
+						{type: "High", team: 1},
+						{type: "Low", team: 2},
+						{type: "Jack", team: 1},
+						{type: "Game", points: 3, team: 2}
+					] : BaseText {
+						text: score.type + (score.type == "Game" ? 
+							" (" + score.points + " points)" : "") + 
+							" - Team " + score.team;
+						font-size: 24px;
+						horizontal-alignment: center;
+					}
+					
+					StylizedButton {
+						text: "Continue";
+						width: 200px;
+						height: 50px;
+						font-size: 24px;
+						clicked => {
+							// TODO: Hide summary
+						}
+					}
+				}
+			}
+		}
+		
+		// Game menu overlay
+		darkScreenGame := DarkScreen {
+			visible: false;
+		}
+		
+		gameMenu := Rectangle {
+			visible: false;
+			x: (parent.width - self.width) / 2;
+			y: (parent.height - self.height) / 2;
+			width: 400px;
+			height: 500px;
+			background: Palette.Green;
+			border-radius: 16px;
+			border-width: 2px;
+			border-color: Palette.Gray;
+			
+			VerticalLayout {
+				padding: 40px;
+				spacing: 20px;
+				
+				StylizedButton {
+					text: "Settings";
+					font-size: 24px;
+					clicked => {
+						settingsView.visible = true;
+					}
+				}
+				
+				StylizedButton {
+					text: "Leave Game";
+					font-size: 24px;
+					clicked => {
+						confirmLeaveGame.visible = true;
+					}
+				}
+				
+				StylizedButton {
+					text: "Resume";
+					font-size: 24px;
+					clicked => {
+						darkScreenGame.visible = false;
+						gameMenu.visible = false;
+					}
+				}
+			}
+			
+			// Settings view
+			settingsView := Rectangle {
+				visible: false;
+				width: 100%;
+				height: 100%;
+				
+				Settings {
+					show-back-button: false;
+				}
+				
+				StylizedButton {
+					text: "Back";
+					width: 100px;
+					height: 40px;
+					x: 20px;
+					y: 20px;
+					font-size: 20px;
+					clicked => {
+						settingsView.visible = false;
+					}
+				}
+			}
+		}
+		
+		// Leave game confirmation
+		confirmLeaveGame := ConfirmationPopup {
+			visible: false;
+			message: "Are you sure you want to leave the game?";
+			
+			confirmed => {
+				GameState.scene = SceneType.MainMenu;
+				GameState.host = HostType.None;
+				darkScreenGame.visible = false;
+				gameMenu.visible = false;
+				confirmLeaveGame.visible = false;
+			}
+			
+			cancelled => {
+				confirmLeaveGame.visible = false;
+			}
+		}
 	}
 
 	//Settings
@@ -707,6 +1858,15 @@ export component MainWindow inherits Window {
             goto_scene: SceneType.MainMenu;
         }
 
-		Settings {}
+		Rectangle {
+			width: 100%;
+			height: 90%;
+			y: 100px;
+			
+			Settings {
+				width: 100%;
+				height: 100%;
+			}
+		}
 	}
 }

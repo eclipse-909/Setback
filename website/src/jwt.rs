@@ -34,7 +34,7 @@ pub fn create_access_token(user_id: String) -> jsonwebtoken::errors::Result<Stri
 			sub: user_id,
 			exp: (Utc::now() + Duration::hours(2)).timestamp() as usize
 		},
-		&*ENCODING_KEY
+		&ENCODING_KEY
 	)
 }
 
@@ -48,7 +48,7 @@ pub fn create_jwts(user_id: String) -> jsonwebtoken::errors::Result<(String, Str
 				sub: user_id,
 				exp: (Utc::now() + Duration::days(7)).timestamp() as usize
 			},
-			&*ENCODING_KEY
+			&ENCODING_KEY
 		)?
 	))
 }
@@ -75,7 +75,7 @@ where S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> +
 	forward_ready!(service);
 	fn call(&self, req: ServiceRequest) -> Self::Future {
 		if let Some(token) = req.headers().get("Authorization").and_then(|h| h.to_str().ok()).and_then(|h| h.strip_prefix("Bearer ")) {
-			if let Ok(decoded_token) = decode::<Claims>(token, &*DECODING_KEY, &Validation::default()) {
+			if let Ok(decoded_token) = decode::<Claims>(token, &DECODING_KEY, &Validation::default()) {
 				req.extensions_mut().insert(decoded_token.claims);
 				let fut: <S as Service<ServiceRequest>>::Future = self.service.call(req);
 				return Box::pin(async {Ok(fut.await?.map_into_left_body())});

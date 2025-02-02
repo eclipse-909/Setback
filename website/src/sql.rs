@@ -183,13 +183,6 @@ impl DB for SqliteDatabase {
 		Ok(())
 	}
 
-    async fn update_password(&self, account_id: u32, password: String) -> Result<(), Error> {
-		sqlx::query(format!("update Accounts set password = {} where account_id = {}", password, account_id))
-			.execute(&self.pool)
-			.await?;
-		Ok(())
-	}
-
 	async fn delete_account(&self, account_id: u32) -> Result<(), Error> {
 		sqlx::query("delete from Accounts where account_id = ?1")
 			.bind(account_id)
