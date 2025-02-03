@@ -1,7 +1,8 @@
-import {SpinBox,Slider,ScrollView} from "std-widgets.slint";
+import {ScrollView} from "std-widgets.slint";
 import { 
-	BaseText, StylizedButton, StylizedCheckbox, StylizedSlider, 
-	/* StylizedDropdown */StylizedComboBox, StylizedTabView, StylizedSpinBox, Card, PlayerDisplay, Palette, ConfirmationDialog
+	BaseText, StylizedButton, StylizedCheckbox, StylizedSlider,
+	StylizedComboBox, StylizedTabView, StylizedSpinBox, Card,
+	PlayerDisplay, Palette, ConfirmationDialog
 } from "components.slint";
 
 ///Game state which stores what scene is currently active.
@@ -84,6 +85,7 @@ export global GameState {
 	];
 
 	callback exit();
+	callback set_state(scene: SceneType, host: HostType);
 
 	callback bid(int);
 	callback play_card(Card);
@@ -269,7 +271,7 @@ component SetupPlayer inherits HorizontalLayout {
                 stroke: Palette.Gray;
                 stroke-width: 2px;
 			}
-			if teamVisible: SpinBox {//TODO reimplement SpinBox
+			if teamVisible: StylizedSpinBox {
 				value: team;
 				minimum: 0;
 				maximum: 7;
@@ -659,6 +661,8 @@ export component MainWindow inherits Window {
 	height: 1080px;
     title: "Setback";
 	icon: @image-url("../assets/images/cardsIcon.png");
+	full-screen: true;
+	no-frame: true;
 
 	// Dropdown overlay properties
 	property <bool> active-dropdown-overlay: false;
@@ -995,14 +999,16 @@ export component MainWindow inherits Window {
 
 		// Settings panel
 		Rectangle {
-			x: parent.width - 450px;
-			width: 400px;
-			height: parent.height;
+			x: parent.width - 550px;
+			y: 50px;
+			width: 500px;
+			height: 1000px;
 			background: #18181840;
 			padding: 20px;
 			
 			VerticalLayout {
 				spacing: 20px;
+				alignment: center;
 				
 				BaseText {
 					text: "Settings";
@@ -1013,6 +1019,7 @@ export component MainWindow inherits Window {
 				// Team Mode
 				HorizontalLayout {
 					spacing: 10px;
+					width: 350px;
 					
 					BaseText {
 						text: "Team Mode:";

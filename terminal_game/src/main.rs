@@ -24,7 +24,7 @@ async fn main() {
 		signal_round_scores,
 		signal_game_over,
 		signal_game_loop_error
-	).unwrap();
+	);
 	game_loop.await.unwrap();
 }
 fn prompt_bid(hand: &[Card], sender: &Sender<u8>) {

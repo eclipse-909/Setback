@@ -462,64 +462,63 @@ export component Card {
         if root.face-up : Image {
             width: parent.width;
             height: parent.height;
-            // We need to handle each card individually
             source: {
                 if (root.suit == 0) { // Hearts
-                    if (root.number == 2) { @image-url("../assets/images/cards/hearts/2.png") }
-                    else if (root.number == 3) { @image-url("../assets/images/cards/hearts/3.png") }
-                    else if (root.number == 4) { @image-url("../assets/images/cards/hearts/4.png") }
-                    else if (root.number == 5) { @image-url("../assets/images/cards/hearts/5.png") }
-                    else if (root.number == 6) { @image-url("../assets/images/cards/hearts/6.png") }
-                    else if (root.number == 7) { @image-url("../assets/images/cards/hearts/7.png") }
-                    else if (root.number == 8) { @image-url("../assets/images/cards/hearts/8.png") }
-                    else if (root.number == 9) { @image-url("../assets/images/cards/hearts/9.png") }
-                    else if (root.number == 10) { @image-url("../assets/images/cards/hearts/10.png") }
-                    else if (root.number == 11) { @image-url("../assets/images/cards/hearts/11.png") }
-                    else if (root.number == 12) { @image-url("../assets/images/cards/hearts/12.png") }
-                    else if (root.number == 13) { @image-url("../assets/images/cards/hearts/13.png") }
-                    else { @image-url("../assets/images/cards/hearts/14.png") }
+                    if (root.number == 2) { @image-url("../assets/images/cards/2_of_hearts.png") }
+                    else if (root.number == 3) { @image-url("../assets/images/cards/3_of_hearts.png") }
+                    else if (root.number == 4) { @image-url("../assets/images/cards/4_of_hearts.png") }
+                    else if (root.number == 5) { @image-url("../assets/images/cards/5_of_hearts.png") }
+                    else if (root.number == 6) { @image-url("../assets/images/cards/6_of_hearts.png") }
+                    else if (root.number == 7) { @image-url("../assets/images/cards/7_of_hearts.png") }
+                    else if (root.number == 8) { @image-url("../assets/images/cards/8_of_hearts.png") }
+                    else if (root.number == 9) { @image-url("../assets/images/cards/9_of_hearts.png") }
+                    else if (root.number == 10) { @image-url("../assets/images/cards/10_of_hearts.png") }
+                    else if (root.number == 11) { @image-url("../assets/images/cards/jack_of_hearts.png") }
+                    else if (root.number == 12) { @image-url("../assets/images/cards/queen_of_hearts.png") }
+                    else if (root.number == 13) { @image-url("../assets/images/cards/king_of_hearts.png") }
+                    else { @image-url("../assets/images/cards/ace_of_hearts.png") }
                 } else if (root.suit == 1) { // Clubs
-                    if (root.number == 2) { @image-url("../assets/images/cards/clubs/2.png") }
-                    else if (root.number == 3) { @image-url("../assets/images/cards/clubs/3.png") }
-                    else if (root.number == 4) { @image-url("../assets/images/cards/clubs/4.png") }
-                    else if (root.number == 5) { @image-url("../assets/images/cards/clubs/5.png") }
-                    else if (root.number == 6) { @image-url("../assets/images/cards/clubs/6.png") }
-                    else if (root.number == 7) { @image-url("../assets/images/cards/clubs/7.png") }
-                    else if (root.number == 8) { @image-url("../assets/images/cards/clubs/8.png") }
-                    else if (root.number == 9) { @image-url("../assets/images/cards/clubs/9.png") }
-                    else if (root.number == 10) { @image-url("../assets/images/cards/clubs/10.png") }
-                    else if (root.number == 11) { @image-url("../assets/images/cards/clubs/11.png") }
-                    else if (root.number == 12) { @image-url("../assets/images/cards/clubs/12.png") }
-                    else if (root.number == 13) { @image-url("../assets/images/cards/clubs/13.png") }
-                    else { @image-url("../assets/images/cards/clubs/14.png") }
+                    if (root.number == 2) { @image-url("../assets/images/cards/2_of_clubs.png") }
+                    else if (root.number == 3) { @image-url("../assets/images/cards/3_of_clubs.png") }
+                    else if (root.number == 4) { @image-url("../assets/images/cards/4_of_clubs.png") }
+                    else if (root.number == 5) { @image-url("../assets/images/cards/5_of_clubs.png") }
+                    else if (root.number == 6) { @image-url("../assets/images/cards/6_of_clubs.png") }
+                    else if (root.number == 7) { @image-url("../assets/images/cards/7_of_clubs.png") }
+                    else if (root.number == 8) { @image-url("../assets/images/cards/8_of_clubs.png") }
+                    else if (root.number == 9) { @image-url("../assets/images/cards/9_of_clubs.png") }
+                    else if (root.number == 10) { @image-url("../assets/images/cards/10_of_clubs.png") }
+                    else if (root.number == 11) { @image-url("../assets/images/cards/jack_of_clubs.png") }
+                    else if (root.number == 12) { @image-url("../assets/images/cards/queen_of_clubs.png") }
+                    else if (root.number == 13) { @image-url("../assets/images/cards/king_of_clubs.png") }
+                    else { @image-url("../assets/images/cards/ace_of_clubs.png") }
                 } else if (root.suit == 2) { // Diamonds
-                    if (root.number == 2) { @image-url("../assets/images/cards/diamonds/2.png") }
-                    else if (root.number == 3) { @image-url("../assets/images/cards/diamonds/3.png") }
-                    else if (root.number == 4) { @image-url("../assets/images/cards/diamonds/4.png") }
-                    else if (root.number == 5) { @image-url("../assets/images/cards/diamonds/5.png") }
-                    else if (root.number == 6) { @image-url("../assets/images/cards/diamonds/6.png") }
-                    else if (root.number == 7) { @image-url("../assets/images/cards/diamonds/7.png") }
-                    else if (root.number == 8) { @image-url("../assets/images/cards/diamonds/8.png") }
-                    else if (root.number == 9) { @image-url("../assets/images/cards/diamonds/9.png") }
-                    else if (root.number == 10) { @image-url("../assets/images/cards/diamonds/10.png") }
-                    else if (root.number == 11) { @image-url("../assets/images/cards/diamonds/11.png") }
-                    else if (root.number == 12) { @image-url("../assets/images/cards/diamonds/12.png") }
-                    else if (root.number == 13) { @image-url("../assets/images/cards/diamonds/13.png") }
-                    else { @image-url("../assets/images/cards/diamonds/14.png") }
+                    if (root.number == 2) { @image-url("../assets/images/cards/2_of_diamonds.png") }
+                    else if (root.number == 3) { @image-url("../assets/images/cards/3_of_diamonds.png") }
+                    else if (root.number == 4) { @image-url("../assets/images/cards/4_of_diamonds.png") }
+                    else if (root.number == 5) { @image-url("../assets/images/cards/5_of_diamonds.png") }
+                    else if (root.number == 6) { @image-url("../assets/images/cards/6_of_diamonds.png") }
+                    else if (root.number == 7) { @image-url("../assets/images/cards/7_of_diamonds.png") }
+                    else if (root.number == 8) { @image-url("../assets/images/cards/8_of_diamonds.png") }
+                    else if (root.number == 9) { @image-url("../assets/images/cards/9_of_diamonds.png") }
+                    else if (root.number == 10) { @image-url("../assets/images/cards/10_of_diamonds.png") }
+                    else if (root.number == 11) { @image-url("../assets/images/cards/jack_of_diamonds.png") }
+                    else if (root.number == 12) { @image-url("../assets/images/cards/queen_of_diamonds.png") }
+                    else if (root.number == 13) { @image-url("../assets/images/cards/king_of_diamonds.png") }
+                    else { @image-url("../assets/images/cards/ace_of_diamonds.png") }
                 } else { // Spades
-                    if (root.number == 2) { @image-url("../assets/images/cards/spades/2.png") }
-                    else if (root.number == 3) { @image-url("../assets/images/cards/spades/3.png") }
-                    else if (root.number == 4) { @image-url("../assets/images/cards/spades/4.png") }
-                    else if (root.number == 5) { @image-url("../assets/images/cards/spades/5.png") }
-                    else if (root.number == 6) { @image-url("../assets/images/cards/spades/6.png") }
-                    else if (root.number == 7) { @image-url("../assets/images/cards/spades/7.png") }
-                    else if (root.number == 8) { @image-url("../assets/images/cards/spades/8.png") }
-                    else if (root.number == 9) { @image-url("../assets/images/cards/spades/9.png") }
-                    else if (root.number == 10) { @image-url("../assets/images/cards/spades/10.png") }
-                    else if (root.number == 11) { @image-url("../assets/images/cards/spades/11.png") }
-                    else if (root.number == 12) { @image-url("../assets/images/cards/spades/12.png") }
-                    else if (root.number == 13) { @image-url("../assets/images/cards/spades/13.png") }
-                    else { @image-url("../assets/images/cards/spades/14.png") }
+                    if (root.number == 2) { @image-url("../assets/images/cards/2_of_spades.png") }
+                    else if (root.number == 3) { @image-url("../assets/images/cards/3_of_spades.png") }
+                    else if (root.number == 4) { @image-url("../assets/images/cards/4_of_spades.png") }
+                    else if (root.number == 5) { @image-url("../assets/images/cards/5_of_spades.png") }
+                    else if (root.number == 6) { @image-url("../assets/images/cards/6_of_spades.png") }
+                    else if (root.number == 7) { @image-url("../assets/images/cards/7_of_spades.png") }
+                    else if (root.number == 8) { @image-url("../assets/images/cards/8_of_spades.png") }
+                    else if (root.number == 9) { @image-url("../assets/images/cards/9_of_spades.png") }
+                    else if (root.number == 10) { @image-url("../assets/images/cards/10_of_spades.png") }
+                    else if (root.number == 11) { @image-url("../assets/images/cards/jack_of_spades.png") }
+                    else if (root.number == 12) { @image-url("../assets/images/cards/queen_of_spades.png") }
+                    else if (root.number == 13) { @image-url("../assets/images/cards/king_of_spades.png") }
+                    else { @image-url("../assets/images/cards/ace_of_spades.png") }
                 }
             }
         }

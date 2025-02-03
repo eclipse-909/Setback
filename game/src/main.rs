@@ -8,9 +8,15 @@ use {
 	std::{
 		f32::consts::PI,
 		rc::Rc,
-		cell::RefCell
+		cell::{
+			RefCell,
+			RefMut
+		}
 	},
-	tokio::task::JoinHandle,
+	tokio::{
+		task::JoinHandle,
+		sync::mpsc::Sender
+	},
 	tokio_util::sync::CancellationToken,
 	slint::{ModelRc, SharedString}
 };
@@ -49,6 +55,7 @@ async fn main() -> Result<(), slint::PlatformError> {
 	let main_window: MainWindow = MainWindow::new()?;
 	set_callbacks!(main_window, game, {
 		on_exit,
+		on_set_state < game < (scene, host),
 		on_bid < game < (bid),
 		on_play_card < game < (card),
 		on_send_create_game < game,
@@ -75,16 +82,24 @@ struct SetbackGame<'multiplayer> {
 }
 
 impl<'multiplayer> SetbackGame<'multiplayer> {
-	fn fetch_players(&self) -> Vec<shared::Player> {
+	fn fetch_players(&self) -> &[shared::Player] {
 		match &self.host_type {
-			Host::None => {unreachable!()}
-			Host::SingleplayerSetup(game_builder) => {todo!()}
-			Host::SingleplayerPlaying(_, _) => {todo!()}
-			Host::Host(game_client) => {todo!()}
-			Host::Client(game_client) => {todo!()}
+			Host::None => {unreachable!("There are no players when you aren't in a game.")}
+			Host::SingleplayerSetup(game_builder) => {
+				game_builder.game.players.as_slice()
+			}
+			Host::SingleplayerPlaying(_, _) => {unreachable!("You should not need to fetch players when you're playing a singleplayer game.")}
+			Host::Host(game_client) | Host::Client(game_client) => {todo!("Send request to server to fetch players.")}
 		}
 	}
-	fn fetch_num_players(&self) -> u8 {todo!()}
+	fn fetch_num_players(&self) -> u8 {
+		match &self.host_type {
+			Host::None => {unreachable!("There are no players when you aren't in a game.")}
+			Host::SingleplayerSetup(game_builder) => {game_builder.game.players.len() as u8}
+			Host::SingleplayerPlaying(_, _) => {unreachable!("You should not need to fetch the number of players when you're playing a singleplayer game.")}
+			Host::Host(game_client) | Host::Client(game_client) => {todo!("Send request to server to fetch the number of players.")}
+		}
+	}
 }
 
 ///Game state which stores what scene is currently active.
@@ -97,6 +112,18 @@ enum Scene {
 	Multiplayer,
 	Game,
 	Settings
+}
+
+impl From<SceneType> for Scene {
+	fn from(scene: SceneType) -> Self {
+		match scene {
+			SceneType::MainMenu => {Scene::MainMenu}
+			SceneType::Setup => {Scene::Setup}
+			SceneType::Multiplayer => {Scene::Multiplayer}
+			SceneType::Game => {Scene::Game}
+			SceneType::Settings => {Scene::Settings}
+		}
+	}
 }
 
 ///Game state which stores the relation between the player and the type of game they're playing.
@@ -115,6 +142,112 @@ enum Host<'multiplayer> {
 }
 
 fn on_exit() {std::process::exit(0);}
+fn on_set_state(setback_game: Rc<RefCell<SetbackGame>>, scene: SceneType, host: HostType) {
+	let mut game: RefMut<SetbackGame> = setback_game.borrow_mut();
+	game.scene_type = scene.into();
+	match game.host_type {
+		Host::None => {
+			match host {
+				HostType::None => {}//no change in host
+				HostType::SingleplayerSetup => {game.host_type = Host::SingleplayerSetup(GameBuilder::default());}//starting singleplayer game
+				HostType::SingleplayerPlaying => {unreachable!("You should not be able to start a singleplayer game when you're not in a game.")}
+				HostType::Host => {
+					//starting multiplayer game
+
+					//TODO show loading screen or message that says "connecting to server..."
+
+					tokio::spawn(async move {
+						todo!("Load username and password from disk, or prompt user");
+						let username: &str = todo!();
+						let password: &str = todo!();
+						match ServerConnection::new_connection(username, password, ssp_callback(setback_game.clone())).await {	
+							Some(connection) => {
+								game.host_type = Host::Host(connection);
+							}
+							None => {
+								todo!()
+							}
+						}
+					});
+				}
+				HostType::Client => {
+					//joining multiplayer game
+					
+					//TODO show loading screen or message that says "connecting to server..."
+
+					tokio::spawn(async move {
+						todo!("Load username and password from disk, or prompt user");
+						let username: &str = todo!();
+						let password: &str = todo!();
+						match ServerConnection::new_connection(username, password, ssp_callback(setback_game.clone())).await {	
+							Some(connection) => {
+								game.host_type = Host::Host(connection);
+							}
+							None => {
+								todo!()
+							}
+						}
+					});
+				}
+			}
+		}
+		Host::SingleplayerSetup(game_builder) => {
+			match host {
+				HostType::None => {game.host_type = Host::None;}//leaving the singleplayer game setup
+				HostType::SingleplayerSetup => {}//no change in host
+				HostType::SingleplayerPlaying => {
+					//starting singleplayer game
+					let (handle, cancel_token) = game_builder.start_game(
+						prompt_bid,
+						prompt_play_card,
+						signal_bid,
+						signal_play_card,
+						signal_next_turn,
+						signal_round_scores,
+						signal_game_over,
+						signal_game_loop_error
+					);
+					game.host_type = Host::SingleplayerPlaying(handle, cancel_token);
+				}
+				HostType::Host => {unreachable!("You should not be able to convert a singleplayer game into a multiplayer game.")}
+				HostType::Client => {unreachable!("You should not be able to join a multiplayer game when you're in a singleplayer game setup.")}
+			}
+		}
+		Host::SingleplayerPlaying(handle, cancel_token) => {
+			match host {
+				HostType::None => {game.host_type = Host::None;}//leaving the singleplayer game
+				HostType::SingleplayerSetup => {unreachable!("You should not be able to return to the setup.")}
+				HostType::SingleplayerPlaying => {}//no change in host
+				HostType::Host => {unreachable!("You should not be able to convert a singleplayer game into a multiplayer game.")}
+				HostType::Client => {unreachable!("You should not be able to join a multiplayer game when you're in a singleplayer game setup.")}
+			}
+		}
+		Host::Host(connection) => {
+			match host {
+				HostType::None => {
+					//leaving the multiplayer game
+					game.host_type = Host::None;
+				}
+				HostType::SingleplayerSetup => {unreachable!("You should not be able to return to the setup.")}
+				HostType::SingleplayerPlaying => {unreachable!("You should not be able to convert a multiplayer game into a singleplayer game.")}
+				HostType::Host => {}//no change in host
+				HostType::Client => {unreachable!("You should not be able to switch from a host to a client.")}
+			}
+		}
+		Host::Client(connection) => {
+			match host {
+				HostType::None => {
+					//leaving the multiplayer game
+					game.host_type = Host::None;
+				}
+				HostType::SingleplayerSetup => {unreachable!("You should not be able to return to the setup.")}
+				HostType::SingleplayerPlaying => {unreachable!("You should not be able to convert a multiplayer game into a singleplayer game.")}
+				HostType::Host => {unreachable!("You should not be able to switch from a client to a host.")}
+				HostType::Client => {}//no change in host
+			}
+		}
+	}
+}
 
 fn on_bid(setback_game: Rc<RefCell<SetbackGame>>, bid: i32) {todo!()}
 fn on_play_card(setback_game: Rc<RefCell<SetbackGame>>, card: Card) {todo!()}
@@ -163,42 +296,57 @@ fn on_calc_player_pos(setback_game: Rc<RefCell<SetbackGame>>, index: i32) -> (f3
 
 //Singleplayer game loop callback functions
 
-// fn prompt_bid(tx: &app::Sender<GameEvent>) -> fn(&Vec<Card>, &mpsc::Sender<u8>) {
-// 	|hand: &Vec<Card>, sender: &mpsc::Sender<u8>| {
-// 		loop {
-// 			println!("Cards in hand:");
-// 			for (index, card) in hand.iter().enumerate() {
-// 				println!("{}: {}", index, card);
-// 			}
-// 			print!("Please enter your bid: ");
-// 			let _ = stdout().flush();
-// 			let mut input: String = String::new();
-// 			if stdin().read_line(&mut input).is_err() {continue;}
-// 			let Ok(n) = input.trim().parse::<u8>() else {print!("\nInvalid input. "); continue;};
-// 			sender.try_send(n).unwrap();
-// 			return;
-// 		}
-// 	}
-// }
-// fn prompt_play_card(hand: &Vec<Card>, sender: &mpsc::Sender<Card>) {
-// 	loop {
-// 		println!("Cards in hand:");
-// 		for (index, card) in hand.iter().enumerate() {
-// 			println!("{}: {}", index, card);
-// 		}
-// 		print!("Please enter the index of the card you want to play: ");
-// 		let _ = stdout().flush();
-// 		let mut input: String = String::new();
-// 		if stdin().read_line(&mut input).is_err() {continue;}
-// 		let Ok(n) = input.trim().parse::<u8>() else {print!("\nInvalid input. "); continue;};
-// 		if n > hand.len() as u8 {print!("\nInvalid input. "); continue;}
-// 		sender.try_send(hand[n as usize].clone()).unwrap();
-// 		return;
-// 	}
-// }
-// fn signal_bid(index: u8, bid: u8) {println!("Player {} bid {}", index, bid);}
-// fn signal_play_card(index: u8, card: Card) {println!("Player {} played {}", index, card);}
-// fn signal_next_turn(index: u8, bidding: bool) {println!("Player {}'s turn to {}", index, if bidding {"bid"} else {"play a card."});}
-// fn signal_round_scores(scores: RoundScores) {println!("Scores {:#?}", scores);}
-// fn signal_game_over() {println!("Game Over");}
-// fn signal_game_loop_error(error: ServerError) {println!("Server Error: {}", error);}
+fn prompt_bid(tx: &Sender<shared::GameEvent>) -> fn(&[shared::Card], &Sender<u8>) {
+	|hand: &[shared::Card], sender: &Sender<u8>| {
+		loop {
+			println!("Cards in hand:");
+			for (index, card) in hand.iter().enumerate() {
+				println!("{}: {}", index, card);
+			}
+			print!("Please enter your bid: ");
+			let _ = stdout().flush();
+			let mut input: String = String::new();
+			if stdin().read_line(&mut input).is_err() {continue;}
+			let Ok(n) = input.trim().parse::<u8>() else {print!("\nInvalid input. "); continue;};
+			sender.try_send(n).unwrap();
+			return;
+		}
+	}
+}
+fn prompt_play_card(hand: &[shared::Card], sender: &Sender<shared::Card>) {
+	loop {
+		println!("Cards in hand:");
+		for (index, card) in hand.iter().enumerate() {
+			println!("{}: {}", index, card);
+		}
+		print!("Please enter the index of the card you want to play: ");
+		let _ = stdout().flush();
+		let mut input: String = String::new();
+		if stdin().read_line(&mut input).is_err() {continue;}
+		let Ok(n) = input.trim().parse::<u8>() else {print!("\nInvalid input. "); continue;};
+		if n > hand.len() as u8 {print!("\nInvalid input. "); continue;}
+		sender.try_send(hand[n as usize].clone()).unwrap();
+		return;
+	}
+}
+fn signal_bid(index: u8, bid: u8) {println!("Player {} bid {}", index, bid);}
+fn signal_play_card(index: u8, card: shared::Card) {println!("Player {} played {}", index, card);}
+fn signal_next_turn(index: u8, bidding: bool) {println!("Player {}'s turn to {}", index, if bidding {"bid"} else {"play a card."});}
+fn signal_round_scores(scores: shared::RoundScores) {println!("Scores {:#?}", scores);}
+fn signal_game_over() {println!("Game Over");}
+fn signal_game_loop_error(error: shared::ServerError) {println!("Server Error: {}", error);}
+
+//Multiplayer game loop callback functions
+
+fn ssp_callback(game: Rc<RefCell<SetbackGame>>) -> fn(message: Result<shared::Ssp, shared::ClientError>) {
+	move |message: Result<shared::Ssp, shared::ClientError>| {
+		match message {
+			Ok(ssp) => {
+				todo!()
+			}
+			Err(error) => {
+				todo!()
+			}
+		}
+	}
+}

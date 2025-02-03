@@ -10,7 +10,7 @@ use {
 		fmt::{Display, Debug, Formatter},
 		io::Error
 	},
-	tokio::sync::mpsc::{Sender, Receiver, channel},
+	tokio::sync::mpsc::{Sender, Receiver, channel, UnboundedSender},
 	bincode::{
 		Decode, Encode, BorrowDecode,
 		enc::Encoder,
@@ -26,15 +26,25 @@ pub const A: u8 = 14;
 pub const CARDS_PER_PLAYER: u8 = 6;
 pub const MAX_GAME_METAS: u8 = 253;
 
-pub struct Player {
+#[derive(Encode, Decode)]
+pub struct PlayerData {
 	pub player_type: PlayerType,
 	pub username: String,
 	pub hand: Vec<Card>,
-	pub bid_tx: Option<Sender<u8>>,
-	pub bid_rx: Option<Receiver<u8>>,
-	pub card_tx: Option<Sender<Card>>,
-	pub card_rx: Option<Receiver<Card>>,
 	pub team_id: u8
+}
+impl PlayerData {
+	fn new(player_type: PlayerType, username: String, hand: Vec<Card>, team_id: u8) -> Self {
+		Self {player_type, username, hand, team_id}
+	}
+}
+
+pub struct Player {
+	pub player_data: PlayerData,
+	pub bid_tx: Sender<u8>,
+	pub bid_rx: Receiver<u8>,
+	pub card_tx: Sender<Card>,
+	pub card_rx: Receiver<Card>
 }
 impl Player {
 	///Self in singleplayer, or another connected player in multiplayer.
@@ -43,16 +53,14 @@ impl Player {
 		let (bid_tx, bid_rx) = channel::<u8>(1);
 		let (card_tx, card_rx) = channel::<Card>(1);
 		Self {
-			player_type: PlayerType::Human(None),
-			username,
-			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
-			bid_tx: Some(bid_tx),
-			bid_rx: Some(bid_rx),
-			card_tx: Some(card_tx),
-			card_rx: Some(card_rx),
-			team_id
+			player_data: PlayerData::new(PlayerType::Human(None), username, Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
+			bid_tx,
+			bid_rx,
+			card_tx,
+			card_rx
 		}
 	}
+
 	///Self in multiplayer.
 	///account_id and username must come from server.
 	pub async fn new_self(ssp_callback: fn(message: Result<Ssp, ClientError>), team_id: u8, username: &str, password: &str) -> Option<Self> {
@@ -60,28 +68,23 @@ impl Player {
 		let (card_tx, card_rx) = channel::<Card>(1);
 		let (server_connection, account_id) = ServerConnection::new_connection(username, password, ssp_callback).await?;
 		Some(Self {
-			player_type: PlayerType::Human(Some(Connection {server_connection: Some(server_connection), account_id, ready: false})),
-			username: String::from(username),
-			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
-			bid_tx: Some(bid_tx),
-			bid_rx: Some(bid_rx),
-			card_tx: Some(card_tx),
-			card_rx: Some(card_rx),
-			team_id
+			player_data: PlayerData::new(PlayerType::Human(Some(Connection {server_connection: Some(server_connection), account_id, ready: false})), String::from(username), Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
+			bid_tx,
+			bid_rx,
+			card_tx,
+			card_rx
 		})
 	}
+
 	pub fn new_ai(team_id: u8) -> Self {
 		let (bid_tx, bid_rx) = channel::<u8>(1);
 		let (card_tx, card_rx) = channel::<Card>(1);
 		Self {
-			player_type: PlayerType::AI,
-			username: String::from("Bot"),//TODO come up with generic name for AI
-			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
-			bid_tx: Some(bid_tx),
-			bid_rx: Some(bid_rx),
-			card_tx: Some(card_tx),
-			card_rx: Some(card_rx),
-			team_id
+			player_data: PlayerData::new(PlayerType::AI, String::from("Bot"), Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
+			bid_tx,
+			bid_rx,
+			card_tx,
+			card_rx
 		}
 	}
 	
@@ -91,70 +94,31 @@ impl Player {
 	///Ok(None) success
 	///Ok(Some) success, and PlayerType is the old info of the player
 	///Err(ServerError) error
-	pub fn update_player(&mut self, other: Self, update_client_info: bool) -> Result<Option<PlayerType>, ServerError> {
-		self.username = other.username;
-		self.hand = other.hand;
-		self.team_id = other.team_id;
-		match &mut self.player_type {
+	pub fn update_player(&mut self, data: PlayerData, update_client_info: bool) -> Result<Option<PlayerType>, ServerError> {
+		self.player_data.username = data.username;
+		self.player_data.hand = data.hand;
+		self.player_data.team_id = data.team_id;
+		match &mut self.player_data.player_type {
 			PlayerType::Human(Some(this_client)) => {
-				if let PlayerType::Human(Some(other_client)) = other.player_type {
+				if let PlayerType::Human(Some(other_client)) = data.player_type {
 					if update_client_info {
 						this_client.account_id = other_client.account_id;
 						this_client.ready = other_client.ready;
 					}
 					Ok(None)
 				} else {
-					Ok(Some(mem::replace(&mut self.player_type, other.player_type)))
+					Ok(Some(mem::replace(&mut self.player_data.player_type, data.player_type)))
 				}
 			}
 			PlayerType::AI => {
-				self.player_type = other.player_type;
+				self.player_data.player_type = data.player_type;
 				Ok(None)
 			}
 			PlayerType::Human(None) => {unreachable!("You should not be using the network in a singleplayer game")}
 		}
 	}
 	
-	pub fn can_follow(&self, lead: Suit) -> bool { self.hand.iter().any(|card| {card.suit == lead}) }
-}
-
-impl Encode for Player {
-	fn encode<__E: Encoder>(&self, encoder: &mut __E) -> Result<(), EncodeError> {
-		Encode::encode(&self.player_type, encoder)?;
-		Encode::encode(&self.username, encoder)?;
-		Encode::encode(&self.hand, encoder)?;
-		//Don't encode bid or card senders and receivers
-		Encode::encode(&self.team_id, encoder)?;
-		Ok(())
-	}
-}
-impl Decode for Player {
-	fn decode<__D: Decoder>(decoder: &mut __D) -> Result<Self, DecodeError> {
-		Ok(Self {
-			player_type: Decode::decode(decoder)?,
-			username: Decode::decode(decoder)?,
-			hand: Decode::decode(decoder)?,
-			bid_tx: None,
-			bid_rx: None,
-			card_tx: None,
-			card_rx: None,
-			team_id: Decode::decode(decoder)?,
-		})
-	}
-}
-impl<'__de> BorrowDecode<'__de> for Player {
-	fn borrow_decode<__D: BorrowDecoder<'__de>>(decoder: &mut __D) -> Result<Self, DecodeError> {
-		Ok(Self {
-			player_type: BorrowDecode::borrow_decode(decoder)?,
-			username: BorrowDecode::borrow_decode(decoder)?,
-			hand: BorrowDecode::borrow_decode(decoder)?,
-			bid_tx: None,
-			bid_rx: None,
-			card_tx: None,
-			card_rx: None,
-			team_id: BorrowDecode::borrow_decode(decoder)?,
-		})
-	}
+	pub fn can_follow(&self, lead: Suit) -> bool { self.player_data.hand.iter().any(|card| {card.suit == lead}) }
 }
 
 #[repr(u8)]
@@ -195,12 +159,12 @@ impl Connection {
 	}
 	
 	///Host-only
-	pub async fn send_player(&mut self, player: Player, index: u8) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Player(player, index), self.account_id)).await
+	pub async fn send_player(&mut self, player_data: PlayerData, index: u8) -> Result<(), Error> {
+		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Player(player_data, index), self.account_id)).await
 	}
 	
 	///Host-only
-	pub async fn send_players(&mut self, players: Vec<Player>) -> Result<(), Error> {
+	pub async fn send_players(&mut self, players: Vec<PlayerData>) -> Result<(), Error> {
 		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Players(players), self.account_id)).await
 	}
 	
@@ -243,7 +207,7 @@ impl<'__de> BorrowDecode<'__de> for Connection {
 	}
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Debug)]
+#[derive(Encode, Decode, Clone, Copy, PartialEq, Debug)]
 pub struct Card {pub suit: Suit, pub number: u8}
 impl Display for Card {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -352,4 +316,28 @@ pub struct RoundScores {
 	pub game_team_id: Option<u8>,
 	pub team_game_scores: Vec<u8>,
 	pub team_scores: Vec<i8>
+}
+
+///Events that can be sent from the game to the player.
+///The game will emit these events in singleplayer.
+///In multiplayer, the TCP stream will receive [Ssp] messages from the server, which may contain these events.
+#[derive(Encode, Decode, Debug)]
+#[repr(u8)]
+pub enum GameEvent {
+	///Index player bid the amount
+	PlayerBid{index: u8, amount: u8},
+	///Index player played the card
+	PlayerPlayedCard{index: u8, card: Card},
+	///It is now index player's turn. This should be sent to every player except the one whose turn it is.
+	PlayerTurn{index: u8},
+	///It is now index player's turn to bid. This should only be sent to the player whose turn it is.
+	PromptBid{index: u8},
+	///It is now index player's turn to play a card. This should only be sent to the player whose turn it is.
+	PromptCard{index: u8},
+	///The round is over, and the scores of the round are given for each team
+	RoundScores(RoundScores),
+	///The game is over, and the scores of the round are given for each team
+	GameOver(RoundScores),
+	///The game has encountered an error
+	GameError(ServerError)
 }

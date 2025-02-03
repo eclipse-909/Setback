@@ -1,11 +1,11 @@
 use {
 	super::resources::{
 		game::{Game, TurnResult},
-		game_items::{Player, PlayerType, Card, RoundScores},
+		game_items::{Player, PlayerType, Card, RoundScores, GameEvent},
 		util::ServerError
 	},
 	tokio::{
-		sync::mpsc::Sender,
+		sync::mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel, Sender},
 		task::JoinHandle
 	},
 	tokio_util::sync::CancellationToken
@@ -16,8 +16,7 @@ use {
 ///[GameBuilder::start_game] moves this into the function and starts the event loop.
 #[derive(Default)]
 pub struct GameBuilder {
-	game: Game,
-	senders: Vec<(Sender<u8>, Sender<Card>)>
+	pub game: Game //TODO I probably don't need to wrap Game with GameBuilder, but the intention is probably clearer this way
 }
 
 impl GameBuilder {
@@ -27,7 +26,7 @@ impl GameBuilder {
 	
 	///Updates a player's status as AI or human.
 	pub fn set_player(&mut self, index: u8, human: bool) {
-		self.game.players[index as usize].player_type = if human {PlayerType::Human(None)} else {PlayerType::AI};
+		self.game.players[index as usize].player_data.player_type = if human {PlayerType::Human(None)} else {PlayerType::AI};
 	}
 	
 	///Makes this player type a networked client.
@@ -43,112 +42,95 @@ impl GameBuilder {
 	}
 	
 	///Initializes any remaining data and starts the game loop.
-	///If it returns Some, all other communication should be handled in the callbacks.
-	///The return value is the join handle to the task the event loop is running on, so you can await it, and a cancellation token.
-	///
-	///[prompt_bid_callback] Blocking sync function where the player is given the bid sender to make a bid. Also informs them of the cards in their hand.
-	///
-	///[prompt_card_callback] Blocking sync function where the player is given the card sender to play a card. Also informs them of the cards in their hand.
-	///
-	///[bid_callback] Notifies you what an AI has bid. It will already be the next player's turn when you receive this.
-	///
-	///[play_card_callback] Notifies you what card an AI has played. It will already be the next player's turn when you receive this.
-	///
-	///[next_turn_callback] Notifies you whose turn it is and whether they're bidding.
-	///
-	///[scores_callback] Notifies you when the round has ended and what the scores of the round are. It will already be the next player's turn when you receive this.
-	///
-	///[game_over_callback] Notifies you when the game is over.
-	///
-	///[error_callback] Notifies you if there's an unrecoverable error during the game loop.
-	pub fn start_game(
-		mut self,
-		prompt_bid_callback: fn(hand: &[Card], sender: &Sender<u8>),
-		prompt_card_callback: fn(hand: &[Card], sender: &Sender<Card>),
-		bid_callback: fn(index: u8, bid: u8),
-		play_card_callback: fn(index: u8, card: Card),
-		next_turn_callback: fn(index: u8, bidding: bool),
-		scores_callback: fn(scores: RoundScores),
-		game_over_callback: fn(),
-		error_callback: fn(error: ServerError)
-	) -> Option<(JoinHandle<()>, CancellationToken)> {
-		if !self.game.start_game() {return None;}
-		for player in self.game.players.iter_mut() {
-			let bid_tx: Sender<u8> = player.bid_tx.take()?;
-			let card_tx: Sender<Card> = player.card_tx.take()?;
-			self.senders.push((bid_tx, card_tx));
-		}
-		if self.game.deal_cards().is_err() {return None;}
+	///Further communication between the game and the players is handled through the returned [GameRuntime].
+	pub fn start_game(mut self) -> GameRuntime {
+		self.game.start_game();
+		self.game.deal_cards();
 		let token: CancellationToken = CancellationToken::new();
 		let cloned_token: CancellationToken = token.clone();
+		let (event_tx, event_rx) = unbounded_channel::<GameEvent>();
+		let senders: Vec<(Sender<u8>, Sender<Card>)> = self.game.players
+			.iter()
+			.map(|player| {
+				(player.bid_tx.clone(), player.card_tx.clone())
+			})
+			.collect();
 		//spawn_local because self.game doesn't implement Send
-		Some((tokio::task::spawn_local(async move {tokio::select! {
+		GameRuntime {handle: tokio::task::spawn_local(async move {tokio::select! {
 			_ = async move {
 				let mut turn_result: Result<TurnResult, ServerError> = Ok(TurnResult::NextTurn);
-				next_turn_callback(self.game.game_data.turn_index, self.game.game_data.turn_number == 0);
 				loop {
 					match turn_result {
 						Ok(TurnResult::NextTurn) => {
 							let index: u8 = self.game.game_data.turn_index;
 							let ai: bool = self.game.is_ai_turn();
-							if self.game.game_data.turn_number == 0 {
+							let bidding: bool = self.game.game_data.turn_number == 0;
+							event_tx.send(GameEvent::PlayerTurn{index}).unwrap();
+							if bidding {
 								let bid: u8 = if ai {
 									let b: u8 = self.game.ai_bid();
 									assert!(self.game.validate_bid(b));
 									b
 								} else {
-									prompt_bid_callback(&self.game.players[index as usize].hand, &self.senders[index as usize].0);
-									let mut b: u8 = self.game.players[index as usize].bid_rx.as_mut().unwrap().recv().await.unwrap();
+									event_tx.send(GameEvent::PromptBid{index}).unwrap();
+									let mut b: u8 = self.game.players[index as usize].bid_rx.recv().await.unwrap();
 									while !self.game.validate_bid(b) {
-										error_callback(ServerError::InvalidBid);
-										prompt_bid_callback(&self.game.players[index as usize].hand, &self.senders[index as usize].0);
-										b = self.game.players[index as usize].bid_rx.as_mut().unwrap().recv().await.unwrap();
+										event_tx.send(GameEvent::GameError(ServerError::InvalidBid)).unwrap();
+										event_tx.send(GameEvent::PromptBid{index}).unwrap();
+										b = self.game.players[index as usize].bid_rx.recv().await.unwrap();
 									}
 									b
 								};
 								turn_result = self.game.next_turn();
-								bid_callback(index, bid);
+								event_tx.send(GameEvent::PlayerBid {index, amount: bid}).unwrap();
 							} else {
-								if ai {
-									self.senders[index as usize].1.send(self.game.ai_play_card()).await.unwrap();
+								let card: Card = if ai {
+									let c: Card = self.game.ai_play_card();
+									assert!(self.game.validate_card(c));
+									c
 								} else {
-									prompt_card_callback(&self.game.players[index as usize].hand, &self.senders[index as usize].1);
-								}
-								let mut card: Card = self.game.players[index as usize].card_rx.as_mut().unwrap().recv().await.unwrap();
-								while !self.game.validate_card(card.clone()) {
-									error_callback(ServerError::InvalidCard);
-									prompt_card_callback(&self.game.players[index as usize].hand, &self.senders[index as usize].1);
-									card = self.game.players[index as usize].card_rx.as_mut().unwrap().recv().await.unwrap();
-								}
+									event_tx.send(GameEvent::PromptCard{index}).unwrap();
+									let mut c: Card = self.game.players[index as usize].card_rx.recv().await.unwrap();
+									while !self.game.validate_card(c) {
+										event_tx.send(GameEvent::GameError(ServerError::InvalidCard)).unwrap();
+										event_tx.send(GameEvent::PromptCard{index}).unwrap();
+										c = self.game.players[index as usize].card_rx.recv().await.unwrap();
+									}
+									c
+								};
 								turn_result = self.game.next_turn();
-								play_card_callback(index, card);
+								event_tx.send(GameEvent::PlayerPlayedCard{index, card}).unwrap();
 							}
-							next_turn_callback(self.game.game_data.turn_index, self.game.game_data.turn_number == 0);
 						}
 						Ok(TurnResult::ReDeal) => {
-							if let Err(error) = self.game.deal_cards() {
-								return error_callback(error);
-							}
+							self.game.deal_cards();
 							turn_result = Ok(TurnResult::NextTurn);
 						}
 						Ok(TurnResult::EndRound(scores)) => {
-							if let Err(error) = self.game.deal_cards() {
-								return error_callback(error);
-							}
+							self.game.deal_cards();
 							turn_result = Ok(TurnResult::NextTurn);
-							scores_callback(scores);
+							event_tx.send(GameEvent::RoundScores(scores)).unwrap();
 						}
 						Ok(TurnResult::GameOver(scores)) => {
-							scores_callback(scores);
-							return game_over_callback();
+							return event_tx.send(GameEvent::GameOver(scores)).unwrap();
 						}
 						Err(error) => {
-							return error_callback(error);
+							return event_tx.send(GameEvent::GameError(error)).unwrap();
 						}
 					}
 				}
 			} => {}
 			_ = cloned_token.cancelled() => {}
-		}}), token))
+		}}), cancel_token: token, event_emitter: event_rx, prompt_senders: senders}
 	}
+}
+
+///A struct to handle communication between the game and the players.
+///
+///[GameBuilder::start_game] moves the game into the function and starts the event loop.
+pub struct GameRuntime {
+	pub handle: JoinHandle<()>,
+	pub cancel_token: CancellationToken,
+	pub event_emitter: UnboundedReceiver<GameEvent>,
+	pub prompt_senders: Vec<(Sender<u8>, Sender<Card>)>
 }

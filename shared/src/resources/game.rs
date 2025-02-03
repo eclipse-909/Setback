@@ -73,7 +73,7 @@ impl Game {
 		if self.pile.len() == self.players.len() {
 			//when the turn is over
 			//give pile to owning team
-			self.game_data.teams[self.players[self.pile_owner as usize].team_id as usize].pile.append(&mut self.pile);
+			self.game_data.teams[self.players[self.pile_owner as usize].player_data.team_id as usize].pile.append(&mut self.pile);
 			self.game_data.turn_index = self.pile_owner;
 			self.game_data.turn_number += 1;
 			if self.game_data.turn_number == 7 {
@@ -98,11 +98,11 @@ impl Game {
 	}
 	
 	///Initializes team and card data. The caller must deal the cards after this function has been called.
-	pub fn start_game(&mut self) -> bool {
+	pub fn start_game(&mut self) {
 		//consolidate teams so the team_ids match indices contiguously starting at 0
 		let mut team_ids: HashMap<u8, u8> = HashMap::with_capacity(self.players.len());
 		for player in self.players.iter() {
-			team_ids.entry(player.team_id).or_insert(0);
+			team_ids.entry(player.player_data.team_id).or_insert(0);
 		}
 		//create team objects in the game data
 		for _ in 0..team_ids.len() {
@@ -114,8 +114,8 @@ impl Game {
 			**new_id = index as u8;
 		}
 		for player in self.players.iter_mut() {
-			let Some(new_id) = team_ids.get(&player.team_id) else {continue;};
-			player.team_id = *new_id;
+			let Some(new_id) = team_ids.get(&player.player_data.team_id) else {continue;};
+			player.player_data.team_id = *new_id;
 		}
 		//create deck of 52
 		for number in 2..=A {
@@ -124,7 +124,6 @@ impl Game {
 			}
 		}
 		shuffle(&mut self.deck);
-		true
 	}
 	
 	///Caller must deal cards for next round after this function is called.
@@ -170,7 +169,7 @@ impl Game {
 		if let Some(index) = game_index {
 			round_scores.entry(index).and_modify(|score| {*score += 1;}).or_insert(1);
 		}
-		round_scores.entry(self.players[self.highest_bidder as usize].team_id).and_modify(|bidder_score| {
+		round_scores.entry(self.players[self.highest_bidder as usize].player_data.team_id).and_modify(|bidder_score| {
 			if *bidder_score < self.highest_bid as i8 {
 				*bidder_score = -(self.highest_bid as i8);
 			}
@@ -197,7 +196,7 @@ impl Game {
 		})
 	}
 	
-	pub fn deal_cards(&mut self) -> Result<(), ServerError> {
+	pub fn deal_cards(&mut self) {
 		//reset game data
 		self.highest_bid = 0;
 		self.game_data.turn_number = 0;
@@ -208,7 +207,7 @@ impl Game {
 		//collect cards and shuffle
 		self.deck.append(&mut self.pile);
 		for player in self.players.iter_mut() {
-			self.deck.append(&mut player.hand);
+			self.deck.append(&mut player.player_data.hand);
 		}
 		for team in self.game_data.teams.iter_mut() {
 			self.deck.append(&mut team.pile);
@@ -218,15 +217,14 @@ impl Game {
 		for _ in 0..2 {
 			for player in self.players.iter_mut() {
 				for card in draw3(&mut self.deck) {
-					player.hand.push(card);
+					player.player_data.hand.push(card);
 				}
 			}
 		}
-		Ok(())
 	}
 	
 	///Which ever player's turn it currently is, this checks if that player is an AI.
-	pub fn is_ai_turn(&self) -> bool {matches!(self.players[self.game_data.turn_index as usize].player_type, PlayerType::AI)}
+	pub fn is_ai_turn(&self) -> bool {matches!(self.players[self.game_data.turn_index as usize].player_data.player_type, PlayerType::AI)}
 	
 	///Validates the bid and updates game state. Returns early if the bid was invalid. Call [Self::next_turn] after this.
 	pub fn validate_bid(&mut self, bid: u8) -> bool {
@@ -243,7 +241,7 @@ impl Game {
 	///Returns early if the card played is invalid. Call [Self::next_turn] after this.
 	pub fn validate_card(&mut self, card: Card) -> bool {
 		let player: &mut Player = &mut self.players[self.game_data.turn_index as usize];
-		let Some(card_index) = player.hand.iter().position(|c| {*c == card}) else {return false;};
+		let Some(card_index) = player.player_data.hand.iter().position(|c| {*c == card}) else {return false;};
 		//update game state
 		if self.pile.is_empty() {
 			//the first card played of the turn
@@ -265,7 +263,7 @@ impl Game {
 			}
 		}
 		//put card on pile
-		self.pile.push(player.hand.remove(card_index));
+		self.pile.push(player.player_data.hand.remove(card_index));
 		true
 	}
 	
@@ -276,7 +274,7 @@ impl Game {
 		for suit in Suit::iter() {
 			suit_points.insert(suit, 0);
 		}
-		for card in player.hand.iter() {
+		for card in player.player_data.hand.iter() {
 			let Some(points) = suit_points.get_mut(&card.suit) else {continue;};
 			*points += match card.number {
 				2 => {10}
@@ -324,7 +322,7 @@ impl Game {
 		//if opponents are about to win, make risky bids
 		if let Some((index, lead_team)) = self.game_data.teams.iter().enumerate().max_by(|(_, team1), (_, team2)| {team1.score.cmp(&team2.score)}) {
 			let player: &Player = &self.players[self.game_data.turn_index as usize];
-			if player.team_id != index as u8 && lead_team.score >= self.meta_data.max_score - 4 && self.game_data.teams[player.team_id as usize].score < self.meta_data.max_score - 4 && bid != 4 {
+			if player.player_data.team_id != index as u8 && lead_team.score >= self.meta_data.max_score - 4 && self.game_data.teams[player.player_data.team_id as usize].score < self.meta_data.max_score - 4 && bid != 4 {
 				bid += 1;
 			}
 		}
@@ -339,15 +337,14 @@ impl Game {
 		//Highest bidder starts the round, and the leading card is a unique calculation
 		if self.game_data.turn_number == 1 && self.pile.is_empty() {
 			let (suit, _) = self.ai_eval_bid();//Suit of highest bid should not have changed, so we will just recalculate it instead of storing it
-			let highest: Card = player.hand.iter().filter(|card| {card.suit == suit}).max_by(|card1, card2| {card1.number.cmp(&card2.number)}).unwrap().clone();
+			let highest: Card = player.player_data.hand.iter().filter(|card| {card.suit == suit}).max_by(|card1, card2| {card1.number.cmp(&card2.number)}).unwrap().clone();
 			return highest;
 		}
 		let playable_card: Vec<Card> = if !self.pile.is_empty() && player.can_follow(self.game_data.lead) {
-			player.hand.iter().filter(|card| {card.suit == self.game_data.lead || card.suit == self.game_data.trump}).cloned().collect()
+			player.player_data.hand.iter().filter(|card| {card.suit == self.game_data.lead || card.suit == self.game_data.trump}).cloned().collect()
 		} else {
-			player.hand.clone()
+			player.player_data.hand.clone()
 		};
-		
 		
 		//For now I'm gonna get a random card
 		let mut rng: ThreadRng = rng();

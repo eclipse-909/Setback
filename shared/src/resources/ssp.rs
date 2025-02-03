@@ -1,7 +1,7 @@
 use {
 	super::{
 		util::{ServerError, ClientError},
-		game_items::{Card, Player, GameFilter, GameMeta, GameData, RoundScores}
+		game_items::{Card, PlayerData, GameFilter, GameMeta, GameData, RoundScores}
 	},
 	bincode::{
 		Decode,
@@ -57,41 +57,41 @@ pub enum Protocol {
 	///There is a small window between the client connecting and the client sending a SyncID message.
 	///If it sends, the server sends one back to verify a successful connection.
 	SyncID,
-	///Server -> Self/Game<br><br>The server detects when the client disconnects and sends this to the owner server or bevy_game
+	///Server -> Self/Game<br><br>The server detects when the client disconnects and sends this to the owner server or game
 	///so the client can be removed from its owning collection. Client never interacts with this protocol.
 	Disconnect,
 	///Server/Game -> Client<br><br>Any time the server has an error. Used as response only.
 	ServerErr(ServerError),
 	///Client -> Self<br><br>Any time the client has an error. Not sent over internet. Used to notify client of problem and disconnect.
 	ClientErr(ClientError),
-	///Client -> Server<br><br>Client creates bevy_game. Responds with Game if successful or Error otherwise.
+	///Client -> Server<br><br>Client creates game. Responds with Game if successful or Error otherwise.
 	CreateGame,
-	///Client -> Server<br><br>Client joins bevy_game. Responds with Game if successful or Error otherwise.
+	///Client -> Server<br><br>Client joins game. Responds with Game if successful or Error otherwise.
 	JoinGame(u32),
 	///Client -> Server<br><br>Client sends a filter used for the server to send back a list of matching GameMetas.
 	///Responds with GameMetas if successful or Error otherwise.
 	SearchGames(GameFilter),
-	///Server -> Client<br><br>Server sends bevy_game info when client joins.
+	///Server -> Client<br><br>Server sends game info when client joins.
 	///Used as response only.
-	Game(GameMeta, Vec<Player>),
-	///Host-Client -> Game -> Client<br><br>Host can update the settings in the lobby which gets sent to the bevy_game.
-	///The bevy_game updates its state and propagates the message to all other clients. No response. May receive spontaneously.
+	Game(GameMeta, Vec<PlayerData>),
+	///Host-Client -> Game -> Client<br><br>Host can update the settings in the lobby which gets sent to the game.
+	///The game updates its state and propagates the message to all other clients. No response. May receive spontaneously.
 	GameMeta(GameMeta),
 	///Server -> Client<br><br>Server sends a list of games. Max list length is 253. Used as response only.
 	GameMetas(Vec<GameMeta>),
 	///Host-Client -> Game -> Client<br><br>When the host changes information about a particular player.
 	///This sends the updated player info and its index. No response. May receive spontaneously.
-	Player(Player, u8),
+	Player(PlayerData, u8),
 	///Host-Client -> Game -> Client<br><br>When information about multiple players changes or the number of players changes.
 	///No response. May receive spontaneously.
-	Players(Vec<Player>),
-	///Client <-> Game<br><br>The clients need to ready-up. The bevy_game updates the state and propagates it to all other clients.
+	Players(Vec<PlayerData>),
+	///Client <-> Game<br><br>The clients need to ready-up. The game updates the state and propagates it to all other clients.
 	///No response. May receive spontaneously.
 	Ready(bool),
-	///Client <-> Game<br><br>The clients bid before the rounds. The bevy_game updates the state and propagates it to all other clients.
+	///Client <-> Game<br><br>The clients bid before the rounds. The game updates the state and propagates it to all other clients.
 	///No response. May receive spontaneously.
 	Bid(u8),
-	///Client <-> Game<br><br>The client plays a card on their turn. The bevy_game updates the state and propagates it to all other clients.
+	///Client <-> Game<br><br>The client plays a card on their turn. The game updates the state and propagates it to all other clients.
 	///No response. May receive spontaneously.
 	PlayCard(Card),
 	///Game -> Client<br><br>Game tells clients when countdown ends. No response.
@@ -103,6 +103,6 @@ pub enum Protocol {
 	DealCards,
 	///Game -> Client<br><br>Tells clients which teams won which points in the round. No response. Receive every time a round ends.
 	RoundScores(RoundScores),
-	///Game -> Client<br><br>Tells clients when the bevy_game is over. No response. Receive when the bevy_game is over and terminated.
+	///Game -> Client<br><br>Tells clients when the game is over. No response. Receive when the game is over and terminated.
 	GameOver
 }
