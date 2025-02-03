@@ -1,3 +1,5 @@
+import {StandardButton} from "std-widgets.slint";
+
 // game/ui/components.slint
 
 export global Palette {
@@ -35,18 +37,17 @@ export component BaseText {
 export component StylizedButton {
     in property <string> text;
     in property <length> font-size: 16px;
-    in property <length> button_width: 450px;
-    in property <length> button_height: font-size * 2;
+	width: 450px;
+	height: font-size * 2;
     in property <bool> enabled: true;
     callback clicked;
 
     Rectangle {
-        width: root.button_width;
-        height: root.button_height;
+        width: root.width;
+        height: root.height;
         background: root.enabled ? #18181840 : #18181820;
-        border-radius: root.button_height / 4;
+        border-radius: root.height / 4;
         border-width: 2px;
-
         border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
 
         touchArea := TouchArea {
@@ -151,14 +152,14 @@ export component StylizedSlider {
     in property <float> maximum: 100;
     in property <float> step: 1;
     in-out property <float> value;
-    in property <length> slider_width: 200px;
-    in property <length> slider_height: 24px;
+	width: 200px;
+	height: 24px;
     in property <bool> enabled: true;
     callback changed(float);
 
     Rectangle {
-        width: root.slider_width;
-        height: root.slider_height;
+        width: root.width;
+        height: root.height;
 
         // Track
         Rectangle {
@@ -171,8 +172,8 @@ export component StylizedSlider {
 
         // Handle
         handle := Rectangle {
-            width: root.slider_height;
-            height: root.slider_height;
+            width: root.height;
+            height: root.height;
             x: (root.value - root.minimum) / (root.maximum - root.minimum) 
                 * (parent.width - self.width);
             background: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
@@ -202,103 +203,79 @@ export component StylizedSlider {
     }
 }
 
-// Custom dropdown with animation and styling
-export component StylizedDropdown {
+export component StylizedComboBox inherits Rectangle {
+    in-out property <string> value;
     in property <[string]> choices;
-    in property <string> selected;
-    in property <bool> enabled: true;
-    in property <length> dropdown_width: 200px;
-    in property <length> dropdown_height: 32px;
-    callback selected-changed(string);
+	in property <bool> enabled <=> button.enabled;
 
-    Rectangle {
-        width: root.dropdown_width;
-        height: root.dropdown_height + (popup.visible ? popup.height + 4px : 0px);
+	callback selected(choice: string);
 
-        // Main button
+    border-radius: 3px;
+    border-width: 2px;
+    border-color: Palette.Orange;
+    height: 32px;
+    min-width: label.x + label.width + i.width;
+    horizontal-stretch: 1;
+
+    label := BaseText {
+		vertical-alignment: center;
+        horizontal-alignment: left;
+        text <=> root.value;
+        height: 100%;
+        x: 12px;
+		font-size: root.height * 0.6;
+	}
+
+    i := Image {
+        source: @image-url("../assets/images/dropdown-arrow.png");
+        colorize: Palette.Orange;
+        height: 40%;
+        width: self.height;
+        image-fit: contain;
+        x: parent.width - self.width - self.y;
+        y: (parent.height - self.height)/2;
+    }
+
+    button :=TouchArea {
+        clicked => { popup.show(); }
+
+        width: 100%;
+        height: 100%;
+    }
+
+    popup := PopupWindow {
+        x:0;
+        y: root.height;
+        width: root.width;
+
         Rectangle {
-            width: root.dropdown_width;
-            height: root.dropdown_height;
-            background: root.enabled ? #18181840 : #18181820;
-            border-radius: self.height / 4;
-            border-width: 2px;
-
-            border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
-
-            HorizontalLayout {
-                padding: root.dropdown_height / 4;
-                spacing: root.dropdown_height / 4;
-
-                BaseText {
-                    text: root.selected;
-                    font-size: root.dropdown_height * 0.6;
-                    vertical-alignment: center;
-                }
-
-                Rectangle {
-                    width: root.dropdown_height / 2;
-                    Image {
-                        source: @image-url("../assets/images/dropdown-arrow.png");
-                        width: parent.width;
-                        height: parent.width;
-                        rotation-angle: popup.visible ? 180deg : 0deg;
-                        animate rotation-angle { duration: 200ms; easing: ease; }
-                    }
-                }
-            }
-
-            touchArea := TouchArea {
-                enabled: root.enabled;
-                clicked => {
-                    popup.visible = !popup.visible;
-                }
-            }
-
-
-            states [
-                pressed when root.enabled && touchArea.pressed: {
-                    background: #18181880;
-                    border-color: Palette.Orange.darker(0.2);
-                }
-                hover when root.enabled && touchArea.has-hover: {
-                    background: #18181860;
-                    touchArea.mouse-cursor: pointer;
-                }
-            ]
-        }
-
-        // Dropdown popup
-        popup := Rectangle {
-            visible: false;
-            y: root.dropdown_height + 4px;
-            width: root.dropdown_width;
-            height: choices.length * 32px;
             background: #181818e0;
-            border-radius: 8px;
+            border-radius: 3px;
             border-width: 2px;
             border-color: Palette.Orange;
-            clip: true;
+        }
 
-            for choice[index] in root.choices : Rectangle {
-                y: index * 32px;
-                width: parent.width;
-                height: 32px;
-                background: ta.has-hover ? #18181880 : transparent;
+        VerticalLayout {
+            spacing: 6px;
+            padding: 3px;
 
-                BaseText {
-                    text: choice;
-                    font-size: 16px;
-                    x: root.dropdown_height / 4;
-                    vertical-alignment: center;
+            for value[idx] in root.choices: Rectangle {
+                border-radius: 3px;
+                background: item-area.has-hover ? Palette.Orange : #0000;
+
+                HorizontalLayout {
+                    Text {
+                        text: value;
+                        color: item-area.has-hover ? Palette.Orange : Palette.Orange;
+                        font-size: 16px;
+                    }
                 }
 
-                ta := TouchArea {
+                item-area := TouchArea {
                     clicked => {
-                        root.selected-changed(choice);
-                        popup.visible = false;
+                        root.value = value;
+						root.selected(value);
                     }
-
-                    mouse-cursor: pointer;
                 }
             }
         }
@@ -308,8 +285,10 @@ export component StylizedDropdown {
 // Tab view component for settings
 export component StylizedTabView {
     in property <[string]> tabs;
-    in property <int> active-tab: 0;
-    callback tab-changed(int);
+    in-out property <int> active-tab: 0;
+	function tab-changed(index: int) {
+		root.active-tab = index;
+	}
 
     VerticalLayout {
         // Tab headers
@@ -361,7 +340,6 @@ export component StylizedTabView {
 
 // Custom number input (spinbox replacement)
 export component StylizedSpinBox {
-	in property <length> spin_box_height;
     in property <int> minimum;
     in property <int> maximum;
     in property <int> step: 1;
@@ -375,8 +353,8 @@ export component StylizedSpinBox {
 
         // Decrease button
         Rectangle {
-            width: root.spin_box_height;
-            height: root.spin_box_height;
+            width: 100%;
+            height: 100%;
             background: root.enabled ? #18181840 : #18181820;
             border-radius: self.height / 4;
             border-width: 2px;
@@ -384,7 +362,7 @@ export component StylizedSpinBox {
 
             BaseText {
                 text: "-";
-                font-size: root.spin_box_height * 0.6;
+                font-size: root.height * 0.6;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -396,7 +374,6 @@ export component StylizedSpinBox {
                     root.changed(root.value);
                 }
             }
-
 
             states [
                 pressed when root.enabled && decreaseTouchArea.pressed: {
@@ -421,7 +398,7 @@ export component StylizedSpinBox {
 
             BaseText {
                 text: root.value;
-                font-size: root.spin_box_height * 0.6;
+                font-size: root.height * 0.6;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -429,8 +406,8 @@ export component StylizedSpinBox {
 
         // Increase button
         Rectangle {
-            width: root.spin_box_height;
-            height: root.spin_box_height;
+            width: 100%;
+            height: 100%;
             background: root.enabled ? #18181840 : #18181820;
             border-radius: self.height / 4;
             border-width: 2px;
@@ -438,7 +415,7 @@ export component StylizedSpinBox {
 
             BaseText {
                 text: "+";
-                font-size: root.spin_box_height * 0.6;
+                font-size: root.height * 0.6;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -472,14 +449,14 @@ export component Card {
     in property <bool> face-up: true;
     in property <bool> enabled: true;
     in property <bool> draggable: false;
-    in property <length> card_width: 100px;
+	width: 100px;
     callback clicked;
     callback drag-started;
     callback drag-ended;
 
     Rectangle {
-        width: root.card_width;
-        height: root.card_width * 1.4;
+        width: root.width;
+        height: root.width * 1.4;
 
         // Card face
         if root.face-up : Image {
@@ -720,4 +697,27 @@ export component PlayerDisplay {
             }
         ]
     }
+}
+
+export component ConfirmationDialog inherits Dialog {
+    in property <string> message;
+    callback confirmed;
+    callback cancelled;
+
+    title: "Confirm";
+
+    VerticalLayout {
+        alignment: center;
+        padding: 20px;
+
+        BaseText {
+            text: root.message;
+            font-size: 20px;
+            horizontal-alignment: center;
+            wrap: true;
+        }
+    }
+
+    StandardButton { kind: ok; clicked => { root.confirmed(); } }
+    StandardButton { kind: cancel; clicked => { root.cancelled(); } }
 }
