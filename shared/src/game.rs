@@ -1,11 +1,12 @@
 use {
 	super::resources::{
 		game::{Game, TurnResult},
-		game_items::{Player, PlayerType, Card, RoundScores, GameEvent},
-		util::ServerError
+		game_items::{Player, PlayerType, Card, GameEvent},
+		util::ServerError,
+		connection::ClientConnection
 	},
 	tokio::{
-		sync::mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel, Sender},
+		sync::mpsc::{UnboundedReceiver, unbounded_channel, Sender},
 		task::JoinHandle
 	},
 	tokio_util::sync::CancellationToken
@@ -20,18 +21,23 @@ pub struct GameBuilder {
 }
 
 impl GameBuilder {
-	pub fn add_player(&mut self, human: bool, team_id: u8) {
-		self.game.players.push(if human {Player::new_human(String::new(), team_id)} else {Player::new_ai(team_id)});
+	pub fn add_ai(&mut self, team_id: u8) {
+		self.game.players.push(Player::new_ai(team_id));
 	}
 	
-	///Updates a player's status as AI or human.
-	pub fn set_player(&mut self, index: u8, human: bool) {
-		self.game.players[index as usize].player_data.player_type = if human {PlayerType::Human(None)} else {PlayerType::AI};
+	///Updates a player's status as AI or human. This should only be called by the server.
+	pub fn update_human(&mut self, index: u8, human: bool) {
+		self.game.players[index as usize].player_data.player_type.set(if human {PlayerType::HumanEmpty} else {PlayerType::AI});
+	}
+
+	///Updates a player's team.
+	pub fn update_team(&mut self, index: u8, team_id: u8) {
+		self.game.players[index as usize].player_data.team_id = team_id;
 	}
 	
-	///Makes this player type a networked client.
-	pub fn set_client(&mut self, index: u8) {
-		todo!()
+	///Makes this player type a networked client. This should only be called by the server.
+	pub fn set_client(&mut self, index: u8, connection: ClientConnection) {
+		self.game.players[index as usize].player_data.player_type.set(PlayerType::HumanConnection(connection));
 	}
 	
 	///Removes a player from the list, and reinserts it at the given index, sliding the remaining players if necessary.
@@ -72,11 +78,11 @@ impl GameBuilder {
 									assert!(self.game.validate_bid(b));
 									b
 								} else {
-									event_tx.send(GameEvent::PromptBid{index}).unwrap();
+									event_tx.send(GameEvent::PromptBid{index, hand: self.game.players[index as usize].player_data.hand.clone()}).unwrap();
 									let mut b: u8 = self.game.players[index as usize].bid_rx.recv().await.unwrap();
 									while !self.game.validate_bid(b) {
 										event_tx.send(GameEvent::GameError(ServerError::InvalidBid)).unwrap();
-										event_tx.send(GameEvent::PromptBid{index}).unwrap();
+										event_tx.send(GameEvent::PromptBid{index, hand: self.game.players[index as usize].player_data.hand.clone()}).unwrap();
 										b = self.game.players[index as usize].bid_rx.recv().await.unwrap();
 									}
 									b
@@ -89,11 +95,11 @@ impl GameBuilder {
 									assert!(self.game.validate_card(c));
 									c
 								} else {
-									event_tx.send(GameEvent::PromptCard{index}).unwrap();
+									event_tx.send(GameEvent::PromptCard{index, hand: self.game.players[index as usize].player_data.hand.clone()}).unwrap();
 									let mut c: Card = self.game.players[index as usize].card_rx.recv().await.unwrap();
 									while !self.game.validate_card(c) {
 										event_tx.send(GameEvent::GameError(ServerError::InvalidCard)).unwrap();
-										event_tx.send(GameEvent::PromptCard{index}).unwrap();
+										event_tx.send(GameEvent::PromptCard{index, hand: self.game.players[index as usize].player_data.hand.clone()}).unwrap();
 										c = self.game.players[index as usize].card_rx.recv().await.unwrap();
 									}
 									c
@@ -111,8 +117,9 @@ impl GameBuilder {
 							turn_result = Ok(TurnResult::NextTurn);
 							event_tx.send(GameEvent::RoundScores(scores)).unwrap();
 						}
-						Ok(TurnResult::GameOver(scores)) => {
-							return event_tx.send(GameEvent::GameOver(scores)).unwrap();
+						Ok(TurnResult::GameOver(round_scores, game_scores)) => {
+							event_tx.send(GameEvent::RoundScores(round_scores)).unwrap();
+							return event_tx.send(GameEvent::GameOver(game_scores)).unwrap();
 						}
 						Err(error) => {
 							return event_tx.send(GameEvent::GameError(error)).unwrap();

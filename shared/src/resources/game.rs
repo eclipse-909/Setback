@@ -89,7 +89,7 @@ impl Game {
 					}
 				}
 				if highest_score >= self.meta_data.max_score && (highest_score > second_highest_score + 1 || (!self.meta_data.win_by_2 && highest_score > second_highest_score)) {
-					return Ok(TurnResult::GameOver(scores));
+					return Ok(TurnResult::GameOver(scores, self.game_data.teams.iter().map(|team| {team.score}).collect()));
 				}
 				return Ok(TurnResult::EndRound(scores));
 			}
@@ -247,7 +247,7 @@ impl Game {
 			//the first card played of the turn
 			self.pile_owner = self.game_data.turn_index;
 			self.game_data.lead_index = self.game_data.turn_index;
-			self.highest_card = card.clone();
+			self.highest_card = card;
 			self.game_data.lead = card.suit;
 			if self.game_data.turn_number == 1 {
 				//first card played of the round
@@ -258,7 +258,7 @@ impl Game {
 			if card.suit != self.game_data.trump && card.suit != self.game_data.lead && player.can_follow(self.game_data.lead) {return false;}
 			//calculate if new owner and update game data
 			if (card.suit == self.highest_card.suit && card.number > self.highest_card.number) || (self.highest_card.suit != self.game_data.trump && card.suit == self.game_data.trump) {
-				self.highest_card = card.clone();
+				self.highest_card = card;
 				self.pile_owner = self.game_data.turn_index;
 			}
 		}
@@ -337,7 +337,7 @@ impl Game {
 		//Highest bidder starts the round, and the leading card is a unique calculation
 		if self.game_data.turn_number == 1 && self.pile.is_empty() {
 			let (suit, _) = self.ai_eval_bid();//Suit of highest bid should not have changed, so we will just recalculate it instead of storing it
-			let highest: Card = player.player_data.hand.iter().filter(|card| {card.suit == suit}).max_by(|card1, card2| {card1.number.cmp(&card2.number)}).unwrap().clone();
+			let highest: Card = *player.player_data.hand.iter().filter(|card| {card.suit == suit}).max_by(|card1, card2| {card1.number.cmp(&card2.number)}).unwrap();
 			return highest;
 		}
 		let playable_card: Vec<Card> = if !self.pile.is_empty() && player.can_follow(self.game_data.lead) {
@@ -372,7 +372,7 @@ impl Game {
 			if AI can follow, only allow follow suit or trump suit, else allow all cards
 		*/
 		
-		let card: Card = playable_card[index].clone();
+		let card: Card = playable_card[index];
 		card
 	}
 }
@@ -425,5 +425,6 @@ pub enum TurnResult {
 	ReDeal,
 	///A re-deal is required for this one too
 	EndRound(RoundScores),
-	GameOver(RoundScores)
+	///Round scores and team scores for whole game
+	GameOver(RoundScores, Vec<i8>)
 }

@@ -1,16 +1,13 @@
 use {
 	super::{
-		connection::{ServerConnection, SetbackConnection},
-		util::{ServerError, ClientError, MAX_PLAYERS},
-		ssp::{Protocol, Ssp}
+		util::{ServerError, MAX_PLAYERS},
+		connection::ClientConnection
 	},
 	std::{
-		mem,
 		array::IntoIter,
-		fmt::{Display, Debug, Formatter},
-		io::Error
+		fmt::{Display, Debug, Formatter}
 	},
-	tokio::sync::mpsc::{Sender, Receiver, channel, UnboundedSender},
+	tokio::sync::mpsc::{Sender, Receiver, channel},
 	bincode::{
 		Decode, Encode, BorrowDecode,
 		enc::Encoder,
@@ -47,13 +44,12 @@ pub struct Player {
 	pub card_rx: Receiver<Card>
 }
 impl Player {
-	///Self in singleplayer, or another connected player in multiplayer.
-	///username must come from server or be an empty string.
-	pub fn new_human(username: String, team_id: u8) -> Self {
+	pub fn new_singleplayer_self(team_id: u8) -> Self {
 		let (bid_tx, bid_rx) = channel::<u8>(1);
 		let (card_tx, card_rx) = channel::<Card>(1);
 		Self {
-			player_data: PlayerData::new(PlayerType::Human(None), username, Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
+			//TODO load username from disk
+			player_data: PlayerData::new(PlayerType::SingleplayerSelf, String::from("Me"), Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
 			bid_tx,
 			bid_rx,
 			card_tx,
@@ -61,19 +57,17 @@ impl Player {
 		}
 	}
 
-	///Self in multiplayer.
-	///account_id and username must come from server.
-	pub async fn new_self(ssp_callback: fn(message: Result<Ssp, ClientError>), team_id: u8, username: &str, password: &str) -> Option<Self> {
+	///Empty slot for a human player in multiplayer. This function should only be called by the server.
+	pub async fn new_human_empty(team_id: u8) -> Self {
 		let (bid_tx, bid_rx) = channel::<u8>(1);
 		let (card_tx, card_rx) = channel::<Card>(1);
-		let (server_connection, account_id) = ServerConnection::new_connection(username, password, ssp_callback).await?;
-		Some(Self {
-			player_data: PlayerData::new(PlayerType::Human(Some(Connection {server_connection: Some(server_connection), account_id, ready: false})), String::from(username), Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
+		Self {
+			player_data: PlayerData::new(PlayerType::HumanEmpty, String::from("Waiting for player to connect..."), Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
 			bid_tx,
 			bid_rx,
 			card_tx,
 			card_rx
-		})
+		}
 	}
 
 	pub fn new_ai(team_id: u8) -> Self {
@@ -88,122 +82,83 @@ impl Player {
 		}
 	}
 	
-	///When decoding a player, that player's player_type, bid_rx, and card_rx will be invalid,
-	///so you need to use this function to move the values from the decoded player into this player to update it.
-	///# Return
-	///Ok(None) success
-	///Ok(Some) success, and PlayerType is the old info of the player
-	///Err(ServerError) error
-	pub fn update_player(&mut self, data: PlayerData, update_client_info: bool) -> Result<Option<PlayerType>, ServerError> {
-		self.player_data.username = data.username;
-		self.player_data.hand = data.hand;
-		self.player_data.team_id = data.team_id;
-		match &mut self.player_data.player_type {
-			PlayerType::Human(Some(this_client)) => {
-				if let PlayerType::Human(Some(other_client)) = data.player_type {
-					if update_client_info {
-						this_client.account_id = other_client.account_id;
-						this_client.ready = other_client.ready;
-					}
-					Ok(None)
-				} else {
-					Ok(Some(mem::replace(&mut self.player_data.player_type, data.player_type)))
-				}
-			}
-			PlayerType::AI => {
-				self.player_data.player_type = data.player_type;
-				Ok(None)
-			}
-			PlayerType::Human(None) => {unreachable!("You should not be using the network in a singleplayer game")}
-		}
-	}
-	
 	pub fn can_follow(&self, lead: Suit) -> bool { self.player_data.hand.iter().any(|card| {card.suit == lead}) }
 }
 
 #[repr(u8)]
-#[derive(Encode, Decode)]
 pub enum PlayerType {
-	///Human(None) = self in singleplayer or another connected player in multiplayer, Human(Some) = self in mutliplayer.
-	///(ServerConnection, account_id, ready)
-	Human(Option<Connection>),
+	///Yourself in singleplayer.
+	SingleplayerSelf,
+	///A slot for a human player in multiplayer that doesn't have a connection yet. This is only used by the server.
+	HumanEmpty,
+	///A connected player in multiplayer. This is only used by the server.
+	HumanConnection(ClientConnection),
+	///The account id and ready status of a connected player in multiplayer.
+	///The server will convert a HumanConnection to a MultiplayerHuman when serializing and sending it to clients.
+	///The client doesn't store this, they just take the account id and ready status from the HumanConnection and update the UI accordingly.
+	MultiplayerHuman{account_id: u32, ready: bool},
 	AI
 }
 
-pub struct Connection {
-	server_connection: Option<ServerConnection>,
-	account_id: u32,
-	ready: bool
-}
-
-impl Connection {
-	pub async fn send_client_error(&mut self, err: ClientError) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::ClientErr(err), self.account_id)).await
-	}
-	
-	pub async fn send_create_game(&mut self) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::CreateGame, self.account_id)).await
-	}
-	
-	pub async fn send_join_game(&mut self, code: u32) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::JoinGame(code), self.account_id)).await
-	}
-	
-	pub async fn send_search_games(&mut self, filter: GameFilter) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id)).await
-	}
-	
-	///Host-only
-	pub async fn send_game_meta(&mut self, meta_data: GameMeta) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::GameMeta(meta_data), self.account_id)).await
-	}
-	
-	///Host-only
-	pub async fn send_player(&mut self, player_data: PlayerData, index: u8) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Player(player_data, index), self.account_id)).await
-	}
-	
-	///Host-only
-	pub async fn send_players(&mut self, players: Vec<PlayerData>) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Players(players), self.account_id)).await
-	}
-	
-	pub async fn send_ready(&mut self, is_ready: bool) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Ready(is_ready), self.account_id)).await
-	}
-	
-	pub async fn send_bid(&mut self, amount: u8) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::Bid(amount), self.account_id)).await
-	}
-	
-	pub async fn send_play_card(&mut self, card: Card) -> Result<(), Error> {
-		self.server_connection.as_mut().unwrap().send(&Ssp::new_with_src(Protocol::PlayCard(card), self.account_id)).await
+impl PlayerType {
+	pub fn set(&mut self, other: Self) {
+		if let Self::HumanConnection(connection) = self {
+			if let Self::MultiplayerHuman{account_id, ready} = other {
+				connection.account_id = account_id;
+				connection.ready = ready;
+				return;
+			}
+		}
+		*self = other;
 	}
 }
 
-impl Encode for Connection {
-	fn encode<__E: Encoder>(&self, encoder: &mut __E) -> Result<(), EncodeError> {
-		Encode::encode(&self.account_id, encoder)?;
-		Encode::encode(&self.ready, encoder)?;
-		Ok(())
+impl Encode for PlayerType {
+	fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+		match self {
+			Self::SingleplayerSelf => {Encode::encode(&0, encoder)}
+			Self::HumanEmpty => {Encode::encode(&1, encoder)}
+			Self::HumanConnection(connection) => {
+				//HumanConnection is encoded as MultiplayerHuman
+				Encode::encode(&3, encoder)?;
+				Encode::encode(&connection.account_id, encoder)?;
+				Encode::encode(&connection.ready, encoder)
+			}
+			Self::MultiplayerHuman{account_id, ready} => {
+				Encode::encode(&3, encoder)?;
+				Encode::encode(&account_id, encoder)?;
+				Encode::encode(&ready, encoder)
+			}
+			Self::AI => {Encode::encode(&4, encoder)}
+		}
 	}
 }
-impl Decode for Connection {
-	fn decode<__D: Decoder>(decoder: &mut __D) -> Result<Self, DecodeError> {
-		Ok(Self {
-			server_connection: None,
-			account_id: Decode::decode(decoder)?,
-			ready: Decode::decode(decoder)?
-		})
+
+impl Decode for PlayerType {
+	fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+		let player_type: u8 = Decode::decode(decoder)?;
+		match player_type {
+			0 => Ok(Self::SingleplayerSelf),
+			1 => unreachable!("HumanConnection is encoded as MultiplayerHuman"),
+			2 => Ok(Self::HumanEmpty),
+			3 => Ok(Self::MultiplayerHuman{account_id: Decode::decode(decoder)?, ready: Decode::decode(decoder)?}),
+			4 => Ok(Self::AI),
+			_ => unreachable!("Invalid player type: {}", player_type)
+		}
 	}
 }
-impl<'__de> BorrowDecode<'__de> for Connection {
-	fn borrow_decode<__D: BorrowDecoder<'__de>>(decoder: &mut __D) -> Result<Self, DecodeError> {
-		Ok(Self {
-			server_connection: None,
-			account_id: BorrowDecode::borrow_decode(decoder)?,
-			ready: BorrowDecode::borrow_decode(decoder)?,
-		})
+
+impl<'de> BorrowDecode<'de> for PlayerType {
+	fn borrow_decode<D: BorrowDecoder<'de>>(decoder: &mut D) -> Result<Self, DecodeError> {
+		let player_type: u8 = Decode::decode(decoder)?;
+		match player_type {
+			0 => Ok(Self::SingleplayerSelf),
+			1 => unreachable!("HumanConnection is encoded as MultiplayerHuman"),
+			2 => Ok(Self::HumanEmpty),
+			3 => Ok(Self::MultiplayerHuman{account_id: BorrowDecode::borrow_decode(decoder)?, ready: BorrowDecode::borrow_decode(decoder)?}),
+			4 => Ok(Self::AI),
+			_ => unreachable!("Invalid player type: {}", player_type)
+		}
 	}
 }
 
@@ -331,13 +286,13 @@ pub enum GameEvent {
 	///It is now index player's turn. This should be sent to every player except the one whose turn it is.
 	PlayerTurn{index: u8},
 	///It is now index player's turn to bid. This should only be sent to the player whose turn it is.
-	PromptBid{index: u8},
+	PromptBid{index: u8, hand: Vec<Card>},
 	///It is now index player's turn to play a card. This should only be sent to the player whose turn it is.
-	PromptCard{index: u8},
+	PromptCard{index: u8, hand: Vec<Card>},
 	///The round is over, and the scores of the round are given for each team
 	RoundScores(RoundScores),
 	///The game is over, and the scores of the round are given for each team
-	GameOver(RoundScores),
+	GameOver(Vec<i8>),
 	///The game has encountered an error
 	GameError(ServerError)
 }

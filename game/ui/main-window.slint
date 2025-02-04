@@ -661,8 +661,6 @@ export component MainWindow inherits Window {
 	height: 1080px;
     title: "Setback";
 	icon: @image-url("../assets/images/cardsIcon.png");
-	full-screen: true;
-	no-frame: true;
 
 	// Dropdown overlay properties
 	property <bool> active-dropdown-overlay: false;
@@ -710,6 +708,7 @@ export component MainWindow inherits Window {
 				clicked => {
 					GameState.scene = SceneType.Setup;
 					GameState.host = HostType.SingleplayerSetup;
+					GameState.set_state(GameState.scene, GameState.host);
 				}
 			}
 
@@ -724,7 +723,10 @@ export component MainWindow inherits Window {
 			settings := StylizedButton {
 				text: "Settings";
 				font-size: 42px;
-				clicked => { GameState.scene = SceneType.Settings; }
+				clicked => {
+					GameState.scene = SceneType.Settings;
+					GameState.set_state(GameState.scene, GameState.host);
+				}
 			}
 
 			exit := StylizedButton {
@@ -771,6 +773,7 @@ export component MainWindow inherits Window {
 							exit.enabled = false;
 							GameState.scene = SceneType.Setup;
 							GameState.host = HostType.Host;
+							GameState.set_state(GameState.scene, GameState.host);
 							multiplayer-popup.close();
 						}
 					}
@@ -795,6 +798,7 @@ export component MainWindow inherits Window {
 						width: 450px;
 						clicked => {
 							GameState.scene = SceneType.Multiplayer;
+							GameState.set_state(GameState.scene, GameState.host);
 							multiplayer-popup.close();
 						}
 					}
@@ -860,6 +864,7 @@ export component MainWindow inherits Window {
 							settings.enabled = true;
 							exit.enabled = true;
 							GameState.host = HostType.Client;
+							GameState.set_state(GameState.scene, GameState.host);
 						}
 					}
 
@@ -936,6 +941,7 @@ export component MainWindow inherits Window {
 							clicked => { 
 								GameState.scene = SceneType.MainMenu;
 								GameState.host = HostType.None;
+								GameState.set_state(GameState.scene, GameState.host);
 								confirmLeave.close();
 							}
 						}
@@ -1112,6 +1118,7 @@ export component MainWindow inherits Window {
 						if (GameState.host == HostType.SingleplayerSetup) {
 							GameState.host = HostType.SingleplayerPlaying;
 							GameState.scene = SceneType.Game;
+							GameState.set_state(GameState.scene, GameState.host);
 						} else {
 							// TODO: Implement ready state toggle
 						}
@@ -1155,6 +1162,7 @@ export component MainWindow inherits Window {
 			font-size: 24px;
 			clicked => {
 				GameState.scene = SceneType.MainMenu;
+				GameState.set_state(GameState.scene, GameState.host);
 			}
 		}
 		
@@ -1301,6 +1309,7 @@ export component MainWindow inherits Window {
 										clicked => {
 											GameState.scene = SceneType.Setup;
 											GameState.host = HostType.Client;
+											GameState.set_state(GameState.scene, GameState.host);
 										}
 									}
 								}
@@ -1861,6 +1870,7 @@ export component MainWindow inherits Window {
 			confirmed => {
 				GameState.scene = SceneType.MainMenu;
 				GameState.host = HostType.None;
+				GameState.set_state(GameState.scene, GameState.host);
 				darkScreenGame.visible = false;
 				gameMenu.close();
 			}
@@ -1882,6 +1892,7 @@ export component MainWindow inherits Window {
 			font-size: 24px;
 			clicked => {
 				GameState.scene = SceneType.MainMenu;
+				GameState.set_state(GameState.scene, GameState.host);
 			}
 		}
 
