@@ -30,6 +30,8 @@ export component BaseText {
         horizontal-alignment: root.horizontal-alignment;
         vertical-alignment: root.vertical-alignment;
         wrap: root.wrap ? TextWrap.word-wrap : TextWrap.no-wrap;
+        width: root.width;
+        height: root.height;
     }
 }
 
@@ -147,58 +149,41 @@ export component StylizedCheckbox {
 }
 
 // Custom slider with better visual feedback
-export component StylizedSlider {
+export component StylizedSlider inherits Rectangle {
     in property <float> minimum: 0;
     in property <float> maximum: 100;
     in property <float> step: 1;
     in-out property <float> value;
-	width: 200px;
+	in property <bool> enabled: true;
+
+	callback changed(value: float);
+
+    width: 200px;
 	height: 24px;
-    in property <bool> enabled: true;
-    callback changed(float);
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
 
-    Rectangle {
-        width: root.width;
-        height: root.height;
+    border-radius: root.height/2;
+    background: touch.pressed ? #eee: #ddd;
+    border-width: 1px;
+    border-color: root.background.darker(25%);
 
-        // Track
-        Rectangle {
-            y: (parent.height - self.height) / 2;
-            width: parent.width;
-            height: 4px;
-            background: root.enabled ? Palette.Gray : Palette.Gray.darker(0.3);
-            border-radius: self.height / 2;
-        }
+    handle := Rectangle {
+        width: self.height;
+        height: parent.height;
+        border-width: 3px;
+        border-radius: self.height / 2;
+        background: touch.pressed ? Palette.Orange.darker(0.2) : Palette.Orange;
+        border-color: self.background.darker(15%);
+        x: (root.width - handle.width) * (root.value - root.minimum)/(root.maximum - root.minimum);
 
-        // Handle
-        handle := Rectangle {
-            width: root.height;
-            height: root.height;
-            x: (root.value - root.minimum) / (root.maximum - root.minimum) 
-                * (parent.width - self.width);
-            background: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
-            border-radius: self.height / 2;
-
-            touch := TouchArea {
-                enabled: root.enabled;
-                
-                moved => {
-                    if (self.enabled && self.pressed) {
-                        // Calculate new value based on mouse position
-                        root.value = Math.max(root.minimum, 
-                            Math.min(root.maximum, 
-                                root.minimum + (self.mouse-x / handle.width) 
-                                * (root.maximum - root.minimum)
-                            )
-                        );
-                        // Round to nearest step
-                        root.value = round(root.value / root.step) * root.step;
-                        root.changed(root.value);
-                    }
+        touch := TouchArea {
+            moved => {
+                if (self.enabled && self.pressed) {
+                    root.value = round(max(root.minimum, min(root.maximum, root.value + (self.mouse-x - self.pressed-x) * (root.maximum - root.minimum) / root.width)) / root.step) * root.step;
+					root.changed(root.value);
                 }
             }
-
-            animate x { duration: 100ms; easing: ease; }
         }
     }
 }
@@ -266,7 +251,7 @@ export component StylizedComboBox inherits Rectangle {
                 HorizontalLayout {
                     Text {
                         text: value;
-                        color: item-area.has-hover ? Palette.Orange : Palette.Orange;
+                        color: item-area.has-hover ? Palette.Gray : Palette.Orange;
                         font-size: 16px;
                     }
                 }
