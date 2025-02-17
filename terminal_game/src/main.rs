@@ -67,6 +67,9 @@ async fn main() {
 							return;
 						}
 					}
+					Some(GameEvent::DealCards) => {
+						println!("Cards are being dealt.");
+					}
 					Some(GameEvent::RoundScores(scores)) => {
 						println!("Round scores: {:#?}", scores);
 					}

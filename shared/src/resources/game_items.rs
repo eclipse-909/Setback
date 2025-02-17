@@ -1,6 +1,6 @@
 use {
 	super::{
-		util::{ServerError, MAX_PLAYERS},
+		util::{Error, MAX_PLAYERS},
 		connection::ClientConnection
 	},
 	std::{
@@ -289,10 +289,12 @@ pub enum GameEvent {
 	PromptBid{index: u8, hand: Vec<Card>},
 	///It is now index player's turn to play a card. This should only be sent to the player whose turn it is.
 	PromptCard{index: u8, hand: Vec<Card>},
+	///Signals that cards are being dealt.
+	DealCards,
 	///The round is over, and the scores of the round are given for each team
 	RoundScores(RoundScores),
 	///The game is over, and the scores of the round are given for each team
 	GameOver(Vec<i8>),
 	///The game has encountered an error
-	GameError(ServerError)
+	GameError(Error)
 }

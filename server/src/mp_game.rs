@@ -1,6 +1,6 @@
 use {
 	shared::{
-		Ssp, Protocol, Player, PlayerType, PlayerClient, GameMeta, GameData, GameFilter, ServerError, TcpClient, MAX_GAME_METAS, MAX_PLAYERS,
+		Ssp, Protocol, Player, PlayerType, PlayerClient, GameMeta, GameData, GameFilter, Error, TcpClient, MAX_GAME_METAS, MAX_PLAYERS,
 		game::{Game, TurnResult}
 	},
 	std::{
@@ -150,7 +150,7 @@ impl MPGame {
 									continue;
 								}
 								if !player_client.host {
-									game_guard.send_error_back(ssp.src_id, ServerError::HostOnlyProtocol).await;
+									game_guard.send_error_back(ssp.src_id, Error::HostOnlyProtocol).await;
 									continue;
 								}
 								game_guard.sp_game.meta_data = meta_data.clone();
@@ -166,7 +166,7 @@ impl MPGame {
 									continue;
 								}
 								if !player_client.host {
-									game_guard.send_error_back(ssp.src_id, ServerError::HostOnlyProtocol).await;
+									game_guard.send_error_back(ssp.src_id, Error::HostOnlyProtocol).await;
 									continue;
 								}
 								//update state and broadcast
@@ -198,7 +198,7 @@ impl MPGame {
 									continue;
 								}
 								if !player_client.host {
-									game_guard.send_error_back(ssp.src_id, ServerError::HostOnlyProtocol).await;
+									game_guard.send_error_back(ssp.src_id, Error::HostOnlyProtocol).await;
 									continue;
 								}
 								//update state and broadcast
@@ -228,7 +228,7 @@ impl MPGame {
 								for player in list_clone.iter_mut() {
 									let PlayerType::Client(player_client) = &mut player.player_type else {continue;};
 									let Some(client) = client_arcs.remove(&player_client.account_id) else {
-										game_guard.send_error_back(ssp.src_id, ServerError::ClientNotFound).await;
+										game_guard.send_error_back(ssp.src_id, Error::ClientNotFound).await;
 										let players: Vec<Player> = game_guard.sp_game.players.clone();
 										game_guard.send_message(&Ssp::new(Protocol::Players(players)), ssp.src_id).await;
 										continue 'listener;
@@ -281,12 +281,12 @@ impl MPGame {
 								let Some(index) = game_guard.client_id_to_index.get(&ssp.src_id) else {return;};
 								let index: u8 = *index;
 								if game_guard.sp_game.game_data.turn_index != index {
-									game_guard.send_error_back(ssp.src_id, ServerError::OutOfTurn).await;
+									game_guard.send_error_back(ssp.src_id, Error::OutOfTurn).await;
 									continue;
 								}
 								//verify valid amount
 								if !game_guard.sp_game.validate_bid(*amount) {
-									game_guard.send_error_back(ssp.src_id, ServerError::InvalidBid).await;
+									game_guard.send_error_back(ssp.src_id, Error::InvalidBid).await;
 									continue;
 								}
 								//update bevy_game and player data
@@ -295,7 +295,7 @@ impl MPGame {
 								let game_data: GameData = game_guard.sp_game.game_data.clone();
 								game_guard.broadcast_message(&Ssp::new(Protocol::GameData(game_data))).await;
 								//do AI's turns and calculate their bids
-								let next_turn: Result<TurnResult, ServerError> = game_guard.sp_game.next_turn();
+								let next_turn: Result<TurnResult, Error> = game_guard.sp_game.next_turn();
 								game_guard.ai_game_loop(next_turn).await;
 							}
 							Protocol::PlayCard(card) => {
@@ -304,13 +304,13 @@ impl MPGame {
 								let Some(client_index) = game_guard.client_id_to_index.get(&ssp.src_id) else {return;};
 								let client_index: u8 = *client_index;
 								if game_guard.sp_game.game_data.turn_index != client_index {
-									game_guard.send_error_back(ssp.src_id, ServerError::OutOfTurn).await;
+									game_guard.send_error_back(ssp.src_id, Error::OutOfTurn).await;
 									continue;
 								}
 								match game_guard.sp_game.validate_card(card.to_owned()) {
 									Ok(true) => {}
 									Ok(false) => {
-										game_guard.send_error_back(ssp.src_id, ServerError::InvalidCard).await;
+										game_guard.send_error_back(ssp.src_id, Error::InvalidCard).await;
 										continue;
 									}
 									Err(_) => {return;}
@@ -320,10 +320,10 @@ impl MPGame {
 								let game_data: GameData = game_guard.sp_game.game_data.clone();
 								game_guard.broadcast_message(&Ssp::new(Protocol::GameData(game_data))).await;
 								//process AI turns
-								let next_turn: Result<TurnResult, ServerError> = game_guard.sp_game.next_turn();
+								let next_turn: Result<TurnResult, Error> = game_guard.sp_game.next_turn();
 								game_guard.ai_game_loop(next_turn).await;
 							}
-							_ => {game.write().unwrap().send_error_back(ssp.src_id, ServerError::InvalidProtocol).await;}
+							_ => {game.write().unwrap().send_error_back(ssp.src_id, Error::InvalidProtocol).await;}
 						}
 					}
 				} => {}
@@ -418,7 +418,7 @@ impl MPGame {
 		}
 	}
 
-	async fn send_error_back(&mut self, src_id: u32, err: ServerError) {
+	async fn send_error_back(&mut self, src_id: u32, err: Error) {
 		let Some((client, index)) = self.get_client(src_id) else {return;};
 		if client.write().unwrap().message_client(&Ssp::new(Protocol::ServerErr(err))).await.is_err() {
 			self.remove_player(index);
@@ -468,7 +468,7 @@ impl MPGame {
 		game_metas
 	}
 	
-	async fn deal_cards(&mut self) -> Result<(), ServerError> {
+	async fn deal_cards(&mut self) -> Result<(), Error> {
 		self.sp_game.deal_cards()?;
 		//send Player to each player
 		for i in 0..self.sp_game.players.len() {
@@ -481,7 +481,7 @@ impl MPGame {
 	}
 	
 	///Processes the next AI turns until it's a human's turn.
-	async fn ai_game_loop(&mut self, mut turn_result: Result<TurnResult, ServerError>) {
+	async fn ai_game_loop(&mut self, mut turn_result: Result<TurnResult, Error>) {
 		loop {
 			match turn_result {
 				Ok(TurnResult::IsAI(ai)) => {

@@ -1,7 +1,7 @@
 use {
 	super::{
 		game_items::{Card, Suit, GameData, GameMeta, Player, PlayerType, RoundScores, Team, J, Q, K, A},
-		util::{MAX_PLAYERS, ServerError}
+		util::{MAX_PLAYERS, Error}
 	},
 	std::collections::HashMap,
 	rand::{
@@ -49,7 +49,7 @@ impl Game {
 	///Jumps to the next player's turn and increments turn and round data.
 	///If Ok, the TurnResult represents what action the caller needs to take immediately after.
 	///If Err, the caller needs to handle it, usually be terminating the game.
-	pub fn next_turn(&mut self) -> Result<TurnResult, ServerError> {
+	pub fn next_turn(&mut self) -> Result<TurnResult, Error> {
 		if self.game_data.turn_number == 1 && self.pile.is_empty() {
 			self.game_data.turn_index = self.highest_bidder;
 			return Ok(TurnResult::NextTurn);
@@ -128,7 +128,7 @@ impl Game {
 	
 	///Caller must deal cards for next round after this function is called.
 	///Use RoundScores to notify players the results of the round.
-	pub fn end_round(&mut self) -> Result<RoundScores, ServerError> {
+	pub fn end_round(&mut self) -> Result<RoundScores, Error> {
 		//calculate scores
 		let mut highest: u8 = 2;
 		let mut highest_index: u8 = 0;

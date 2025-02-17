@@ -1,6 +1,6 @@
 use {
 	crate::mp_game::{MPGame, Games, MAX_GAMES},
-	shared::{TcpClient, Ssp, Protocol, Version, Player, ServerError, ClientError, spawn_async, spawn_sync},
+	shared::{TcpClient, Ssp, Protocol, Version, Player, Error, ClientError, spawn_async, spawn_sync},
 	std::{
 		collections::HashMap,
 		sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard}
@@ -48,7 +48,7 @@ async fn main() {
 				Protocol::Disconnect => {remove_player(&clients_clone, ssp.src_id).await;}
 				Protocol::CreateGame => {
 					if games.read().unwrap().len() >= MAX_GAMES as usize {
-						send_error_back(&clients_clone, ssp.src_id, ServerError::GamesAtCapacity).await;
+						send_error_back(&clients_clone, ssp.src_id, Error::GamesAtCapacity).await;
 						continue;
 					}
 					let Some(client) = clients_clone.write().unwrap().remove(&ssp.src_id) else {continue;};
@@ -69,12 +69,12 @@ async fn main() {
 				Protocol::JoinGame(code) => {
 					let games_guard: RwLockReadGuard<HashMap<u32, Arc<RwLock<MPGame>>>> = games.read().unwrap();
 					let Some(game) = games_guard.get(code) else {
-						send_error_back(&clients_clone, ssp.src_id, ServerError::GameNotFound).await;
+						send_error_back(&clients_clone, ssp.src_id, Error::GameNotFound).await;
 						continue;
 					};
 					let mut game_guard: RwLockWriteGuard<MPGame> = game.write().unwrap();
 					if !game_guard.can_add_player() {
-						send_error_back(&clients_clone, ssp.src_id, ServerError::GameAtCapacity).await;
+						send_error_back(&clients_clone, ssp.src_id, Error::GameAtCapacity).await;
 						continue;
 					}
 					let Some(client) = clients_clone.write().unwrap().remove(&ssp.src_id) else {continue;};
@@ -86,7 +86,7 @@ async fn main() {
 				Protocol::SearchGames(filter) => {
 					send_message(&clients_clone, &Ssp::new(Protocol::GameMetas(MPGame::get_game_metas(&games, filter).await)), ssp.src_id).await;
 				}
-				_ => {send_error_back(&clients_clone, ssp.src_id, ServerError::InvalidProtocol).await;}
+				_ => {send_error_back(&clients_clone, ssp.src_id, Error::InvalidProtocol).await;}
 			}
 		}
 	});
@@ -158,7 +158,7 @@ async fn main() {
 										if client_guard.owner_tx.send(ssp).is_err() {break}
 									}
 									Err(_) => {
-										if client_guard.message_client(&Ssp::new(Protocol::ServerErr(ServerError::Deserialization))).await.is_err() {break;}
+										if client_guard.message_client(&Ssp::new(Protocol::ServerErr(Error::Deserialization))).await.is_err() {break;}
 									}//1
 								}//2
 							}//3
@@ -184,7 +184,7 @@ async fn send_message(clients: &Clients, ssp: &Ssp, dest_id: u32) {
 	}
 }
 
-async fn send_error_back(clients: &Clients, src_id: u32, err: ServerError) {
+async fn send_error_back(clients: &Clients, src_id: u32, err: Error) {
 	let client_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> = clients.write().unwrap();
 	let Some(client) = client_guard.get(&src_id) else {return;};
 	if client.write().unwrap().message_client(&Ssp::new(Protocol::ServerErr(err))).await.is_err() {

@@ -1,21 +1,20 @@
 use {
 	super::{
 		ssp::{Ssp, Protocol},
-		util::ClientError,
-		game_items::{GameFilter, GameMeta, PlayerData, Card}
+		util::Error,
+		game_items::{GameFilter, GameMeta, PlayerData, GameEvent}
 	},
 	std::{
 		net::{Ipv4Addr, SocketAddrV4},
-		future::Future,
-		io::Error
+		future::Future
 	},
 	tokio::{
 		net::{
 			TcpStream,
 			tcp::{OwnedWriteHalf, OwnedReadHalf}
 		},
-		io::{AsyncWriteExt, AsyncReadExt},
-		task::JoinHandle
+		sync::mpsc::{UnboundedSender, unbounded_channel},
+		io::{AsyncWriteExt, AsyncReadExt}
 	},
 	tokio_util::sync::CancellationToken,
 	bincode::{Decode, Encode, config::standard},
@@ -23,10 +22,12 @@ use {
 	awc::Client
 };
 
+pub const SERVER_PORT: u16 = 42069;
+
 const SERVER_SOCKET: SocketAddrV4 = if cfg!(debug_assertions) {
-	SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 42069)
+	SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), SERVER_PORT)
 } else {
-	SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 42069)//TODO change this to actual socket once server is deployed
+	SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), SERVER_PORT)//TODO change this to actual socket once server is deployed
 };
 
 const WEBSITE_URL: &str = if cfg!(debug_assertions) {
@@ -36,31 +37,34 @@ const WEBSITE_URL: &str = if cfg!(debug_assertions) {
 };
 
 ///This standardizes the method of communication between the server and clients by putting the logic in one place.
-pub trait SetbackConnection {
-	const BUF_LEN: usize = size_of::<Ssp>();//TODO this might not be enough for protocols involving Vec<T>
-	fn write_half(&mut self) -> &mut OwnedWriteHalf;
-	fn send(&mut self, ssp: &Ssp) -> impl Future<Output = Result<(), Error>> {async move {
-		let mut bytes: Vec<u8> = bincode::encode_to_vec(ssp, standard()).map_err(Error::other)?;
+trait SetbackConnection {
+	fn writer(&mut self) -> &mut UnboundedSender<Ssp>;
+	#[inline(always)]
+	fn send(&mut self, ssp: Ssp) {self.writer().send(ssp).unwrap();}
+	fn write(write_half: &mut OwnedWriteHalf, ssp: Ssp) -> impl Future<Output = Result<(), Error>> {async move {
+		let mut bytes: Vec<u8> = bincode::encode_to_vec(ssp, standard()).unwrap();
 		//prefix with 2-byte length
 		let mut message: Vec<u8> = (bytes.len() as u16).to_le_bytes().to_vec();
 		message.append(&mut bytes);
-		self.write_half().write_all(message.as_slice()).await
+		write_half.write_all(message.as_slice()).await.map_err(|_|Error::NetworkIO)
 	}}
-	fn read(read_half: &mut OwnedReadHalf, buffer: &mut [u8]) -> impl Future<Output = Result<Ssp, Error>> {async move {
-		let len: u16 = read_half.read_u16_le().await?;
-		debug_assert!(len <= Self::BUF_LEN as u16, "Buffer not big enough. Length of this message: {} bytes.", len);
-		read_half.read_exact(&mut buffer[..len as usize]).await?;
-		Ssp::decode(&mut buffer[..len as usize]).map_err(Error::other)
+	fn read(read_half: &mut OwnedReadHalf, buffer: &mut Vec<u8>) -> impl Future<Output = Result<Ssp, Error>> {async move {
+		//read the 2-byte length prefix
+		let len: u16 = read_half.read_u16_le().await.map_err(|_|Error::NetworkIO)?;
+		if len > buffer.len() as u16 {
+			buffer.resize(len as usize, 0);
+		}
+		read_half.read_exact(&mut buffer[..len as usize]).await.map_err(|_|Error::NetworkIO)?;
+		Ok(Ssp::decode(&mut buffer[..len as usize]).unwrap())
 	}}
 }
 
 ///Connection to the server, owned by the client.
 pub struct ServerConnection {
-	writer: OwnedWriteHalf,
-	message_loop: Option<JoinHandle<()>>,
+	message_tx: UnboundedSender<Ssp>,
 	cancellation_token: CancellationToken,
 	api: Client,
-	account_id: u32,
+	account_id: u32,//TODO I might just store this in the client's session cookies rather than in this struct
 	pub ready: bool
 }
 
@@ -70,88 +74,103 @@ impl ServerConnection {
 	///Use the [callback] to handle when a message is received or when there's an error.
 	///The tcp stream stops listening when the callback is invoked with a ClientError, or when [Self::shutdown] is called.
 	///Returning None means it couldn't connect to the server.
-	pub async fn new_connection(username: &str, password: &str, ssp_callback: fn(message: Result<Ssp, ClientError>)) -> Option<Self> {
+	pub async fn new_connection(username: &str, password: &str, ssp_callback: fn(message: Result<Ssp, Error>), on_write_error: impl Fn(Error) + Send + 'static) -> Option<Self> {
 		//set up awc client
 		let api: Client = Client::default();
 		
 		//login and get account_id
-		let Ok(mut res) = api
+		let account_id: u32 = api
 			//TODO fix the URL to match the updated API
 			//TODO username and password need to be filtered/sanitized/verified
 			.get(format!("{}api/login?username={}&password={}", WEBSITE_URL, username, password).as_str())
 			.send()
-			.await else {return None;};
-		let Ok(account_response) = res.json::<AccountResponse>().await else {return None;};
-		let account_id: u32 = account_response.account_id;
+			.await
+			.ok()?
+			.cookie("account_id")?
+			.value()
+			.parse::<u32>()
+			.ok()?;
 		
-		//Sync with server
-		let (mut reader, writer) = TcpStream::connect(SERVER_SOCKET).await.ok()?.into_split();
+		//Read thread
+		let (mut reader, mut writer) = TcpStream::connect(SERVER_SOCKET).await.ok()?.into_split();
 		let cancellation_token: CancellationToken = CancellationToken::new();
-		let cloned_token: CancellationToken = cancellation_token.clone();
-		let message_loop: JoinHandle<()> = tokio::spawn(async move {tokio::select! {
+		let read_cancel_token: CancellationToken = cancellation_token.clone();
+		tokio::spawn(async move {tokio::select! {
 			_ = async move {
-				let mut buffer: [u8; <ServerConnection as SetbackConnection>::BUF_LEN] = [0; <ServerConnection as SetbackConnection>::BUF_LEN];
+				let mut buffer: Vec<u8> = Vec::with_capacity(std::mem::size_of::<Ssp>());
 				loop {
-					let res: Result<Ssp, ClientError> = Self::read(&mut reader, &mut buffer).await.map_err(|_|ClientError::IO);
-					let is_err: bool = res.is_err();
+					let res: Result<Ssp, Error> = Self::read(&mut reader, &mut buffer).await.map_err(|_|Error::NetworkIO);
+					// let is_err: bool = res.is_err();
 					ssp_callback(res);
-					if is_err {break;}
+					// if is_err {break;}
+					//TODO how do I handle the error here?
 				}
 				//TODO do I need to handle the post-error here? If so, how?
 			} => {}
-			_ = cloned_token.cancelled() => {}
+			_ = read_cancel_token.cancelled() => {}
 		}});
-		let mut server_connection: Self = Self {writer, message_loop: Some(message_loop), cancellation_token, api, account_id, ready: false};
-		server_connection.send(&Ssp::new_with_src(Protocol::SyncID, account_id)).await.ok()?;
+
+		//Write thread
+		let (message_tx, mut message_rx) = unbounded_channel();
+		let write_cancel_token: CancellationToken = cancellation_token.clone();
+		tokio::spawn(async move {tokio::select! {
+			_ = async move {
+				while let Some(ssp) = message_rx.recv().await {
+					if let Err(error) = Self::write(&mut writer, ssp).await {
+						on_write_error(error);
+					}
+				}
+				//TODO do I need to handle the post-error here? If so, how?
+			} => {}
+			_ = write_cancel_token.cancelled() => {}
+		}});
+
+		let mut server_connection: Self = Self {message_tx, cancellation_token, api, account_id, ready: false};
+		server_connection.send(Ssp::new_with_src(Protocol::SyncID, account_id));
 		Some(server_connection)
 	}
 
-	pub async fn shutdown(mut self) {
+	pub async fn shutdown(self) {
 		self.cancellation_token.cancel();
-		let _ = self.message_loop.take().unwrap().await;
 	}
 
-	pub async fn send_client_error(&mut self, err: ClientError) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::ClientErr(err), self.account_id)).await
+	pub fn send_error(&mut self, err: Error) {
+		self.send(Ssp::new_with_src(Protocol::Err(err), self.account_id))
 	}
 	
-	pub async fn send_create_game(&mut self) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::CreateGame, self.account_id)).await
+	pub fn send_create_game(&mut self, public: bool) {
+		self.send(Ssp::new_with_src(Protocol::CreateGame{public}, self.account_id))
 	}
 	
-	pub async fn send_join_game(&mut self, code: u32) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::JoinGame(code), self.account_id)).await
+	pub fn send_join_game(&mut self, code: u32) {
+		self.send(Ssp::new_with_src(Protocol::JoinGame{code}, self.account_id))
 	}
 
-	pub async fn send_search_games(&mut self, filter: GameFilter) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id)).await
+	pub fn send_search_games(&mut self, filter: GameFilter) {
+		self.send(Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id))
 	}
 
 	///Host-only
-	pub async fn send_game_meta(&mut self, meta_data: GameMeta) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::GameMeta(meta_data), self.account_id)).await
+	pub fn send_game_meta(&mut self, meta_data: GameMeta) {
+		self.send(Ssp::new_with_src(Protocol::GameMeta(meta_data), self.account_id))
 	}
 
 	///Host-only
-	pub async fn send_player(&mut self, player_data: PlayerData, index: u8) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::Player(player_data, index), self.account_id)).await
+	pub fn send_player(&mut self, player_data: PlayerData, index: u8) {
+		self.send(Ssp::new_with_src(Protocol::Player{data: player_data, index}, self.account_id))
 	}
 
 	///Host-only
-	pub async fn send_players(&mut self, players: Vec<PlayerData>) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::Players(players), self.account_id)).await
+	pub fn send_players(&mut self, players: Vec<PlayerData>) {
+		self.send(Ssp::new_with_src(Protocol::Players(players), self.account_id))
 	}
 
-	pub async fn send_ready(&mut self, is_ready: bool) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::Ready(is_ready), self.account_id)).await
+	pub fn send_ready(&mut self, is_ready: bool) {
+		self.send(Ssp::new_with_src(Protocol::Ready{is_ready}, self.account_id))
 	}
 
-	pub async fn send_bid(&mut self, amount: u8) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::Bid(amount), self.account_id)).await
-	}
-	
-	pub async fn send_play_card(&mut self, card: Card) -> Result<(), Error> {
-		self.send(&Ssp::new_with_src(Protocol::PlayCard(card), self.account_id)).await
+	pub fn send_game_event(&mut self, event: GameEvent) {
+		self.send(Ssp::new_with_src(Protocol::GameEvent(event), self.account_id))
 	}
 	
 	///Logs out of your account by clearing session cookies.
@@ -169,7 +188,7 @@ impl ServerConnection {
 
 impl SetbackConnection for ServerConnection {
 	#[inline(always)]
-	fn write_half(&mut self) -> &mut OwnedWriteHalf {&mut self.writer}
+	fn writer(&mut self) -> &mut UnboundedSender<Ssp> {&mut self.message_tx}
 }
 
 impl Drop for ServerConnection {
@@ -180,8 +199,7 @@ impl Drop for ServerConnection {
 
 ///Connection to the client, owned by the server.
 pub struct ClientConnection {
-	writer: OwnedWriteHalf,
-	message_loop: Option<JoinHandle<()>>,
+	message_tx: UnboundedSender<Ssp>,
 	cancellation_token: CancellationToken,
 	pub account_id: u32,
 	pub ready: bool
@@ -194,6 +212,7 @@ impl ClientConnection {
 		//Read one message for authentication
 		//construct the client connection
 		//begin the message loop
+		//being writing loop
 	}
 
 	//TODO make a function for each protocol for convenience
@@ -201,7 +220,7 @@ impl ClientConnection {
 
 impl SetbackConnection for ClientConnection {
 	#[inline(always)]
-	fn write_half(&mut self) -> &mut OwnedWriteHalf {&mut self.writer}
+	fn writer(&mut self) -> &mut UnboundedSender<Ssp> {&mut self.message_tx}
 }
 
 impl Drop for ClientConnection {
@@ -218,6 +237,3 @@ pub struct AccountData {
 	pub password: String,
 	pub last_active: String
 }
-
-#[derive(Serialize, Deserialize)]
-pub struct AccountResponse {pub account_id: u32}

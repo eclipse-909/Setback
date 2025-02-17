@@ -17,46 +17,43 @@ pub const MIN_PLAYERS: u8 = 4;
 
 #[repr(u8)]
 #[derive(Encode, Decode, Clone, Debug)]
-pub enum ServerError {
+pub enum Error {
 	Indeterminate,
-	Deserialization,
-	ListAtCapacity,
-	GamesAtCapacity,
+	Authentication,
+	Authorization,
+	NetworkIO,
+	IncompatibleVersion,
 	InvalidProtocol,
-	ClientNotFound,
-	ProtocolCannotRelay,
-	GameNotFound,
+	GamesAtCapacity,
 	GameAtCapacity,
-	TcpSendFailed,
-	HostOnlyProtocol,
+	GameNotFound,
+	ClientNotFound,
 	CouldNotCreatePlayer,
 	CouldNotCreateGame,
 	InvalidBid,
 	InvalidCard,
 	OutOfTurn
 }
-impl Display for ServerError {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {write!(f, "{:?}", self)}
+impl Display for Error {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {write!(f, "{}", match self {
+		Error::Indeterminate => "Unexpected error - cause unknown",
+		Error::Authentication => "Invalid username or password",
+		Error::Authorization => "You do not have permission to perform this action",
+		Error::NetworkIO => "Network error",
+		Error::IncompatibleVersion => "Incompatible version - please update the game",
+		Error::InvalidProtocol => "Invalid protocol",
+		Error::GamesAtCapacity => "Server is at capacity - please try to create a game later",
+		Error::GameAtCapacity => "Game has maximum number of players - cannot join",
+		Error::GameNotFound => "Game not found - make sure the game code is correct",
+		Error::ClientNotFound => "Client not found",
+		Error::CouldNotCreatePlayer => "Could not create player",
+		Error::CouldNotCreateGame => "Could not create game",
+		Error::InvalidBid => "Invalid bid",
+		Error::InvalidCard => "Invalid card - play a legal card",
+		Error::OutOfTurn => "It is not your turn"
+	})}
 }
-impl std::error::Error for ServerError {}
-
-#[repr(u8)]
-#[derive(Encode, Decode, Debug)]
-pub enum ClientError {
-	IO,
-	Serialization,
-	NotConnected,
-	Runtime,
-	EndOfStream,
-	NullPtr,
-	WrongVersion,
-	InvalidUsernameOrPassword,
-	BadRequest
-}
-impl Display for ClientError {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {write!(f, "{:?}", self)}
-}
-impl std::error::Error for ClientError {}
+impl std::error::Error for Error {}
 
 ///Spawns an async tasks that terminates if the terminator receives a message
 pub fn spawn_async<F>(terminator: watch::Receiver<()>, future: F) -> JoinHandle<()> where F: Future + Send + 'static, F::Output: Send + 'static {

@@ -11,16 +11,12 @@ use {
 		sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard}
 	},
 	tokio::{
-		runtime::Runtime,
+		runtime::{Runtime, Handle},
 		sync::mpsc::{unbounded_channel, UnboundedSender}
 	}
 };
 
 slint::include_modules!();
-
-//ellipse for player positions in setup
-const ELLIPSE_RADIUS: f32 = 525.;
-const ELLIPSE_HEIGHT_RATIO: f32 = 0.625;
 
 fn main() -> Result<(), slint::PlatformError> {
 	let main_window: MainWindow = MainWindow::new()?;
@@ -28,18 +24,18 @@ fn main() -> Result<(), slint::PlatformError> {
 		.enable_all()
 		.build()
 		.unwrap();
-	let game: Arc<RwLock<SetbackGame>> = Arc::new(RwLock::new(SetbackGame::new(main_window.as_weak(), &runtime)));
+	let game: Arc<RwLock<SetbackGame>> = SetbackGame::new(main_window.as_weak(), runtime.handle().clone());
 	main_window.window().set_maximized(true);
 
 	main_window.global::<GameState>().on_exit(on_exit);
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_set_state(move|scene, host|on_set_state(game_clone.clone(), &runtime, scene, host));
+	main_window.global::<GameState>().on_set_state(move|scene, host|on_set_state(game_clone.clone(), runtime.handle().clone(), scene, host));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
 	main_window.global::<GameState>().on_make_bid(move|bid|on_make_bid(game_clone.clone(), bid));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
 	main_window.global::<GameState>().on_play_card(move|card|on_play_card(game_clone.clone(), card));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_create_game(move||on_create_game(game_clone.clone()));
+	main_window.global::<GameState>().on_create_game(move|public|on_create_game(game_clone.clone(), public));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
 	main_window.global::<GameState>().on_join_game(move|code|on_join_game(game_clone.clone(), code));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
@@ -57,47 +53,50 @@ struct SetbackGame {
 	scene_type: Scene,
 	host_type: Host,
 	connection: Option<ServerConnection>,
-	event_emitter: UnboundedSender<UiEvent>
+	event_tx: UnboundedSender<UiEvent>
 }
 
 unsafe impl Send for SetbackGame {}
 unsafe impl Sync for SetbackGame {}
 
 impl SetbackGame {
-	fn new(window_weak: Weak<MainWindow>, runtime: &Runtime) -> Self {
-		let (event_emitter, mut event_rx) = unbounded_channel();
+	fn new(window_weak: Weak<MainWindow>, runtime: Handle) -> Arc<RwLock<SetbackGame>> {
+		let (event_tx, mut event_rx) = unbounded_channel();
+		let setback_game: Arc<RwLock<SetbackGame>> = Arc::new(RwLock::new(SetbackGame {
+			scene_type: Scene::default(),
+			host_type: Host::default(),
+			connection: None,
+			event_tx
+		}));
+		let setback_game_clone: Arc<RwLock<SetbackGame>> = setback_game.clone();
+		let runtime_clone: Handle = runtime.clone();
 		runtime.spawn(async move {
 			while let Some(event) = event_rx.recv().await {
 				match event {
 					// window_weak.upgrade_in_event_loop(move |window| {}); //this is how you update the ui from other threads/tasks
-					_ => {}
+
+					UiEvent::UpdatePlayers(players) => todo!(),
+					UiEvent::UpdatePublicGames(game_metas) => todo!(),
+					UiEvent::UpdateGame(game_meta) => todo!(),
+					UiEvent::UnrecoverableError(_) => {
+						todo!("Set error in UI");
+						on_set_state(setback_game_clone, runtime_clone, SceneType::MainMenu, HostType::None);
+					},
+					UiEvent::MultiplayerError(_) => todo!(),
+					UiEvent::SetupError(_) => todo!(),
+					UiEvent::GameError(_) => todo!(),
+					UiEvent::PromptBid => todo!(),
+					UiEvent::PromptCard => todo!(),
+					UiEvent::RepromptBid => todo!(),
+					UiEvent::RepromptCard => todo!(),
+					UiEvent::PlayerBid { index, bid } => todo!(),
+					UiEvent::PlayerPlayedCard { index, card } => todo!(),
+					UiEvent::PlayerReadyUp { index, ready } => todo!(),
+					
 				}
 			}
 		});
-		SetbackGame {
-			scene_type: Scene::default(),
-			host_type: Host::default(),
-			connection: None,
-			event_emitter
-		}
-	}
-
-	fn fetch_players(&self) -> &[shared::Player] {
-		match &self.host_type {
-			Host::SingleplayerSetup(game_builder) => {
-				game_builder.game.players.as_slice()
-			}
-			Host::Host | Host::Client => {todo!("Send request to server to fetch players.")}
-			_ => {unreachable!("Illegal host type.")}
-		}
-	}
-
-	fn fetch_num_players(&self) -> u8 {
-		match &self.host_type {
-			Host::SingleplayerSetup(game_builder) => {game_builder.game.players.len() as u8}
-			Host::Host | Host::Client => {todo!("Send request to server to fetch the number of players.")}
-			_ => {unreachable!("Illegal host type.")}
-		}
+		setback_game
 	}
 }
 
@@ -145,16 +144,38 @@ enum UiEvent {
 	UpdatePlayers(Vec<shared::Player>),
 	UpdatePublicGames(Vec<shared::GameMeta>),
 	UpdateGame(shared::GameMeta),
-	SetError(String),
+	UnrecoverableError(String),
+	MultiplayerError(String),
+	SetupError(String),
+	GameError(String),
 	PromptBid,
 	PromptCard,
+	RepromptBid,
+	RepromptCard,
 	PlayerBid{index: u8, bid: u8},
 	PlayerPlayedCard{index: u8, card: shared::Card},
 	PlayerReadyUp{index: u8, ready: bool},
 }
 
+impl From<Comparison> for shared::Comparison {
+	fn from(comparison: Comparison) -> Self {
+		match comparison {
+			Comparison::Equal => shared::Comparison::Equal,
+			Comparison::LessOrEqual => shared::Comparison::LessOrEqual,
+			Comparison::GreaterOrEqual => shared::Comparison::GreaterOrEqual,
+			Comparison::Less => shared::Comparison::Less,
+			Comparison::Greater => shared::Comparison::Greater,
+			Comparison::NotEqual => shared::Comparison::NotEqual
+		}
+	}
+}
+
+//singleplayer and multiplayer functions
+
+#[inline(always)]
 fn on_exit() {std::process::exit(0);}
-fn on_set_state(setback_game: Arc<RwLock<SetbackGame>>, runtime: &Runtime, scene: SceneType, host: HostType) {
+
+fn on_set_state(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle, scene: SceneType, host: HostType) {
 	runtime.spawn(async move {
 		let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 		match game.scene_type {
@@ -166,25 +187,29 @@ fn on_set_state(setback_game: Arc<RwLock<SetbackGame>>, runtime: &Runtime, scene
 			}
 			Scene::Setup => {
 				match scene {
-					SceneType::Multiplayer | SceneType::Settings => {unreachable!("You should not be able to change the scene to a multiplayer or settings when you're in the setup.")}
+					SceneType::Multiplayer |
+					SceneType::Settings => {unreachable!("You should not be able to change the scene to a multiplayer or settings when you're in the setup.")}
 					_ => {game.scene_type = scene.into();}
 				}
 			}
 			Scene::Multiplayer => {
 				match scene {
-					SceneType::Game | SceneType::Settings => {unreachable!("You should not be able to change the scene to a game or settings when you're in the multiplayer.")}
+					SceneType::Game |
+					SceneType::Settings => {unreachable!("You should not be able to change the scene to a game or settings when you're in the multiplayer.")}
 					_ => {game.scene_type = scene.into();}
 				}
 			}
 			Scene::Game => {
 				match scene {
-					SceneType::Setup | SceneType::Game => {unreachable!("You should not be able to change the scene to a setup or game when you're in the game.")}
+					SceneType::Setup |
+					SceneType::Game => {unreachable!("You should not be able to change the scene to a setup or game when you're in the game.")}
 					_ => {game.scene_type = scene.into();}
 				}
 			}
 			Scene::Settings => {
 				match scene {
-					SceneType::Setup | SceneType::Multiplayer | SceneType::Game => {unreachable!("You should not be able to change the scene to a setup or game when you're in the settings.")}
+					SceneType::Setup |
+					SceneType::Multiplayer | SceneType::Game => {unreachable!("You should not be able to change the scene to a setup or game when you're in the settings.")}
 					_ => {game.scene_type = scene.into();}
 				}
 			}
@@ -202,7 +227,7 @@ fn on_set_state(setback_game: Arc<RwLock<SetbackGame>>, runtime: &Runtime, scene
 						todo!("Load username and password from disk, or prompt user");
 						let username: &str = todo!();
 						let password: &str = todo!();
-						match ServerConnection::new_connection(username, password, ssp_callback(setback_game.clone())).await {
+						match ServerConnection::new_connection(username, password, ssp_callback(setback_game), on_error(setback_game)).await {
 							Some(connection) => {
 								game.connection = Some(connection);
 								todo!();
@@ -220,7 +245,7 @@ fn on_set_state(setback_game: Arc<RwLock<SetbackGame>>, runtime: &Runtime, scene
 						todo!("Load username and password from disk, or prompt user");
 						let username: &str = todo!();
 						let password: &str = todo!();
-						match ServerConnection::new_connection(username, password, ssp_callback(setback_game.clone())).await {
+						match ServerConnection::new_connection(username, password, ssp_callback(setback_game), on_error(setback_game)).await {
 							Some(connection) => {
 								game.connection = Some(connection);
 								todo!();
@@ -262,7 +287,7 @@ fn on_set_state(setback_game: Arc<RwLock<SetbackGame>>, runtime: &Runtime, scene
 					HostType::None => {
 						//leaving the multiplayer game
 						let connection = game.connection.take().unwrap();
-						tokio::task::spawn_local(connection.shutdown());
+						tokio::task::spawn_local(connection.shutdown()); //TODO don't do this
 						game.host_type = Host::None;
 					}
 					HostType::Host => {}//no change in host
@@ -274,7 +299,7 @@ fn on_set_state(setback_game: Arc<RwLock<SetbackGame>>, runtime: &Runtime, scene
 					HostType::None => {
 						//leaving the multiplayer game
 						let connection = game.connection.take().unwrap();
-						tokio::task::spawn_local(connection.shutdown());
+						tokio::task::spawn_local(connection.shutdown()); //TODO don't do this
 						game.host_type = Host::None;
 					}
 					HostType::Client => {}//no change in host
@@ -285,11 +310,32 @@ fn on_set_state(setback_game: Arc<RwLock<SetbackGame>>, runtime: &Runtime, scene
 	});
 }
 
+fn on_error(setback_game: Arc<RwLock<SetbackGame>>) -> impl Fn(shared::Error) + Send + 'static {
+	move |error: shared::Error| {
+		match error {
+			shared::Error::Indeterminate |
+			shared::Error::Authentication |
+			shared::Error::Authorization |
+			shared::Error::NetworkIO |
+			shared::Error::IncompatibleVersion |
+			shared::Error::InvalidProtocol => {
+				setback_game.write().unwrap().event_tx.send(UiEvent::UnrecoverableError(error.to_string())).unwrap();
+			}
+			_ => {}
+		}
+	}
+}
+
+fn on_add_player(setback_game: Arc<RwLock<SetbackGame>>) {todo!()}
+fn on_remove_player(setback_game: Arc<RwLock<SetbackGame>>, index: u8) {todo!()}
+fn on_set_player_team(setback_game: Arc<RwLock<SetbackGame>>, index: u8, team: i32) {todo!()}
 fn on_make_bid(setback_game: Arc<RwLock<SetbackGame>>, bid: i32) {todo!()}
 fn on_play_card(setback_game: Arc<RwLock<SetbackGame>>, card: Card) {todo!()}
 
-fn on_create_game(setback_game: Arc<RwLock<SetbackGame>>) {todo!()}
-fn on_join_game(setback_game: Arc<RwLock<SetbackGame>>, code: slint::SharedString) {todo!()}
+//multiplayer only functions
+
+fn on_create_game(setback_game: Arc<RwLock<SetbackGame>>, public: bool) {setback_game.write().unwrap().connection.as_mut().unwrap().send_create_game(public);}
+fn on_join_game(setback_game: Arc<RwLock<SetbackGame>>, code: slint::SharedString) {setback_game.write().unwrap().connection.as_mut().unwrap().send_join_game(code.to_string().parse::<u32>().unwrap());}
 fn on_search_games(
 	setback_game: Arc<RwLock<SetbackGame>>,
 	max_score_cmp: Comparison,
@@ -300,14 +346,49 @@ fn on_search_games(
 	win_by_2: bool,
 	negative_scores: bool,
 	dealer_override: bool
-) {todo!()}
-fn on_get_game_meta(setback_game: Arc<RwLock<SetbackGame>>) {todo!()}
-fn on_ready_up(setback_game: Arc<RwLock<SetbackGame>>, ready: bool) {todo!()}
+) {
+	setback_game.write().unwrap().connection.as_mut().unwrap().send_search_games(shared::GameFilter {
+		std_team_mode,
+		win_by_2,
+		negative_scores,
+		dealer_override,
+		max_score_cmp: shared::Comparison::from(max_score_cmp),
+		max_score_value: max_score_value as i8,
+		max_players_cmp: shared::Comparison::from(max_players_cmp),
+		max_players_value: max_players_value as u8
+	});
+}
+fn on_get_game_meta(setback_game: Arc<RwLock<SetbackGame>>) {
+	todo!("get game meta from UI");
+	// setback_game.write().unwrap().connection.as_mut().unwrap().send_game_meta();
+}
+fn on_ready_up(setback_game: Arc<RwLock<SetbackGame>>, ready: bool) {setback_game.write().unwrap().connection.as_mut().unwrap().send_ready(ready);}
+fn on_logout(setback_game: Arc<RwLock<SetbackGame>>) {todo!()}
 
-///only used in singleplayer
-fn on_fetch_players(setback_game: Arc<RwLock<SetbackGame>>, main_window: &MainWindow) {
+///Ssp message received callback
+fn ssp_callback(game: Arc<RwLock<SetbackGame>>) -> fn(message: Result<shared::Ssp, shared::Error>) {
+	move |message: Result<shared::Ssp, shared::Error>| {
+		match message {
+			Ok(ssp) => {
+				todo!()
+			}
+			Err(error) => {
+				todo!()
+			}
+		}
+	}
+}
+
+//only used in singleplayer
+
+///Fetches the players from the singleplayer setup and displays them in the UI.
+fn on_get_players(setback_game: Arc<RwLock<SetbackGame>>, main_window: &MainWindow) {
+	const ELLIPSE_RADIUS: f32 = 525.;
+	const ELLIPSE_HEIGHT_RATIO: f32 = 0.625;
+
 	let game: RwLockReadGuard<SetbackGame> = setback_game.read().unwrap();
-	let players: &[shared::Player] = game.fetch_players();
+	let Host::SingleplayerSetup(game_builder) = &game.host_type else {unreachable!("Cannot fetch players outside of singleplayer setup.")};
+	let players: &[shared::Player] = game_builder.game.players.as_slice();
 	let players = ModelRc::from(
 		players.iter()
 			.enumerate()
@@ -326,24 +407,4 @@ fn on_fetch_players(setback_game: Arc<RwLock<SetbackGame>>, main_window: &MainWi
 			.as_slice()
 	);
 	main_window.global::<GameState>().set_players(players);
-}
-
-fn on_fetch_games(setback_game: Arc<RwLock<SetbackGame>>, main_window: &MainWindow) {todo!()}
-
-fn on_logout(setback_game: Arc<RwLock<SetbackGame>>) {todo!()}
-fn on_get_account(setback_game: Arc<RwLock<SetbackGame>>) {todo!()}
-
-//Multiplayer game loop callback functions
-
-fn ssp_callback(game: Arc<RwLock<SetbackGame>>) -> fn(message: Result<shared::Ssp, shared::ClientError>) {
-	move |message: Result<shared::Ssp, shared::ClientError>| {
-		match message {
-			Ok(ssp) => {
-				todo!()
-			}
-			Err(error) => {
-				todo!()
-			}
-		}
-	}
 }

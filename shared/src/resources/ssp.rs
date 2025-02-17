@@ -1,7 +1,7 @@
 use {
 	super::{
-		util::{ServerError, ClientError},
-		game_items::{Card, PlayerData, GameFilter, GameMeta, GameData, RoundScores}
+		util::Error,
+		game_items::{PlayerData, GameFilter, GameMeta, GameData, GameEvent}
 	},
 	bincode::{
 		Decode,
@@ -50,59 +50,109 @@ impl Version {
 	pub const LATEST: Version = Version(0, 1, 0);
 }
 
+///Request - client sends message to server/game.
+///Response - server/game sends message to client.
+///Spontaneous - server/game sends message to client without request.
+///Internal - server/game sends message to itself.
+///When a request is sent, the caller will not wait for a response.
+///You must handle the response the same way you would handle a spontaneous message.
 #[repr(u8)]
 #[derive(Encode, Decode)]
 pub enum Protocol {
-	///Client <-> Server<br><br>Client sends its account_id to the server when client connects to server.
+	///Client ---SyncID--> Server<br>
+	///Client <--SyncID--- Server<br>
+	///Request and response<br><br>
+	///Client sends its account_id to the server when client connects to server.
 	///There is a small window between the client connecting and the client sending a SyncID message.
-	///If it sends, the server sends one back to verify a successful connection.
+	///The client must send this to authenticate before attempting to send any other messages.
+	///The server will disconnect the client if it doesn't send this message immediately after connecting.
+	///The server will send a SyncID message to the client in response once the client is authenticated.
 	SyncID,
-	///Server -> Self/Game<br><br>The server detects when the client disconnects and sends this to the owner server or game
+	///Server ---Disconnect--> Self/Game<br>
+	///Internal<br><br>
+	///The server detects when the client disconnects and sends this to the owner server or game
 	///so the client can be removed from its owning collection. Client never interacts with this protocol.
 	Disconnect,
-	///Server/Game -> Client<br><br>Any time the server has an error. Used as response only.
-	ServerErr(ServerError),
-	///Client -> Self<br><br>Any time the client has an error. Not sent over internet. Used to notify client of problem and disconnect.
-	ClientErr(ClientError),
-	///Client -> Server<br><br>Client creates game. Responds with Game if successful or Error otherwise.
-	CreateGame,
-	///Client -> Server<br><br>Client joins game. Responds with Game if successful or Error otherwise.
-	JoinGame(u32),
-	///Client -> Server<br><br>Client sends a filter used for the server to send back a list of matching GameMetas.
-	///Responds with GameMetas if successful or Error otherwise.
-	SearchGames(GameFilter),
-	///Server -> Client<br><br>Server sends game info when client joins.
-	///Used as response only.
+	///Client ---Any--> Server/Game<br>
+	///Client <--Err--- Server/Game<br>
+	///Response only<br><br>
+	///OR<br><br>
+	///Client <--Err--- Server/Game<br>
+	///Spontaneous<br><br>
+	///Any time the server has an error, it sends this to the client.
+	///The client does not send client-side errors to the server.
+	Err(Error),
+	///Client ---CreateGame--> Server<br>
+	///Client <--Game--- Server<br>
+	///Request only<br><br>
+	///Client creates game.
+	CreateGame{public: bool},
+	///Client ---JoinGame--> Server<br>
+	///Client <--Game--- Server<br>
+	///Request only<br><br>
+	///Client requests to join game.
+	JoinGame{code: u32},
+	///Client ---CreateGame--> Server<br>
+	///Client <--Game--- Server<br>
+	///Response only<br><br>
+	///OR<br><br>
+	///Client ---JoinGame--> Server<br>
+	///Client <--Game--- Server<br>
+	///Response only<br><br>
+	///Server sends game info when client creates or joins a game.
 	Game(GameMeta, Vec<PlayerData>),
-	///Host-Client -> Game -> Client<br><br>Host can update the settings in the lobby which gets sent to the game.
-	///The game updates its state and propagates the message to all other clients. No response. May receive spontaneously.
-	GameMeta(GameMeta),
-	///Server -> Client<br><br>Server sends a list of games. Max list length is 253. Used as response only.
+	///Client ---SearchGames--> Server<br>
+	///Client <--GameMetas--- Server<br>
+	///Request only<br><br>
+	///Client sends a filter used for the server to send back a list of matching GameMetas.
+	SearchGames(GameFilter),
+	///Client ---SearchGames--> Server<br>
+	///Client <--GameMetas--- Server<br>
+	///Response only<br><br>
+	///Client requests a list of public games and receives a list of GameMetas.
 	GameMetas(Vec<GameMeta>),
-	///Host-Client -> Game -> Client<br><br>When the host changes information about a particular player.
-	///This sends the updated player info and its index. No response. May receive spontaneously.
-	Player(PlayerData, u8),
-	///Host-Client -> Game -> Client<br><br>When information about multiple players changes or the number of players changes.
-	///No response. May receive spontaneously.
+	///Host-Client ---GameMeta--> Game<br>
+	///All-Clients <--GameMeta--- Game<br>
+	///Request and response<br>
+	///Spontaneous<br><br>
+	///Host can update the settings in the lobby which gets sent to the game.
+	///The game updates its state and propagates the message to all other clients.
+	GameMeta(GameMeta),
+	///Client ---Player--> Game<br>
+	///All-Clients <--Player--- Game<br>
+	///Request and response<br>
+	///Spontaneous<br><br>
+	///The host or a player can update the player data of that player.
+	///The game updates its state and propagates the message to all other clients.
+	Player{data: PlayerData, index: u8},
+	///Client ---Players--> Game<br>
+	///All-Clients <--Players--- Game<br>
+	///Request and response<br>
+	///Spontaneous<br><br>
+	///When information about multiple players changes or the number of players changes.
+	///The game updates its state and propagates the message to all other clients.
 	Players(Vec<PlayerData>),
-	///Client <-> Game<br><br>The clients need to ready-up. The game updates the state and propagates it to all other clients.
-	///No response. May receive spontaneously.
-	Ready(bool),
-	///Client <-> Game<br><br>The clients bid before the rounds. The game updates the state and propagates it to all other clients.
-	///No response. May receive spontaneously.
-	Bid(u8),
-	///Client <-> Game<br><br>The client plays a card on their turn. The game updates the state and propagates it to all other clients.
-	///No response. May receive spontaneously.
-	PlayCard(Card),
-	///Game -> Client<br><br>Game tells clients when countdown ends. No response.
+	///Client ---Ready--> Game<br>
+	///All-Clients <--Ready--- Game<br>
+	///Request and response<br>
+	///Spontaneous<br><br>
+	///When a client ready-ups, the game updates the state and propagates it to all other clients.
+	Ready{is_ready: bool},
+	///Client <--Start--- Game<br>
+	///Spontaneous<br><br>
+	///Game tells clients when countdown ends.
 	Start,
-	///Game -> Client<br><br>Used to sync data between clients. No response. May receive spontaneously.
+	///Client <--GameData--- Game<br>
+	///Spontaneous<br><br>
+	///Used to sync data between clients.
 	GameData(GameData),
-	///Game -> Client<br><br>Lets the clients know when cards are being dealt. No response.
-	///Receive when cards are dealt at the start of the round, or when nobody bids and a re-deal is required.
-	DealCards,
-	///Game -> Client<br><br>Tells clients which teams won which points in the round. No response. Receive every time a round ends.
-	RoundScores(RoundScores),
-	///Game -> Client<br><br>Tells clients when the game is over. No response. Receive when the game is over and terminated.
-	GameOver
+	///Client <--GameEvent--- Game<br>
+	///Spontaneous<br><br>
+	///OR<br><br>
+	///Client <--GameEvent--- Game<br>
+	///Client ---GameEvent--> Game<br>
+	///Response and request<br>
+	///Spontaneous<br><br>
+	///The game emits these events to the client. Sometimes the client will send a message back to the game.
+	GameEvent(GameEvent)
 }

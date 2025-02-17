@@ -2,7 +2,7 @@ use {
 	super::resources::{
 		game::{Game, TurnResult},
 		game_items::{Player, PlayerType, Card, GameEvent},
-		util::ServerError,
+		util::Error,
 		connection::ClientConnection
 	},
 	tokio::{
@@ -64,7 +64,7 @@ impl GameBuilder {
 		//spawn_local because self.game doesn't implement Send
 		GameRuntime {handle: tokio::task::spawn_local(async move {tokio::select! {
 			_ = async move {
-				let mut turn_result: Result<TurnResult, ServerError> = Ok(TurnResult::NextTurn);
+				let mut turn_result: Result<TurnResult, Error> = Ok(TurnResult::NextTurn);
 				loop {
 					match turn_result {
 						Ok(TurnResult::NextTurn) => {
@@ -81,7 +81,7 @@ impl GameBuilder {
 									event_tx.send(GameEvent::PromptBid{index, hand: self.game.players[index as usize].player_data.hand.clone()}).unwrap();
 									let mut b: u8 = self.game.players[index as usize].bid_rx.recv().await.unwrap();
 									while !self.game.validate_bid(b) {
-										event_tx.send(GameEvent::GameError(ServerError::InvalidBid)).unwrap();
+										event_tx.send(GameEvent::GameError(Error::InvalidBid)).unwrap();
 										event_tx.send(GameEvent::PromptBid{index, hand: self.game.players[index as usize].player_data.hand.clone()}).unwrap();
 										b = self.game.players[index as usize].bid_rx.recv().await.unwrap();
 									}
@@ -98,7 +98,7 @@ impl GameBuilder {
 									event_tx.send(GameEvent::PromptCard{index, hand: self.game.players[index as usize].player_data.hand.clone()}).unwrap();
 									let mut c: Card = self.game.players[index as usize].card_rx.recv().await.unwrap();
 									while !self.game.validate_card(c) {
-										event_tx.send(GameEvent::GameError(ServerError::InvalidCard)).unwrap();
+										event_tx.send(GameEvent::GameError(Error::InvalidCard)).unwrap();
 										event_tx.send(GameEvent::PromptCard{index, hand: self.game.players[index as usize].player_data.hand.clone()}).unwrap();
 										c = self.game.players[index as usize].card_rx.recv().await.unwrap();
 									}
@@ -110,6 +110,7 @@ impl GameBuilder {
 						}
 						Ok(TurnResult::ReDeal) => {
 							self.game.deal_cards();
+							event_tx.send(GameEvent::DealCards).unwrap();
 							turn_result = Ok(TurnResult::NextTurn);
 						}
 						Ok(TurnResult::EndRound(scores)) => {

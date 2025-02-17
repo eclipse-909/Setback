@@ -95,7 +95,7 @@ export global GameState {
 	callback make_bid(bid: int);
 	callback play_card(card: Card);
 
-	callback create_game();
+	callback create_game(public: bool);
 	callback join_game(join_code: string);
 	callback search_games(
 		max_score_cmp: Comparison,
