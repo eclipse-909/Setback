@@ -34,14 +34,14 @@ export struct Player {
 	y: length
 }
 
-enum Suit {
+export enum Suit {
 	Hearts,
 	Clubs,
 	Diamonds,
 	Spades
 }
 
-struct Card {
+export struct Card {
 	suit: Suit,
 	number: int
 }
@@ -68,8 +68,6 @@ export struct Game {
 export global GameState {
 	in property <SceneType> scene: SceneType.MainMenu;
 	in property <HostType> host: HostType.None;
-	in property <bool> had_error: false;
-	in property <string> error_message;
 	// in property <[Player]> players: [];	//Use this for production
 	in property <[Player]> players:[		//use this for slint preview
 		{username: "Player 1 (Me)", is_human: true, team: 0, local: true, x: 0px, y: 328.125px},
@@ -590,6 +588,9 @@ export component MainWindow inherits Window {
     title: "Setback";
 	icon: @image-url("../assets/images/cardsIcon.png");
 
+	in-out property <bool> had_error: false;
+	in-out property <string> error_message;
+
 	// Main Menu Scene
 	if GameState.scene == SceneType.MainMenu : Rectangle {
 		width: 100%;
@@ -800,7 +801,7 @@ export component MainWindow inherits Window {
 
 		//error popup
 		init => {
-			if GameState.had_error {
+			if root.had_error {
 				error-popup.show();
 			}
 		}
@@ -824,7 +825,7 @@ export component MainWindow inherits Window {
 					padding: 20px;
 
 					BaseText {
-						text: GameState.error_message;
+						text: root.error_message;
 						font-size: 24px;
 						horizontal-alignment: center;
 						vertical-alignment: center;
@@ -839,8 +840,8 @@ export component MainWindow inherits Window {
 						width: 100px;
 						height: 40px;
 						clicked => {
-							GameState.had_error = false;
-							GameState.error_message = "";
+							root.had_error = false;
+							root.error_message = "";
 							error-popup.close();
 						}
 					}

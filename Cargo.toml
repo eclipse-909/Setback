@@ -1,5 +1,6 @@
 [workspace]
 members = [
+	"admin_controller",
 	"game",
 	"server",
 	"shared",

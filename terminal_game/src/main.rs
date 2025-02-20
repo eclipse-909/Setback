@@ -12,12 +12,11 @@ use {
 async fn main() {
 	let mut game: GameBuilder = GameBuilder::default();
 	game.game.players.push(Player::new_singleplayer_self(0));
-	for i in 1..8 {
-		game.add_ai(i % 2);
+	for _ in 1..8 {
+		game.add_ai();
 	}
 	let mut game_runtime: GameRuntime = game.start_game();
 	tokio::select! {
-		_ = game_runtime.handle => {return;}
 		_ = async {
 			loop {
 				match game_runtime.event_emitter.recv().await {
@@ -84,5 +83,6 @@ async fn main() {
 				}
 			}
 		} => {}
+		_ = game_runtime.cancel_token.cancelled() => {}
 	}
 }

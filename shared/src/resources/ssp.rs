@@ -114,24 +114,32 @@ pub enum Protocol {
 	///Host-Client ---GameMeta--> Game<br>
 	///All-Clients <--GameMeta--- Game<br>
 	///Request and response<br>
-	///Spontaneous<br><br>
+	///Spontaneous<br>
+	///Host only on request<br><br>
 	///Host can update the settings in the lobby which gets sent to the game.
 	///The game updates its state and propagates the message to all other clients.
 	GameMeta(GameMeta),
-	///Client ---Player--> Game<br>
-	///All-Clients <--Player--- Game<br>
-	///Request and response<br>
-	///Spontaneous<br><br>
-	///The host or a player can update the player data of that player.
-	///The game updates its state and propagates the message to all other clients.
-	Player{data: PlayerData, index: u8},
-	///Client ---Players--> Game<br>
+	///Client ---UpdatePlayerTeam--> Game<br>
+	///All-Clients <--UpdatePlayerTeam--- Game<br>
+	///Request only<br>
+	///The host or a player can update the team of that player.
+	UpdatePlayerTeam{index: u8, team: u8},
+	///Client ---UpdatePlayerType--> Game<br>
+	///All-Clients <--UpdatePlayerType--- Game<br>
+	///Request only<br>
+	///The host or a player can update the type of that player.
+	UpdatePlayerType{index: u8, human: bool},
+	///Host-Client ---AddPlayer--> Game<br>
 	///All-Clients <--Players--- Game<br>
-	///Request and response<br>
+	///Response only<br>
 	///Spontaneous<br><br>
+	///OR<br><br>
+	///Client ---RemovePlayer--> Game<br>
+	///All-Clients <--Players--- Game<br>
+	///Response only<br><br>
 	///When information about multiple players changes or the number of players changes.
 	///The game updates its state and propagates the message to all other clients.
-	Players(Vec<PlayerData>),
+	Players{players: Vec<PlayerData>, local_player_index: u8},
 	///Client ---Ready--> Game<br>
 	///All-Clients <--Ready--- Game<br>
 	///Request and response<br>
@@ -154,5 +162,52 @@ pub enum Protocol {
 	///Response and request<br>
 	///Spontaneous<br><br>
 	///The game emits these events to the client. Sometimes the client will send a message back to the game.
-	GameEvent(GameEvent)
+	GameEvent(GameEvent),
+	///Host-Client ---AddPlayer--> Game<br>
+	///All-Clients <--Players--- Game<br>
+	///Request only<br>
+	///Host only<br><br>
+	///The host can add a player to the game.
+	AddPlayer,
+	///Host-Client ---RemovePlayer--> Game<br>
+	///All-Clients <--Players--- Game<br>
+	///Request only<br>
+	///Host only<br><br>
+	///The host can remove a player from the game.
+	RemovePlayer{index: u8},
+	///Client ---Admin--> Server<br>
+	///Server <--Admin--- Client<br>
+	///Request and response<br>
+	///Client sends an admin message to the server.
+	Admin(AdminMessage)
+}
+
+///Admins can use these messages to mess with the server with admin privileges.
+#[derive(Encode, Decode)]
+pub enum AdminMessage {
+	///Admin ---Authorize--> Server<br>
+	///Admin <--AuthorizeResponse--- Server<br>
+	///Request only<br><br>
+	///Client sends an authorize message to the server with their username, password, account_id, and admin_password.
+	Authorize{admin_password: String},
+	///Admin ---Any--> Server<br>
+	///Admin <--AuthorizeResponse--- Server<br>
+	///Authorization error response only<br><br>
+	///Server sends an authorize response to the client to indicate if the client now has admin privileges.
+	AuthorizeResponse(bool),
+	///Admin ---DisableCreateGame--> Server<br>
+	///Admin <--DisableCreateGame--- Server<br>
+	///Request and response<br><br>
+	///Disables the ability to create games.
+	DisableCreateGame,
+	///Admin ---EnableCreateGame--> Server<br>
+	///Admin <--EnableCreateGame--- Server<br>
+	///Request and response<br><br>
+	///Enables the ability to create games.
+	EnableCreateGame,
+	///Admin ---NumActiveGames--> Server<br>
+	///Admin <--NumActiveGames--- Server<br>
+	///Request and response<br><br>
+	///Server sends the number of active games to the admin.
+	NumActiveGames(u8)
 }

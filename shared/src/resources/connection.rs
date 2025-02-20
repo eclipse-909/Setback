@@ -2,7 +2,7 @@ use {
 	super::{
 		ssp::{Ssp, Protocol},
 		util::Error,
-		game_items::{GameFilter, GameMeta, PlayerData, GameEvent}
+		game_items::{GameFilter, GameMeta, GameEvent}
 	},
 	std::{
 		net::{Ipv4Addr, SocketAddrV4},
@@ -19,7 +19,7 @@ use {
 	tokio_util::sync::CancellationToken,
 	bincode::{Decode, Encode, config::standard},
 	serde::{Deserialize, Serialize},
-	awc::Client
+	reqwest::{Client, StatusCode}
 };
 
 pub const SERVER_PORT: u16 = 42069;
@@ -36,8 +36,12 @@ const WEBSITE_URL: &str = if cfg!(debug_assertions) {
 	"http://127.0.0.1:8080/"//TODO change this to actual URL once website is deployed
 };
 
+macro_rules! website {
+	($path:expr) => {format!("{}{}", WEBSITE_URL, $path)};
+}
+
 ///This standardizes the method of communication between the server and clients by putting the logic in one place.
-trait SetbackConnection {
+pub trait SetbackConnection {
 	fn writer(&mut self) -> &mut UnboundedSender<Ssp>;
 	#[inline(always)]
 	fn send(&mut self, ssp: Ssp) {self.writer().send(ssp).unwrap();}
@@ -62,9 +66,9 @@ trait SetbackConnection {
 ///Connection to the server, owned by the client.
 pub struct ServerConnection {
 	message_tx: UnboundedSender<Ssp>,
-	cancellation_token: CancellationToken,
+	pub cancellation_token: CancellationToken,
 	api: Client,
-	account_id: u32,//TODO I might just store this in the client's session cookies rather than in this struct
+	pub account_id: u32,//TODO I might just store this in the client's session cookies rather than in this struct
 	pub ready: bool
 }
 
@@ -74,38 +78,46 @@ impl ServerConnection {
 	///Use the [callback] to handle when a message is received or when there's an error.
 	///The tcp stream stops listening when the callback is invoked with a ClientError, or when [Self::shutdown] is called.
 	///Returning None means it couldn't connect to the server.
-	pub async fn new_connection(username: &str, password: &str, ssp_callback: fn(message: Result<Ssp, Error>), on_write_error: impl Fn(Error) + Send + 'static) -> Option<Self> {
-		//set up awc client
-		let api: Client = Client::default();
+	pub async fn new_connection(username: String, password: String, ssp_callback: impl Fn(Option<Ssp>) + Send + Sync + 'static, on_write_error: impl Fn(Error) + Send + 'static) -> Result<Self, Error> {
+		//set up reqwest client
+		let api: Client = Client::builder()
+			.cookie_store(true)
+			.build()
+			.unwrap();
 		
 		//login and get account_id
 		let account_id: u32 = api
 			//TODO fix the URL to match the updated API
 			//TODO username and password need to be filtered/sanitized/verified
-			.get(format!("{}api/login?username={}&password={}", WEBSITE_URL, username, password).as_str())
+			.post(website!("api/login"))
+			.json(&LoginCredentials {username, password})
 			.send()
 			.await
-			.ok()?
-			.cookie("account_id")?
+			.map_err(|_|Error::NetworkIO)?
+			.error_for_status()
+			.map_err(|err| {
+				match err.status() {
+					Some(StatusCode::UNAUTHORIZED) => {Error::Authentication}
+					_ => {Error::ServerError}
+				}
+			})?
+			.cookies()
+			.find(|cookie| cookie.name() == "account_id")
+			.ok_or(Error::ServerError)?
 			.value()
 			.parse::<u32>()
-			.ok()?;
+			.map_err(|_|Error::ServerError)?;
 		
 		//Read thread
-		let (mut reader, mut writer) = TcpStream::connect(SERVER_SOCKET).await.ok()?.into_split();
+		let (mut reader, mut writer) = TcpStream::connect(SERVER_SOCKET).await.map_err(|_|Error::NetworkIO)?.into_split();
 		let cancellation_token: CancellationToken = CancellationToken::new();
 		let read_cancel_token: CancellationToken = cancellation_token.clone();
 		tokio::spawn(async move {tokio::select! {
 			_ = async move {
 				let mut buffer: Vec<u8> = Vec::with_capacity(std::mem::size_of::<Ssp>());
 				loop {
-					let res: Result<Ssp, Error> = Self::read(&mut reader, &mut buffer).await.map_err(|_|Error::NetworkIO);
-					// let is_err: bool = res.is_err();
-					ssp_callback(res);
-					// if is_err {break;}
-					//TODO how do I handle the error here?
+					ssp_callback(Self::read(&mut reader, &mut buffer).await.ok());
 				}
-				//TODO do I need to handle the post-error here? If so, how?
 			} => {}
 			_ = read_cancel_token.cancelled() => {}
 		}});
@@ -127,11 +139,7 @@ impl ServerConnection {
 
 		let mut server_connection: Self = Self {message_tx, cancellation_token, api, account_id, ready: false};
 		server_connection.send(Ssp::new_with_src(Protocol::SyncID, account_id));
-		Some(server_connection)
-	}
-
-	pub async fn shutdown(self) {
-		self.cancellation_token.cancel();
+		Ok(server_connection)
 	}
 
 	pub fn send_error(&mut self, err: Error) {
@@ -155,14 +163,12 @@ impl ServerConnection {
 		self.send(Ssp::new_with_src(Protocol::GameMeta(meta_data), self.account_id))
 	}
 
-	///Host-only
-	pub fn send_player(&mut self, player_data: PlayerData, index: u8) {
-		self.send(Ssp::new_with_src(Protocol::Player{data: player_data, index}, self.account_id))
+	pub fn send_update_team(&mut self, index: u8, team: u8) {
+		self.send(Ssp::new_with_src(Protocol::UpdatePlayerTeam{index, team}, self.account_id))
 	}
 
-	///Host-only
-	pub fn send_players(&mut self, players: Vec<PlayerData>) {
-		self.send(Ssp::new_with_src(Protocol::Players(players), self.account_id))
+	pub fn send_update_player_type(&mut self, index: u8, human: bool) {
+		self.send(Ssp::new_with_src(Protocol::UpdatePlayerType{index, human}, self.account_id))
 	}
 
 	pub fn send_ready(&mut self, is_ready: bool) {
@@ -172,17 +178,20 @@ impl ServerConnection {
 	pub fn send_game_event(&mut self, event: GameEvent) {
 		self.send(Ssp::new_with_src(Protocol::GameEvent(event), self.account_id))
 	}
-	
-	///Logs out of your account by clearing session cookies.
-	pub async fn logout(&mut self) {
-		//TODO fix the URL for updated logout API
-		let _ = self.api.get(format!("{}api/account/logout", WEBSITE_URL).as_str()).send().await;
+
+	///Host-only
+	pub fn send_add_player(&mut self) {
+		self.send(Ssp::new_with_src(Protocol::AddPlayer, self.account_id))
+	}
+
+	///Host-only
+	pub fn send_remove_player(&mut self, index: u8) {
+		self.send(Ssp::new_with_src(Protocol::RemovePlayer{index}, self.account_id))
 	}
 	
-	///Fetches the account with the given ID.
-	pub async fn get_account(&mut self, account_id: u32) -> Option<AccountData> {
-		//TODO fix the URL for updated account API
-		self.api.get(format!("{}api/user/{}", WEBSITE_URL, account_id).as_str()).send().await.ok()?.json::<AccountData>().await.ok()
+	///Logs out of your account by clearing session cookies.
+	pub fn logout(&mut self, runtime: tokio::runtime::Handle) {
+		runtime.spawn(self.api.get(website!("api/account/logout")).send());
 	}
 }
 
@@ -229,11 +238,17 @@ impl Drop for ClientConnection {
 	}
 }
 
-#[derive(Encode, Decode, Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AccountData {
 	///alias for rowid in sqlite
 	pub account_id: u32,
 	pub username: String,
 	pub password: String,
 	pub last_active: String
+}
+
+#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
+pub struct LoginCredentials {
+	pub username: String,
+	pub password: String,
 }
