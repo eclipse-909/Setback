@@ -100,17 +100,17 @@ pub enum Protocol {
 	///Client <--Game--- Server<br>
 	///Response only<br><br>
 	///Server sends game info when client creates or joins a game.
-	Game(GameMeta, Vec<PlayerData>),
+	Game(GameMeta, Vec<PlayerData>, bool),
 	///Client ---SearchGames--> Server<br>
-	///Client <--GameMetas--- Server<br>
+	///Client <--PublicGames--- Server<br>
 	///Request only<br><br>
-	///Client sends a filter used for the server to send back a list of matching GameMetas.
+	///Client sends a filter used for the server to send back a list of matching PublicGames.
 	SearchGames(GameFilter),
 	///Client ---SearchGames--> Server<br>
-	///Client <--GameMetas--- Server<br>
+	///Client <--PublicGames--- Server<br>
 	///Response only<br><br>
-	///Client requests a list of public games and receives a list of GameMetas.
-	GameMetas(Vec<GameMeta>),
+	///Client requests a list of public games and receives a list of PublicGames.
+	PublicGames(Vec<PublicGame>),
 	///Host-Client ---GameMeta--> Game<br>
 	///All-Clients <--GameMeta--- Game<br>
 	///Request and response<br>
@@ -121,12 +121,12 @@ pub enum Protocol {
 	GameMeta(GameMeta),
 	///Client ---UpdatePlayerTeam--> Game<br>
 	///All-Clients <--UpdatePlayerTeam--- Game<br>
-	///Request only<br>
+	///Request and response<br>
 	///The host or a player can update the team of that player.
 	UpdatePlayerTeam{index: u8, team: u8},
 	///Client ---UpdatePlayerType--> Game<br>
 	///All-Clients <--UpdatePlayerType--- Game<br>
-	///Request only<br>
+	///Request and response<br>
 	///The host or a player can update the type of that player.
 	UpdatePlayerType{index: u8, human: bool},
 	///Host-Client ---AddPlayer--> Game<br>
@@ -145,12 +145,14 @@ pub enum Protocol {
 	///Request and response<br>
 	///Spontaneous<br><br>
 	///When a client ready-ups, the game updates the state and propagates it to all other clients.
-	Ready{is_ready: bool},
+	Ready{is_ready: bool, index: u8},
 	///Client <--Start--- Game<br>
+	///Response only<br>
 	///Spontaneous<br><br>
 	///Game tells clients when countdown ends.
 	Start,
 	///Client <--GameData--- Game<br>
+	///Response only<br>
 	///Spontaneous<br><br>
 	///Used to sync data between clients.
 	GameData(GameData),
@@ -210,4 +212,11 @@ pub enum AdminMessage {
 	///Request and response<br><br>
 	///Server sends the number of active games to the admin.
 	NumActiveGames(u8)
+}
+
+#[derive(Encode, Decode)]
+pub struct PublicGame {
+	pub players: u8,
+	pub join_code: u32,
+	pub game_meta: GameMeta,
 }

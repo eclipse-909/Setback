@@ -3,7 +3,7 @@
 use {
 	shared::{
 		game::{GameBuilder, GameRuntime},
-		ServerConnection, LoginCredentials, GameEvent, PlayerType, GameMeta, Error, Ssp, GameFilter
+		ServerConnection, GameEvent, PlayerType, GameMeta, Error, Ssp, GameFilter, Protocol, PlayerData, RoundScores, PublicGame
 	},
 	slint::{ModelRc, SharedString, Weak},
 	std::{
@@ -11,13 +11,14 @@ use {
 		f32::consts::PI,
 		fs::{self, File},
 		path::{PathBuf, Path},
-		sync::{Arc, LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}
+		sync::{Arc, LazyLock, RwLock, RwLockWriteGuard}
 	},
 	tokio::{
 		runtime::{Handle, Runtime},
 		sync::mpsc::{unbounded_channel, UnboundedSender}
 	},
-	bincode::config::standard
+	bincode::config::standard,
+	keyring::Entry
 };
 
 slint::include_modules!();
@@ -29,8 +30,8 @@ static PROJ_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
 		.unwrap()
 });
 
-static CREDENTIALS_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
-	PROJ_DIR.join(".cred")
+static USERNAME_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
+	PROJ_DIR.join(".user")
 });
 
 static SETTINGS_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
@@ -40,6 +41,8 @@ static SETTINGS_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
 static LOG_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
 	PROJ_DIR.join("log.txt")
 });
+
+const SERVICE: &str = "com.github.setback-game.setback";
 
 fn main() -> Result<(), slint::PlatformError> {
 	//Tokio runtime
@@ -65,61 +68,118 @@ fn main() -> Result<(), slint::PlatformError> {
 	let window_weak: Weak<MainWindow> = main_window.as_weak();
 	runtime.spawn(async move {
 		while let Some(event) = event_rx.recv().await {
-			match event {
-				// window_weak.upgrade_in_event_loop(move |window| {}); //this is how you update the ui from other threads/tasks
-				UiEvent::PromptCredentials => {}
-				UiEvent::ConnectionError(error) => {}
-				UiEvent::ConnectionSuccess => {}
-				UiEvent::AuthenticationError => {}
-				UiEvent::UpdateTeam{index, team} => {}
-				UiEvent::UpdatePlayerType {index, human} => {}
-				UiEvent::UpdatePlayers(players) => {}
-				UiEvent::UpdatePublicGames(game_metas) => {}
-				UiEvent::UpdateGame(game_meta) => {}
-				UiEvent::UnrecoverableError(error) => {
-					window_weak.upgrade_in_event_loop(move |window| {
-						window.set_had_error(true);
+			window_weak.upgrade_in_event_loop(move |window| {
+				match event {
+					UiEvent::PromptCredentials => {}
+					UiEvent::ConnectionSuccess => {}
+					UiEvent::AuthenticationError => {}
+					UiEvent::UpdateTeam{index, team} => {}
+					UiEvent::UpdatePlayerType {index, human} => {}
+					UiEvent::UpdatePlayers(players) => {
+						window.set_players(ModelRc::from(players.as_slice()));
+					}
+					UiEvent::UpdatePublicGames(public_games) => {
+						let games: Vec<Game> = public_games
+							.iter()
+							.map(|pub_game| Game {
+								join_code: SharedString::from(pub_game.join_code.to_string()),
+								players: pub_game.players as i32,
+								max_players: pub_game.game_meta.max_players as i32,
+								std_team: pub_game.game_meta.std_team_mode,
+								win_by_2: pub_game.game_meta.win_by_2,
+								negative_scores: pub_game.game_meta.negative_scores,
+								dealer_override: pub_game.game_meta.dealer_override
+							})
+							.collect();
+						window.set_games(ModelRc::from(games.as_slice()));
+					}
+					UiEvent::UpdateGame(game_meta) => {
+						window.set_std_team_mode(game_meta.std_team_mode);
+						window.set_win_by_2(game_meta.win_by_2);
+						window.set_negative_scores(game_meta.negative_scores);
+						window.set_dealer_override(game_meta.dealer_override);
+						window.set_max_score(game_meta.max_score as i32);
+						window.set_max_players(game_meta.max_players as i32);
+					}
+					UiEvent::UnrecoverableError(error) => {
+						window.set_error_location(ErrorLocation::MainMenu);
 						window.set_error_message(SharedString::from(&error));
-						window.global::<GameState>().invoke_set_state(SceneType::MainMenu, HostType::None);
-					}).unwrap();
-				},
-				UiEvent::MultiplayerError(error) => {}
-				UiEvent::GameError(error) => {}
-				UiEvent::PromptBid => {}
-				UiEvent::PromptCard => {}
-				UiEvent::RepromptBid => {}
-				UiEvent::RepromptCard => {}
-				UiEvent::PlayerBid {index, bid} => {}
-				UiEvent::PlayerPlayedCard {index, card} => {}
-				UiEvent::PlayerReadyUp {index, ready} => {}
-			}
+						window.invoke_set_state(SceneType::MainMenu, HostType::None);
+					}
+					UiEvent::RecoverableError(error, location) => {
+						window.set_error_location(location);
+						window.set_error_message(SharedString::from(&error));
+					}
+					UiEvent::PromptBid => {}
+					UiEvent::PromptCard => {}
+					UiEvent::RepromptBid => {}
+					UiEvent::RepromptCard => {}
+					UiEvent::PlayerBid {index, bid} => {}
+					UiEvent::PlayerPlayedCard {index, card} => {}
+					UiEvent::PlayerReadyUp{index, ready} => {}
+					UiEvent::PlayerTurn {index} => {}
+					UiEvent::RoundScores(round_scores) => {}
+					UiEvent::GameOver(items) => {}
+					UiEvent::DealCards => {}
+					UiEvent::UpdateHand(hand) => {}
+					UiEvent::StartGame => {}
+					UiEvent::EnterSetup{host} => {
+						window.set_scene(SceneType::Setup);
+						window.set_host(if host {HostType::Host} else {HostType::Client});
+					}
+				}
+			}).unwrap();
 		}
 	});
 
 	//UI event handlers
 	main_window.window().set_maximized(true);
+	
+	main_window.on_exit(||std::process::exit(0));
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	let runtime_clone: Handle = runtime.handle().clone();
+	main_window.on_multiplayer_clicked(move||multiplayer_clicked(game_clone.clone(), runtime_clone.clone()));
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	let runtime_clone: Handle = runtime.handle().clone();
+	main_window.on_handle_credentials(move|username, password|handle_credentials(game_clone.clone(), runtime_clone.clone(), username, password));
+	main_window.on_save_settings(save_settings);
+	main_window.on_load_settings(load_settings);
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	let runtime_clone: Handle = runtime.handle().clone();
+	main_window.on_set_state(move|scene, host|set_state(game_clone.clone(), runtime_clone.clone(), scene, host));
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	main_window.on_add_player(move||add_player(game_clone.clone()));
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	main_window.on_remove_player(move|index|remove_player(game_clone.clone(), index as u8));
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	main_window.on_set_player_team(move|index, team|set_player_team(game_clone.clone(), index as u8, team));
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	main_window.on_make_bid(move|bid|make_bid(game_clone.clone(), bid));
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	main_window.on_play_card(move|card|play_card(game_clone.clone(), card));
 
-	main_window.global::<GameState>().on_exit(||std::process::exit(0));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_set_state(move|scene, host|set_state(game_clone.clone(), runtime.handle().clone(), scene, host));
+	main_window.on_create_game(move|public|create_game(game_clone.clone(), public));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_make_bid(move|bid|make_bid(game_clone.clone(), bid));
+	main_window.on_join_game(move|code|join_game(game_clone.clone(), code));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_play_card(move|card|play_card(game_clone.clone(), card));
-	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_create_game(move|public|create_game(game_clone.clone(), public));
-	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_join_game(move|code|join_game(game_clone.clone(), code));
-	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_search_games(move|
+	main_window.on_search_games(move|
 		max_score_cmp, max_score_value, max_players_cmp, max_players_value, std_team_mode, win_by_2, negative_scores, dealer_override
 	|search_games(
 		game_clone.clone(), max_score_cmp, max_score_value, max_players_cmp, max_players_value, std_team_mode, win_by_2, negative_scores, dealer_override
 	));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_get_game_meta(move||get_game_meta(game_clone.clone()));
+	main_window.on_send_game_meta(move|
+		std_team_mode, win_by_2, negative_scores, dealer_override, max_score, max_players
+	|send_game_meta(
+		game_clone.clone(), std_team_mode, win_by_2, negative_scores, dealer_override, max_score as i8, max_players as u8
+	));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	main_window.global::<GameState>().on_ready_up(move|ready|ready_up(game_clone.clone(), ready));
+	main_window.on_ready_up(move|ready|ready_up(game_clone.clone(), ready));
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	main_window.on_logout(move||logout(game_clone.clone(), runtime.handle().clone()));
+	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
+	main_window.on_set_player_type(move|index, human|set_player_type(game_clone.clone(), index as u8, human));
 
 	main_window.run()
 }
@@ -171,24 +231,29 @@ enum Host {
 #[repr(u8)]
 enum UiEvent {
 	PromptCredentials,
-	ConnectionError(String),
 	ConnectionSuccess,
 	AuthenticationError,
 	UpdateTeam{index: u8, team: i32},
 	UpdatePlayerType{index: u8, human: bool},
 	UpdatePlayers(Vec<Player>),
-	UpdatePublicGames(Vec<GameMeta>),
+	UpdatePublicGames(Vec<PublicGame>),
 	UpdateGame(GameMeta),
 	UnrecoverableError(String),
-	MultiplayerError(String),
-	GameError(String),
+	RecoverableError(String, ErrorLocation),
 	PromptBid,
 	PromptCard,
 	RepromptBid,
 	RepromptCard,
 	PlayerBid{index: u8, bid: u8},
 	PlayerPlayedCard{index: u8, card: shared::Card},
-	PlayerReadyUp{index: u8, ready: bool}
+	PlayerReadyUp{index: u8, ready: bool},
+	PlayerTurn{index: u8},
+	RoundScores(RoundScores),
+	GameOver(Vec<i8>),
+	DealCards,
+	UpdateHand(Vec<shared::Card>),
+	StartGame,
+	EnterSetup{host: bool}
 }
 
 impl From<Comparison> for shared::Comparison {
@@ -221,66 +286,86 @@ impl From<Card> for shared::Card {
 	}
 }
 
+impl Default for Settings {
+	fn default() -> Self {
+		Settings {
+			master_volume: 100.0,
+			music_volume: 100.0,
+			ui_volume: 100.0,
+			resolution: SharedString::from("1920x1080"),
+			framerate: SharedString::from("60 FPS"),
+			vsync: true,
+			triple_buffering: true,
+			pass_keybind: SharedString::from("0"),
+			bid_2_keybind: SharedString::from("2"),
+			bid_3_keybind: SharedString::from("3"),
+			bid_4_keybind: SharedString::from("4"),
+			bid_5_keybind: SharedString::from("5"),
+			play_card_1_keybind: SharedString::from("1"),
+			play_card_2_keybind: SharedString::from("2"),
+			play_card_3_keybind: SharedString::from("3"),
+			play_card_4_keybind: SharedString::from("4"),
+			play_card_5_keybind: SharedString::from("5"),
+			play_card_6_keybind: SharedString::from("6"),
+			toggle_settings_keybind: SharedString::from("esc")
+		}
+	}
+}
+
 //Main menu functions
 
 ///Prompts user for credentials if necessary or creates connection to server with saved credentials.
 fn multiplayer_clicked(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle) {
-	let path: &Path = CREDENTIALS_PATH.as_path();
-	if path.exists() {
-		match fs::read(path) {
-			Ok(contents) => {
-				match bincode::decode_from_slice::<LoginCredentials, _>(contents.as_slice(), standard()) {
-					Ok((credentials, _)) => {
-						//file read successfully
-						runtime.spawn(async move {
-							match ServerConnection::new_connection(
-								credentials.username,
-								credentials.password,
-								ssp_callback(setback_game.clone()),
-								handle_error(setback_game.clone())
-							).await {
-								Ok(connection) => {
-									let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
-									game.connection = Some(connection);
-									game.event_tx.send(UiEvent::ConnectionSuccess).unwrap();
-								}
-								Err(error) => {
-									if let Error::Authentication = error {
-										setback_game.write().unwrap().event_tx.send(UiEvent::AuthenticationError).unwrap();
-									} else {
-										setback_game.write().unwrap().event_tx.send(UiEvent::ConnectionError(error.to_string())).unwrap();
-									}
+	let path: &Path = USERNAME_PATH.as_path();
+	match fs::read_to_string(path) {
+		Ok(username) => {
+			match Entry::new(SERVICE, username.as_str()).unwrap().get_password() {
+				Ok(password) => {
+					runtime.spawn(async move {
+						match ServerConnection::new_connection(
+							username,
+							password,
+							ssp_callback(setback_game.clone()),
+							handle_error(setback_game.clone())
+						).await {
+							Ok(connection) => {
+								let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
+								game.connection = Some(connection);
+								game.event_tx.send(UiEvent::ConnectionSuccess).unwrap();
+							}
+							Err(error) => {
+								if let Error::Authentication = error {
+									setback_game.write().unwrap().event_tx.send(UiEvent::AuthenticationError).unwrap();
+								} else {
+									setback_game.write().unwrap().event_tx.send(UiEvent::RecoverableError(error.to_string(), ErrorLocation::MultiplayerPopup)).unwrap();
 								}
 							}
-						});
-					}
-					Err(_) => {
-						//failed to decode credentials
-						//override the file with a new empty one
-						File::create(path).unwrap();
-						setback_game.write().unwrap().event_tx.send(UiEvent::PromptCredentials).unwrap();
-					}
+						}
+					});
 				}
-			}
-			Err(_) => {
-				//failed to read file
-				setback_game.write().unwrap().event_tx.send(UiEvent::ConnectionError(String::from("Could not load credentials. Make sure the .cred file can be opened and read, then try again."))).unwrap();
+				Err(keyring::Error::NoEntry) => {
+					File::create(path).unwrap();
+					setback_game.write().unwrap().event_tx.send(UiEvent::PromptCredentials).unwrap();
+				}
+				Err(keyring::Error::Ambiguous(_)) => {panic!("Ambiguous credentials")}//TODO handle error
+				Err(_) => {unreachable!()}
 			}
 		}
-	} else {
-		//create the dir/file
-		fs::create_dir_all(PROJ_DIR.as_path()).unwrap();
-		File::create(path).unwrap();
-		setback_game.write().unwrap().event_tx.send(UiEvent::PromptCredentials).unwrap();
+		Err(_) => {
+			File::create(path).unwrap();
+			setback_game.write().unwrap().event_tx.send(UiEvent::PromptCredentials).unwrap();
+		}
 	}
 }
 
 ///When the user submits their credentials, this function is called.
 fn handle_credentials(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle, username: SharedString, password: SharedString) {
 	runtime.spawn(async move {
+		let username: String = username.to_string();
+		let password: String = password.to_string();
 		match ServerConnection::new_connection(
-			username.to_string(),
-			password.to_string(),
+			username.clone(),
+			password.clone(),
 			ssp_callback(setback_game.clone()),
 			handle_error(setback_game.clone())
 		).await {
@@ -288,16 +373,39 @@ fn handle_credentials(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle, u
 				let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 				game.connection = Some(connection);
 				game.event_tx.send(UiEvent::ConnectionSuccess).unwrap();
+				fs::write(USERNAME_PATH.as_path(), username.as_str()).unwrap();
+				if let Err(keyring::Error::Ambiguous(_)) = Entry::new(SERVICE, username.as_str()).unwrap().set_password(password.as_str()) {
+					panic!("Ambiguous credentials");
+				}
 			}
 			Err(error) => {
 				if let Error::Authentication = error {
 					setback_game.write().unwrap().event_tx.send(UiEvent::AuthenticationError).unwrap();
 				} else {
-					setback_game.write().unwrap().event_tx.send(UiEvent::ConnectionError(error.to_string())).unwrap();
+					setback_game.write().unwrap().event_tx.send(UiEvent::RecoverableError(error.to_string(), ErrorLocation::MultiplayerPopup)).unwrap();
 				}
 			}
 		}
 	});
+}
+
+///Saves settings to disk
+fn save_settings(settings: Settings) {
+	bincode::encode_into_std_write(settings, &mut File::create(SETTINGS_PATH.as_path()).unwrap(), standard()).unwrap();
+}
+
+///Loads settings from disk
+fn load_settings() -> Settings {
+	match &mut File::open(SETTINGS_PATH.as_path()) {
+		Ok(mut file) => {
+			bincode::decode_from_std_read(&mut file, standard()).unwrap()
+		}
+		Err(_) => {
+			let settings: Settings = Settings::default();
+			save_settings(settings);
+			settings
+		}
+	}
 }
 
 //singleplayer and multiplayer functions
@@ -422,14 +530,14 @@ fn handle_error(setback_game: Arc<RwLock<SetbackGame>>) -> impl Fn(Error) + Send
 			Error::GameNotFound => {
 				match setback_game.read().unwrap().scene_type {
 					Scene::MainMenu => {setback_game.write().unwrap().event_tx.send(UiEvent::UnrecoverableError(error.to_string())).unwrap();}
-					Scene::Multiplayer => {setback_game.write().unwrap().event_tx.send(UiEvent::MultiplayerError(error.to_string())).unwrap();}
+					Scene::Multiplayer => {setback_game.write().unwrap().event_tx.send(UiEvent::RecoverableError(error.to_string(), ErrorLocation::Scene)).unwrap();}
 					_ => {unreachable!("Error in illegal scene.")}
 				}
 			}
 			Error::InvalidBid |
 			Error::InvalidCard |
 			Error::OutOfTurn => {
-				setback_game.write().unwrap().event_tx.send(UiEvent::GameError(error.to_string())).unwrap();
+				setback_game.write().unwrap().event_tx.send(UiEvent::RecoverableError(error.to_string(), ErrorLocation::Scene)).unwrap();
 			}
 			Error::ClientNotFound => unreachable!("Server-only error"),
 		}
@@ -438,10 +546,11 @@ fn handle_error(setback_game: Arc<RwLock<SetbackGame>>) -> impl Fn(Error) + Send
 
 fn add_player(setback_game: Arc<RwLock<SetbackGame>>) {
 	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
+	let local_player_index: u8 = game.local_player_index;
 	match &mut game.host_type {
 		Host::SingleplayerSetup(game_builder) => {
 			game_builder.add_ai();
-			let players: Vec<Player> = as_ui_player_vec(game_builder.game.players.as_slice());
+			let players: Vec<Player> = as_ui_player_vec(local_player_index, game_builder.game.players.as_slice());
 			game.event_tx.send(UiEvent::UpdatePlayers(players)).unwrap();
 		}
 		Host::Host => {
@@ -453,10 +562,11 @@ fn add_player(setback_game: Arc<RwLock<SetbackGame>>) {
 
 fn remove_player(setback_game: Arc<RwLock<SetbackGame>>, index: u8) {
 	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
+	let local_player_index: u8 = game.local_player_index;
 	match &mut game.host_type {
 		Host::SingleplayerSetup(game_builder) => {
 			game_builder.game.players.remove(index as usize);
-			let players: Vec<Player> = as_ui_player_vec(game_builder.game.players.as_slice());
+			let players: Vec<Player> = as_ui_player_vec(local_player_index, game_builder.game.players.as_slice());
 			game.event_tx.send(UiEvent::UpdatePlayers(players)).unwrap();
 		}
 		Host::Host => {
@@ -545,21 +655,33 @@ fn search_games(
 	});
 }
 
-fn get_game_meta(setback_game: Arc<RwLock<SetbackGame>>) {
-	todo!("game meta params from UI");
-	// setback_game.write().unwrap().connection.as_mut().unwrap().send_game_meta();
+fn send_game_meta(
+	setback_game: Arc<RwLock<SetbackGame>>,
+	std_team_mode: bool,
+	win_by_2: bool,
+	negative_scores: bool,
+	dealer_override: bool,
+	max_score: i8,
+	max_players: u8
+) {
+	setback_game.write().unwrap().connection.as_mut().unwrap().send_game_meta(GameMeta {
+		std_team_mode,
+		win_by_2,
+		negative_scores,
+		dealer_override,
+		max_score,
+		max_players
+	});
 }
 
 fn ready_up(setback_game: Arc<RwLock<SetbackGame>>, ready: bool) {
-	setback_game.write().unwrap().connection.as_mut().unwrap().send_ready(ready);
+	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();	
+	let local_player_index: u8 = game.local_player_index;
+	game.connection.as_mut().unwrap().send_ready(ready, local_player_index);
 }
 
 fn logout(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle) {
 	setback_game.write().unwrap().connection.as_mut().unwrap().logout(runtime);
-}
-
-fn kick_player(setback_game: Arc<RwLock<SetbackGame>>, index: u8) {
-	set_player_type(setback_game, index, false);
 }
 
 fn set_player_type(setback_game: Arc<RwLock<SetbackGame>>, index: u8, human: bool) {
@@ -574,7 +696,50 @@ fn ssp_callback(game: Arc<RwLock<SetbackGame>>) -> impl Fn(Option<Ssp>) + Send +
 		let mut game: RwLockWriteGuard<SetbackGame> = game.write().unwrap();
 		match message {
 			Some(ssp) => {
-				todo!()
+				match ssp.protocol {
+					Protocol::SyncID => {}
+					Protocol::Err(error) => {
+						match error {
+							Error::InvalidBid => game.event_tx.send(UiEvent::RepromptBid).unwrap(),
+							Error::InvalidCard => game.event_tx.send(UiEvent::RepromptCard).unwrap(),
+							_ => game.event_tx.send(UiEvent::RecoverableError(error.to_string(), ErrorLocation::Scene)).unwrap()
+						}
+					}
+					Protocol::Game(game_meta, player_datas, host) => {
+						game.event_tx.send(UiEvent::EnterSetup{host}).unwrap();
+						game.event_tx.send(UiEvent::UpdateGame(game_meta)).unwrap();
+						game.event_tx.send(UiEvent::UpdatePlayers(as_ui_player_vec(game.local_player_index, player_datas.as_slice()))).unwrap();
+					}
+					Protocol::PublicGames(public_games) => game.event_tx.send(UiEvent::UpdatePublicGames(public_games)).unwrap(),
+					Protocol::GameMeta(game_meta) => game.event_tx.send(UiEvent::UpdateGame(game_meta)).unwrap(),
+					Protocol::UpdatePlayerTeam{index, team} => game.event_tx.send(UiEvent::UpdateTeam{index, team: team as i32}).unwrap(),
+					Protocol::UpdatePlayerType{index, human} => game.event_tx.send(UiEvent::UpdatePlayerType{index, human}).unwrap(),
+					Protocol::Players{players, local_player_index} => game.event_tx.send(UiEvent::UpdatePlayers(as_ui_player_vec(local_player_index, players.as_slice()))).unwrap(),
+					Protocol::Ready{is_ready, index} => game.event_tx.send(UiEvent::PlayerReadyUp{index, ready: is_ready}).unwrap(),
+					Protocol::Start => game.event_tx.send(UiEvent::StartGame).unwrap(),
+					Protocol::GameEvent(game_event) => {
+						match game_event {
+							GameEvent::PlayerBid{index, amount} => game.event_tx.send(UiEvent::PlayerBid{index, bid: amount}).unwrap(),
+							GameEvent::PlayerPlayedCard{index, card} => game.event_tx.send(UiEvent::PlayerPlayedCard{index, card}).unwrap(),
+							GameEvent::PlayerTurn{index} => game.event_tx.send(UiEvent::PlayerTurn{index}).unwrap(),
+							GameEvent::PromptBid{hand,..} => {
+								game.event_tx.send(UiEvent::UpdateHand(hand)).unwrap();
+								game.event_tx.send(UiEvent::PromptBid).unwrap();
+							}
+							GameEvent::PromptCard{hand,..} => {
+								game.event_tx.send(UiEvent::UpdateHand(hand)).unwrap();
+								game.event_tx.send(UiEvent::PromptCard).unwrap();
+							}
+							GameEvent::DealCards => game.event_tx.send(UiEvent::DealCards).unwrap(),
+							GameEvent::RoundScores(round_scores) => game.event_tx.send(UiEvent::RoundScores(round_scores)).unwrap(),
+							GameEvent::GameOver(team_scores) => game.event_tx.send(UiEvent::GameOver(team_scores)).unwrap(),
+							GameEvent::GameError(error) => game.event_tx.send(UiEvent::RecoverableError(error.to_string(), ErrorLocation::Scene)).unwrap(),
+						}
+					}
+					Protocol::Disconnect => unreachable!("Server doesn't send this to clients"),
+					Protocol::Admin(_) => unreachable!("Clients are not permitted to send or receive admin messages."),
+					_ => unreachable!("Request only")
+				}
 			}
 			None => {
 				game.connection = None;
@@ -586,22 +751,25 @@ fn ssp_callback(game: Arc<RwLock<SetbackGame>>) -> impl Fn(Option<Ssp>) + Send +
 
 //Util functions
 
-fn as_ui_player_vec(players: &[shared::Player]) -> Vec<Player> {
+fn as_ui_player_vec(local_player_index: u8, players: &[impl AsRef<PlayerData>]) -> Vec<Player> {
 	const ELLIPSE_RADIUS: f32 = 525.;
 	const ELLIPSE_HEIGHT_RATIO: f32 = 0.625;
 
-	players.iter()
+	let mut players: Vec<Player> = players
+		.iter()
 		.enumerate()
 		.map(|(index, player)| {
 			let theta: f32 = 2. * PI * index as f32 / players.len() as f32 + 3. * PI / 2.;
 			Player {
 				local: false,
-				is_human: !matches!(player.player_data.player_type, PlayerType::AI),
-				team: player.player_data.team_id as i32,
-				username: SharedString::from(&player.player_data.username),
+				is_human: !matches!(player.as_ref().player_type, PlayerType::AI),
+				team: player.as_ref().team_id as i32,
+				username: SharedString::from(&player.as_ref().username),
 				x: theta.cos() * ELLIPSE_RADIUS,
 				y: ELLIPSE_HEIGHT_RATIO * theta.sin() * ELLIPSE_RADIUS
 			}
 		})
-		.collect::<Vec<Player>>()
+		.collect::<Vec<Player>>();
+	players[local_player_index as usize].local = true;
+	players
 }

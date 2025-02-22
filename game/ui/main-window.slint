@@ -65,48 +65,35 @@ export struct Game {
 	dealer_override: bool
 }
 
-export global GameState {
-	in property <SceneType> scene: SceneType.MainMenu;
-	in property <HostType> host: HostType.None;
-	// in property <[Player]> players: [];	//Use this for production
-	in property <[Player]> players:[		//use this for slint preview
-		{username: "Player 1 (Me)", is_human: true, team: 0, local: true, x: 0px, y: 328.125px},
-		{username: "Player 2", is_human: false, team: 1, local: false, x: -371.231px, y: 232.091px},
-		{username: "Player 3", is_human: false, team: 0, local: false, x: -525px, y: 0px},
-        {username: "Player 4", is_human: false, team: 1, local: false, x: -371.231px, y: -232.091px},
-        {username: "Player 5", is_human: false, team: 0, local: false, x: 0px, y: -328.125px},
-        {username: "Player 6", is_human: false, team: 1, local: false, x: 371.231px, y: -232.091px},
-        {username: "Player 7", is_human: false, team: 0, local: false, x: 525px, y: 0px},
-        {username: "Player 8", is_human: false, team: 1, local: false, x: 371.231px, y: 232.091px}
-	];
-	// in property <[Game]> games: [];	//Use this for production
-	in property <[Game]> games:[		//use this for slint preview
-		{join_code: "123456", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
-		{join_code: "123457", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
-		{join_code: "123458", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
-		{join_code: "123459", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true}
-	];
+export enum ErrorLocation {
+	None,
+	MainMenu,
+	MultiplayerPopup,
+	///Whichever of the remaining scenes the error occurred in (Multiplayer, Setup, Game)
+	Scene
+}
 
-	callback exit();
-	callback set_state(scene: SceneType, host: HostType);
-
-	callback make_bid(bid: int);
-	callback play_card(card: Card);
-
-	callback create_game(public: bool);
-	callback join_game(join_code: string);
-	callback search_games(
-		max_score_cmp: Comparison,
-		max_score_value: int,
-		max_players_cmp: Comparison,
-		max_players_value: int,
-		std_team_mode: bool,
-		win_by_2: bool,
-		negative_scores: bool,
-		dealer_override: bool
-	);
-	callback get_game_meta();
-	callback ready_up(is_ready: bool);
+@rust-attr(derive(bincode::Encode, bincode::Decode))
+export struct Settings {
+	master_volume: float,
+	music_volume: float,
+	ui_volume: float,
+	resolution: string,
+	framerate: string,
+	vsync: bool,
+	triple_buffering: bool,
+	pass_keybind: string,
+	bid_2_keybind: string,
+	bid_3_keybind: string,
+	bid_4_keybind: string,
+	bid_5_keybind: string,
+	play_card_1_keybind: string,
+	play_card_2_keybind: string,
+	play_card_3_keybind: string,
+	play_card_4_keybind: string,
+	play_card_5_keybind: string,
+	play_card_6_keybind: string,
+	toggle_settings_keybind: string
 }
 
 component SetupPlayer inherits HorizontalLayout {
@@ -204,7 +191,7 @@ component SetupPlayer inherits HorizontalLayout {
 }
 
 // Settings component that can be reused in both the settings scene and game popup
-component Settings {
+component SettingsPanel {
     in property <bool> show-back-button: true;
     callback back;
     
@@ -214,7 +201,7 @@ component Settings {
 
         // Settings tabs
         settings-tabs := StylizedTabView {
-            tabs: ["Audio", "Video", "Keybinds"];
+            tabs: ["Audio", "Video", "Keybinds", "Account"];
             
             // Audio Settings
             if settings-tabs.active-tab == 0 : VerticalLayout {
@@ -238,7 +225,7 @@ component Settings {
                     StylizedSlider {
                         width: 300px;
                         height: 32px;
-                        value: 100;
+                        value: GlobalSettings.settings.master_volume;
 						step: 0.1;
                     }
                 }
@@ -260,7 +247,7 @@ component Settings {
                     StylizedSlider {
                         width: 300px;
                         height: 32px;
-                        value: 100;
+                        value: GlobalSettings.settings.music_volume;
 						step: 0.1;
                     }
                 }
@@ -282,7 +269,7 @@ component Settings {
                     StylizedSlider {
                         width: 300px;
                         height: 32px;
-                        value: 100;
+                        value: GlobalSettings.settings.ui_volume;
 						step: 0.1;
                     }
                 }
@@ -326,7 +313,7 @@ component Settings {
                         width: 200px;
                         height: 32px;
                         choices: ["120 FPS", "60 FPS", "30 FPS", "Unlimited"];
-                        value: "60 FPS";
+                        value: GlobalSettings.settings.framerate;
                         selected(value) => {
                             // Handle framerate change
                         }
@@ -343,7 +330,7 @@ component Settings {
                         vertical-alignment: center;
                     }
                     StylizedCheckbox {
-                        checked: true;
+                        checked: GlobalSettings.settings.vsync;
                     }
                 }
                 
@@ -357,7 +344,7 @@ component Settings {
                         vertical-alignment: center;
                     }
                     StylizedCheckbox {
-                        checked: false;
+                        checked: GlobalSettings.settings.triple_buffering;
                     }
                 }
             }
@@ -386,11 +373,11 @@ component Settings {
                         }
                         
                         for bind[i] in [
-                            { name: "Pass", key: "0" },
-                            { name: "Bid 2", key: "2" },
-                            { name: "Bid 3", key: "3" },
-                            { name: "Bid 4", key: "4" },
-                            { name: "Bid 5", key: "5" }
+                            { name: "Pass", key: GlobalSettings.settings.pass_keybind },
+                            { name: "Bid 2", key: GlobalSettings.settings.bid_2_keybind },
+                            { name: "Bid 3", key: GlobalSettings.settings.bid_3_keybind },
+                            { name: "Bid 4", key: GlobalSettings.settings.bid_4_keybind },
+                            { name: "Bid 5", key: GlobalSettings.settings.bid_5_keybind }
                         ] : HorizontalLayout {
                             spacing: 20px;
                             alignment: space-around;
@@ -454,12 +441,12 @@ component Settings {
                         }
                         
                         for bind[i] in [
-                            { name: "Play Card 1", key: "1" },
-                            { name: "Play Card 2", key: "2" },
-                            { name: "Play Card 3", key: "3" },
-                            { name: "Play Card 4", key: "4" },
-                            { name: "Play Card 5", key: "5" },
-                            { name: "Play Card 6", key: "6" }
+                            { name: "Play Card 1", key: GlobalSettings.settings.play_card_1_keybind },
+                            { name: "Play Card 2", key: GlobalSettings.settings.play_card_2_keybind },
+                            { name: "Play Card 3", key: GlobalSettings.settings.play_card_3_keybind },
+                            { name: "Play Card 4", key: GlobalSettings.settings.play_card_4_keybind },
+                            { name: "Play Card 5", key: GlobalSettings.settings.play_card_5_keybind },
+                            { name: "Play Card 6", key: GlobalSettings.settings.play_card_6_keybind }
                         ] : HorizontalLayout {
                             spacing: 20px;
                             alignment: space-around;
@@ -541,7 +528,7 @@ component Settings {
                                 border-radius: 4px;
                                 
                                 BaseText {
-                                    text: "esc";
+                                    text: GlobalSettings.settings.toggle_settings_keybind;
                                     font-size: 20px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
@@ -564,6 +551,25 @@ component Settings {
                     }
                 }
             }
+
+			if settings-tabs.active-tab == 3 : VerticalLayout {
+				padding: 40px;
+				spacing: 30px;
+
+				/*
+				Account settings:
+
+				if signed-in:
+					display text: "Signed in as {username}"
+					logout button
+
+				if not signed-in:
+					sign-in button
+						//popup with login interface
+					sign-up button
+						//opens website in browser
+				*/	
+			}
         }
         
         // Version display
@@ -582,17 +588,88 @@ component DarkScreen inherits Rectangle {
     height: 100%;
 }
 
+global GlobalSettings {
+	in-out property <Settings> settings;
+}
+
 export component MainWindow inherits Window {
 	width: 1920px;
 	height: 1080px;
     title: "Setback";
 	icon: @image-url("../assets/images/cardsIcon.png");
 
-	in-out property <bool> had_error: false;
+	init => {
+		GlobalSettings.settings = load_settings();
+	}
+
+	in-out property <ErrorLocation> error_location: ErrorLocation.None;
 	in-out property <string> error_message;
+	in-out property <SceneType> scene: SceneType.MainMenu;
+	in-out property <HostType> host: HostType.None;
+	// in property <[Player]> players: [];	//Use this for production
+	in-out property <[Player]> players:[	//use this for slint preview
+		{username: "Player 1 (Me)", is_human: true, team: 0, local: true, x: 0px, y: 328.125px},
+		{username: "Player 2", is_human: false, team: 1, local: false, x: -371.231px, y: 232.091px},
+		{username: "Player 3", is_human: false, team: 0, local: false, x: -525px, y: 0px},
+        {username: "Player 4", is_human: false, team: 1, local: false, x: -371.231px, y: -232.091px},
+        {username: "Player 5", is_human: false, team: 0, local: false, x: 0px, y: -328.125px},
+        {username: "Player 6", is_human: false, team: 1, local: false, x: 371.231px, y: -232.091px},
+        {username: "Player 7", is_human: false, team: 0, local: false, x: 525px, y: 0px},
+        {username: "Player 8", is_human: false, team: 1, local: false, x: 371.231px, y: 232.091px}
+	];
+	// in property <[Game]> games: [];	//Use this for production
+	in-out property <[Game]> games:[	//use this for slint preview
+		{join_code: "123456", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
+		{join_code: "123457", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
+		{join_code: "123458", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
+		{join_code: "123459", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true}
+	];
+	in-out property <bool> std_team_mode: true;
+	in-out property <bool> win_by_2: false;
+	in-out property <bool> negative_scores: true;
+	in-out property <bool> dealer_override: false;
+	in-out property <int> max_score: 21;
+	in-out property <int> max_players: 8;
+
+	callback exit();
+	callback multiplayer_clicked();
+	callback handle_credentials(username: string, password: string);
+	callback save_settings(settings: Settings);
+	callback load_settings() -> Settings;
+
+	callback set_state(scene: SceneType, host: HostType);
+	callback add_player();
+	callback remove_player(index: int);
+	callback set_player_team(index: int, team: int);
+	callback make_bid(bid: int);
+	callback play_card(card: Card);
+
+	callback create_game(public: bool);
+	callback join_game(join_code: string);
+	callback search_games(
+		max_score_cmp: Comparison,
+		max_score_value: int,
+		max_players_cmp: Comparison,
+		max_players_value: int,
+		std_team_mode: bool,
+		win_by_2: bool,
+		negative_scores: bool,
+		dealer_override: bool
+	);
+	callback send_game_meta(
+		std_team_mode: bool,
+		win_by_2: bool,
+		negative_scores: bool,
+		dealer_override: bool,
+		max_score: int,
+		max_players: int
+	);
+	callback ready_up(is_ready: bool);
+	callback logout();
+	callback set_player_type(index: int, human: bool);
 
 	// Main Menu Scene
-	if GameState.scene == SceneType.MainMenu : Rectangle {
+	if root.scene == SceneType.MainMenu : Rectangle {
 		width: 100%;
 		height: 100%;
 		background: Palette.Green;
@@ -627,9 +704,9 @@ export component MainWindow inherits Window {
 				text: "Singleplayer";
 				font-size: 42px;
 				clicked => {
-					GameState.scene = SceneType.Setup;
-					GameState.host = HostType.SingleplayerSetup;
-					GameState.set_state(GameState.scene, GameState.host);
+					root.scene = SceneType.Setup;
+					root.host = HostType.SingleplayerSetup;
+					root.set_state(root.scene, root.host);
 				}
 			}
 
@@ -638,6 +715,7 @@ export component MainWindow inherits Window {
 				font-size: 42px;
 				clicked => {
 					multiplayer-popup.show();
+					darkScreenMainMenu.visible = true;
 				}
 			}
 
@@ -645,27 +723,26 @@ export component MainWindow inherits Window {
 				text: "Settings";
 				font-size: 42px;
 				clicked => {
-					GameState.scene = SceneType.Settings;
-					GameState.set_state(GameState.scene, GameState.host);
+					root.scene = SceneType.Settings;
+					root.set_state(root.scene, root.host);
 				}
 			}
 
 			exit := StylizedButton {
 				text: "Exit";
 				font-size: 42px;
-				clicked => { GameState.exit(); }
+				clicked => { root.exit(); }
 			}
 		}
 
 		// Multiplayer Popup
 		darkScreenMainMenu := DarkScreen {}
-
 		multiplayer-popup := PopupWindow {
 			width: 600px;
 			height: 600px;
 			x: 715px;
 			y: (parent.height - self.height) / 2;
-			close-policy: close-on-click-outside;
+			close-policy: no-auto-close;
 
 			Rectangle {
 				width: 100%;
@@ -687,10 +764,11 @@ export component MainWindow inherits Window {
 						font-size: 32px;
 						width: 450px;
 						clicked => {
-							GameState.scene = SceneType.Setup;
-							GameState.host = HostType.Host;
-							GameState.set_state(GameState.scene, GameState.host);
+							root.scene = SceneType.Setup;
+							root.host = HostType.Host;
+							root.set_state(root.scene, root.host);
 							multiplayer-popup.close();
+							darkScreenMainMenu.visible = false;
 						}
 					}
 
@@ -699,10 +777,11 @@ export component MainWindow inherits Window {
 						font-size: 32px;
 						width: 450px;
 						clicked => {
-							GameState.scene = SceneType.Setup;
-							GameState.host = HostType.Host;
-							GameState.set_state(GameState.scene, GameState.host);
+							root.scene = SceneType.Setup;
+							root.host = HostType.Host;
+							root.set_state(root.scene, root.host);
 							multiplayer-popup.close();
+							darkScreenMainMenu.visible = false;
 						}
 					}
 
@@ -721,9 +800,10 @@ export component MainWindow inherits Window {
 						font-size: 32px;
 						width: 450px;
 						clicked => {
-							GameState.scene = SceneType.Multiplayer;
-							GameState.set_state(GameState.scene, GameState.host);
+							root.scene = SceneType.Multiplayer;
+							root.set_state(root.scene, root.host);
 							multiplayer-popup.close();
+							darkScreenMainMenu.visible = false;
 						}
 					}
 
@@ -733,6 +813,7 @@ export component MainWindow inherits Window {
 						width: 450px;
 						clicked => {
 							multiplayer-popup.close();
+							darkScreenMainMenu.visible = false;
 						}
 					}
 				}
@@ -779,10 +860,10 @@ export component MainWindow inherits Window {
 						clicked => {
 							join.visible = false;
 							options.visible = true;
-							GameState.join_game(input.text);
+							root.join_game(input.text);
 							multiplayer-popup.close();
-							GameState.host = HostType.Client;
-							GameState.set_state(GameState.scene, GameState.host);
+							root.host = HostType.Client;
+							root.set_state(root.scene, root.host);
 						}
 					}
 
@@ -801,7 +882,7 @@ export component MainWindow inherits Window {
 
 		//error popup
 		init => {
-			if root.had_error {
+			if root.error_location == ErrorLocation.MainMenu {
 				error-popup.show();
 			}
 		}
@@ -840,7 +921,7 @@ export component MainWindow inherits Window {
 						width: 100px;
 						height: 40px;
 						clicked => {
-							root.had_error = false;
+							root.error_location = ErrorLocation.None;
 							root.error_message = "";
 							error-popup.close();
 						}
@@ -851,7 +932,7 @@ export component MainWindow inherits Window {
 	}
 
 	//Setup
-	if GameState.scene == SceneType.Setup : Rectangle {
+	if root.scene == SceneType.Setup : Rectangle {
 		width: 100%;
 		height: 100%;
 		background: Palette.Green;
@@ -907,9 +988,9 @@ export component MainWindow inherits Window {
 							height: 40px;
 							font-size: 20px;
 							clicked => { 
-								GameState.scene = SceneType.MainMenu;
-								GameState.host = HostType.None;
-								GameState.set_state(GameState.scene, GameState.host);
+								root.scene = SceneType.MainMenu;
+								root.host = HostType.None;
+								root.set_state(root.scene, root.host);
 								confirmLeave.close();
 							}
 						}
@@ -929,13 +1010,13 @@ export component MainWindow inherits Window {
 		}
 
 		// Player arrangement area
-		if GameState.players.length != 0: Rectangle {
+		if root.players.length != 0: Rectangle {
 			x: 100px;
 			y: 100px;
 			width: parent.width - 500px;
 			height: parent.height - 200px;
 			
-			for player[i] in GameState.players : PlayerDisplay {
+			for player[i] in root.players : PlayerDisplay {
 				x: player.x + (parent.width - self.width) / 2;
 				y: player.y + (parent.height - self.height) / 2;
 				
@@ -946,7 +1027,7 @@ export component MainWindow inherits Window {
 				is-ready: false; // TODO: Add ready state to Player struct
 				is-current-turn: false;
 				is-setup-mode: true;
-				can-edit: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+				can-edit: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
 				size: 200px;
 				
 				remove => {
@@ -1006,29 +1087,29 @@ export component MainWindow inherits Window {
 						height: 32px;
 						choices: ["Standard", "Custom"];
 						value: "Standard";
-						enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+						enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
 					}
 				}
 				
 				// Win by 2
 				StylizedCheckbox {
 					text: "Win by 2";
-					checked: false;
-					enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+					checked: root.win_by_2;
+					enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
 				}
 				
 				// Negative Scores
 				StylizedCheckbox {
 					text: "Negative Scores";
-					checked: false;
-					enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+					checked: root.negative_scores;
+					enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
 				}
 				
 				// Dealer Override
 				StylizedCheckbox {
 					text: "Dealer Override";
-					checked: false;
-					enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+					checked: root.dealer_override;
+					enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
 				}
 				
 				// Max Score
@@ -1042,10 +1123,10 @@ export component MainWindow inherits Window {
 					}
 					
 					StylizedSpinBox {
-						value: 11;
+						value: root.max_score;
 						minimum: 1;
 						maximum: 99;
-						enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+						enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
 					}
 				}
 				
@@ -1060,15 +1141,15 @@ export component MainWindow inherits Window {
 					}
 					
 					StylizedSpinBox {
-						value: 4;
+						value: root.max_players;
 						minimum: 2;
 						maximum: 8;
-						enabled: GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host;
+						enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
 					}
 				}
 				
 				// Add Player button
-				if GameState.host == HostType.SingleplayerSetup || GameState.host == HostType.Host : StylizedButton {
+				if root.host == HostType.SingleplayerSetup || root.host == HostType.Host : StylizedButton {
 					text: "Add Player";
 					font-size: 24px;
 					clicked => {
@@ -1080,13 +1161,13 @@ export component MainWindow inherits Window {
 				
 				// Start/Ready button
 				StylizedButton {
-					text: GameState.host == HostType.SingleplayerSetup ? "Start" : "Ready";
+					text: root.host == HostType.SingleplayerSetup ? "Start" : "Ready";
 					font-size: 32px;
 					clicked => {
-						if (GameState.host == HostType.SingleplayerSetup) {
-							GameState.host = HostType.SingleplayerPlaying;
-							GameState.scene = SceneType.Game;
-							GameState.set_state(GameState.scene, GameState.host);
+						if (root.host == HostType.SingleplayerSetup) {
+							root.host = HostType.SingleplayerPlaying;
+							root.scene = SceneType.Game;
+							root.set_state(root.scene, root.host);
 						} else {
 							// TODO: Implement ready state toggle
 						}
@@ -1094,7 +1175,7 @@ export component MainWindow inherits Window {
 				}
 				
 				// Countdown timer (only visible in multiplayer when all players ready)
-				if GameState.host != HostType.SingleplayerSetup : HorizontalLayout {
+				if root.host != HostType.SingleplayerSetup : HorizontalLayout {
 					alignment: center;
 					spacing: 10px;
 					
@@ -1115,7 +1196,7 @@ export component MainWindow inherits Window {
 	}
 
 	//Multiplayer
-	if GameState.scene == SceneType.Multiplayer : Rectangle {
+	if root.scene == SceneType.Multiplayer : Rectangle {
 		width: 100%;
 		height: 100%;
 		background: Palette.Green;
@@ -1129,8 +1210,8 @@ export component MainWindow inherits Window {
 			y: 25px;
 			font-size: 24px;
 			clicked => {
-				GameState.scene = SceneType.MainMenu;
-				GameState.set_state(GameState.scene, GameState.host);
+				root.scene = SceneType.MainMenu;
+				root.set_state(root.scene, root.host);
 			}
 		}
 		
@@ -1157,8 +1238,8 @@ export component MainWindow inherits Window {
 							{ text: "Players", width: 120px },
 							{ text: "Team Mode", width: 120px },
 							{ text: "Win by 2", width: 100px },
-							{ text: "Neg. Scores", width: 120px },
-							{ text: "Dealer Override", width: 140px },
+							{ text: "Neg. Scores", width: 140px },
+							{ text: "Dealer Override", width: 160px },
 							{ text: "", width: 100px } // Join button column
 						] : Rectangle {
 							width: header.width;
@@ -1181,7 +1262,7 @@ export component MainWindow inherits Window {
 							spacing: 10px;
 							
 							// Sample game entries (replace with actual data)
-							for game in GameState.games : Rectangle {
+							for game in root.games : Rectangle {
 								height: 50px;
 								background: #ffffff20;
 								border-radius: 8px;
@@ -1193,7 +1274,7 @@ export component MainWindow inherits Window {
 									Rectangle {
 										width: 120px;
 										BaseText {
-											text: game.players;
+											text: game.players + " / " + game.max_players;
 											font-size: 18px;
 											horizontal-alignment: center;
 											vertical-alignment: center;
@@ -1227,7 +1308,7 @@ export component MainWindow inherits Window {
 									
 									// Negative Scores
 									Rectangle {
-										width: 120px;
+										width: 140px;
 										Image {
 											source: game.negative_scores ? 
 												@image-url("../assets/images/checkmark.png") : 
@@ -1241,7 +1322,7 @@ export component MainWindow inherits Window {
 									
 									// Dealer Override
 									Rectangle {
-										width: 140px;
+										width: 160px;
 										Image {
 											source: game.dealer_override
 												? @image-url("../assets/images/checkmark.png")
@@ -1260,7 +1341,7 @@ export component MainWindow inherits Window {
 										height: 30px;
 										font-size: 16px;
 										clicked => {
-											GameState.join_game(game.join_code);
+											root.join_game(game.join_code);
 										}
 									}
 								}
@@ -1272,13 +1353,14 @@ export component MainWindow inherits Window {
 			
 			// Filters panel (right side)
 			Rectangle {
-				width: 30%;
+				width: 20%;
 				background: #18181840;
 				border-radius: 16px;
 				
 				VerticalLayout {
 					padding: 20px;
 					spacing: 20px;
+					alignment: start;
 					
 					BaseText {
 						text: "Active Filters";
@@ -1288,12 +1370,12 @@ export component MainWindow inherits Window {
 					}
 					
 					// Team Mode filter
-					VerticalLayout {
+					HorizontalLayout {
 						spacing: 10px;
-						
-						StylizedCheckbox {
+
+						BaseText {
 							text: "Team Mode";
-							checked: false;
+							font-size: 24px;
 						}
 						
 						StylizedComboBox {
@@ -1301,7 +1383,6 @@ export component MainWindow inherits Window {
 							height: 32px;
 							choices: ["Standard", "Custom"];
 							value: "Standard";
-							enabled: false;
 						}
 					}
 					
@@ -1327,28 +1408,27 @@ export component MainWindow inherits Window {
 					VerticalLayout {
 						spacing: 10px;
 						
-						StylizedCheckbox {
+						BaseText {
 							text: "Max Score";
-							checked: false;
+							font-size: 24px;
 						}
 						
 						HorizontalLayout {
 							spacing: 10px;
 							
 							StylizedComboBox {
-								width: 40%;
+								width: 20%;
 								height: 32px;
 								choices: ["=", "≤", "≥", "<", ">", "≠"];
 								value: "=";
-								enabled: false;
 							}
 							
 							StylizedSpinBox {
-								width: 60%;
-								value: 11;
-								minimum: 1;
+								width: 20%;
+								height: 30%;
+								value: 21;
+								minimum: 2;
 								maximum: 99;
-								enabled: false;
 							}
 						}
 					}
@@ -1357,28 +1437,27 @@ export component MainWindow inherits Window {
 					VerticalLayout {
 						spacing: 10px;
 						
-						StylizedCheckbox {
+						BaseText {
 							text: "Max Players";
-							checked: false;
+							font-size: 24px;
 						}
 						
 						HorizontalLayout {
 							spacing: 10px;
 							
 							StylizedComboBox {
-								width: 40%;
+								width: 20%;
 								height: 32px;
 								choices: ["=", "≤", "≥", "<", ">", "≠"];
 								value: "=";
-								enabled: false;
 							}
 							
 							StylizedSpinBox {
-								width: 60%;
-								value: 4;
-								minimum: 2;
+								width: 20%;
+								height: 30%;
+								value: 8;
+								minimum: 4;
 								maximum: 8;
-								enabled: false;
 							}
 						}
 					}
@@ -1388,7 +1467,7 @@ export component MainWindow inherits Window {
 	}
 
 	//Game
-	if GameState.scene == SceneType.Game : Rectangle {
+	if root.scene == SceneType.Game : Rectangle {
 		width: 100%;
 		height: 100%;
 		background: Palette.Green;
@@ -1542,7 +1621,7 @@ export component MainWindow inherits Window {
 			height: parent.height - 100px;
 			
 			// Other players
-			for player[i] in GameState.players : PlayerDisplay {
+			for player[i] in root.players : PlayerDisplay {
 				visible: !player.local;
 				x: player.x + (parent.width - self.width) / 2;
 				y: player.y + (parent.height - self.height) / 2;
@@ -1673,7 +1752,7 @@ export component MainWindow inherits Window {
 						font-size: 32px;
 						enabled: bid == 0 || bid > 3; // TODO: Check against highest bid
 						clicked => {
-							GameState.make_bid(bid);
+							root.make_bid(bid);
 						}
 					}
 				}
@@ -1795,7 +1874,7 @@ export component MainWindow inherits Window {
 				border-width: 2px;
 				border-color: Palette.Gray;
 
-				Settings {
+				SettingsPanel {
 					show-back-button: true;
 					back => {
 						settings-popup.close();
@@ -1809,9 +1888,9 @@ export component MainWindow inherits Window {
 			message: "Are you sure you want to leave the game?";
 			
 			confirmed => {
-				GameState.scene = SceneType.MainMenu;
-				GameState.host = HostType.None;
-				GameState.set_state(GameState.scene, GameState.host);
+				root.scene = SceneType.MainMenu;
+				root.host = HostType.None;
+				root.set_state(root.scene, root.host);
 				darkScreenGame.visible = false;
 				gameMenu.close();
 			}
@@ -1819,7 +1898,7 @@ export component MainWindow inherits Window {
 	}
 
 	//Settings
-	if GameState.scene == SceneType.Settings : Rectangle {
+	if root.scene == SceneType.Settings : Rectangle {
 		width: 100%;
 		height: 100%;
 		background: Palette.Green;
@@ -1832,8 +1911,8 @@ export component MainWindow inherits Window {
 			y: 25px;
 			font-size: 24px;
 			clicked => {
-				GameState.scene = SceneType.MainMenu;
-				GameState.set_state(GameState.scene, GameState.host);
+				root.scene = SceneType.MainMenu;
+				root.set_state(root.scene, root.host);
 			}
 		}
 
@@ -1842,7 +1921,7 @@ export component MainWindow inherits Window {
 			height: 90%;
 			y: 100px;
 			
-			Settings {
+			SettingsPanel {
 				width: 100%;
 				height: 100%;
 			}

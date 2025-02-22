@@ -31,6 +31,8 @@ push() {
 
 alias build_game='cargo build -p game --profile=game-debug'
 
+alias cloc_setback='cloc --include-ext=rs,slint,html,js,css,sql,sh,toml,md --exclude-dir=target,.idea,.git .'
+
 alias docker-build-website='docker build -t setback-website -f ./website/Dockerfile .'
 alias docker-run-website='docker run --rm -p 80:8080 setback-website'
 

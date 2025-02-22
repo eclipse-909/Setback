@@ -171,8 +171,8 @@ impl ServerConnection {
 		self.send(Ssp::new_with_src(Protocol::UpdatePlayerType{index, human}, self.account_id))
 	}
 
-	pub fn send_ready(&mut self, is_ready: bool) {
-		self.send(Ssp::new_with_src(Protocol::Ready{is_ready}, self.account_id))
+	pub fn send_ready(&mut self, is_ready: bool, index: u8) {
+		self.send(Ssp::new_with_src(Protocol::Ready{is_ready, index}, self.account_id))
 	}
 
 	pub fn send_game_event(&mut self, event: GameEvent) {

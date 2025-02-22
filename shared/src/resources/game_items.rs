@@ -35,6 +35,12 @@ impl PlayerData {
 		Self {player_type, username, hand, team_id}
 	}
 }
+impl AsRef<PlayerData> for PlayerData {
+	#[inline(always)]
+    fn as_ref(&self) -> &PlayerData {
+        self
+    }
+}
 
 pub struct Player {
 	pub player_data: PlayerData,
@@ -83,6 +89,12 @@ impl Player {
 	}
 	
 	pub fn can_follow(&self, lead: Suit) -> bool { self.player_data.hand.iter().any(|card| {card.suit == lead}) }
+}
+impl AsRef<PlayerData> for Player {
+	#[inline(always)]
+    fn as_ref(&self) -> &PlayerData {
+        &self.player_data
+    }
 }
 
 #[repr(u8)]
@@ -186,12 +198,14 @@ impl Suit {
 #[derive(Encode, Decode, Clone)]
 pub struct GameMeta {
 	pub std_team_mode: bool,
-	pub max_score: i8,
 	pub win_by_2: bool,
-	pub negative_scores: bool
+	pub negative_scores: bool,
+	pub dealer_override: bool,
+	pub max_score: i8,
+	pub max_players: u8
 }
 impl Default for GameMeta {
-	fn default() -> Self {Self {std_team_mode: true, max_score: 21, win_by_2: false, negative_scores: true}}
+	fn default() -> Self {Self {std_team_mode: true, max_score: 21, win_by_2: false, negative_scores: true, dealer_override: false, max_players: 8}}
 }
 
 #[derive(Encode, Decode)]
