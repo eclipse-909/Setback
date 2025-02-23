@@ -1,0 +1,89 @@
+///Game state which stores what scene is currently active.
+export enum SceneType {
+	MainMenu,
+	Setup,
+	Multiplayer,
+	Game,
+	Settings
+}
+
+export enum HostType {
+	///Not in a game.
+	None,
+	SingleplayerSetup,
+	SingleplayerPlaying,
+	///Created a multiplayer game as the host.
+	Host,
+	///Joined a multiplayer game as a client.
+	Client
+}
+
+export struct SetupPlayerData {
+	username: string,
+	team: int,
+	is_human: bool,
+	local: bool,
+	x: length,
+	y: length
+}
+
+export enum Suit {
+	Hearts,
+	Clubs,
+	Diamonds,
+	Spades
+}
+
+export struct Card {
+	suit: Suit,
+	number: int
+}
+
+export enum Comparison {
+	Equal,
+	LessOrEqual,
+	GreaterOrEqual,
+	Less,
+	Greater,
+	NotEqual
+}
+
+export struct Game {
+	join_code: string,
+	players: int,
+	max_players: int,
+	std_team: bool,
+	win_by_2: bool,
+	negative_scores: bool,
+	dealer_override: bool
+}
+
+export enum ErrorLocation {
+	None,
+	MainMenu,
+	MultiplayerPopup,
+	///Whichever of the remaining scenes the error occurred in (Multiplayer, Setup, Game)
+	Scene
+}
+
+export struct Settings {
+	master_volume: float,
+	music_volume: float,
+	ui_volume: float,
+	resolution: string,
+	framerate: string,
+	vsync: bool,
+	triple_buffering: bool,
+	pass_keybind: string,
+	bid_2_keybind: string,
+	bid_3_keybind: string,
+	bid_4_keybind: string,
+	bid_5_keybind: string,
+	play_card_1_keybind: string,
+	play_card_2_keybind: string,
+	play_card_3_keybind: string,
+	play_card_4_keybind: string,
+	play_card_5_keybind: string,
+	play_card_6_keybind: string,
+	toggle_settings_keybind: string
+}

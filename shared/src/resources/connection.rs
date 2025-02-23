@@ -31,9 +31,9 @@ const SERVER_SOCKET: SocketAddrV4 = if cfg!(debug_assertions) {
 };
 
 const WEBSITE_URL: &str = if cfg!(debug_assertions) {
-	"http://127.0.0.1:8080/"
+	"https://127.0.0.1/"
 } else {
-	"http://127.0.0.1:8080/"//TODO change this to actual URL once website is deployed
+	"https://127.0.0.1/"//TODO change this to actual URL once website is deployed
 };
 
 macro_rules! website {

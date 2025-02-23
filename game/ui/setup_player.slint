@@ -1,0 +1,125 @@
+import {BaseText} from "base_text.slint";
+import {StylizedCheckbox} from "stylized_checkbox.slint";
+import {StylizedSpinBox} from "stylized_spin_box.slint";
+import {Palette} from "global.slint";
+
+export component SetupPlayer inherits HorizontalLayout {
+	in property <string> username;
+	in property <bool> human;
+	in property <int> team;
+	in property <bool> human_enabled;
+	in property <bool> team_enabled;
+	in property <bool> can_drag;
+	in property <bool> ready;
+	in property <bool> show_ready;
+
+	callback remove;
+	callback toggle_human(human: bool);
+    callback team_changed(team: int);
+    callback drag_started;
+    callback drag_ended;
+    callback position_changed(x: length, y: length);
+
+    height: 200px;
+
+	touchArea := TouchArea {
+		width: root.height;
+        height: root.height;
+		enabled: root.can_drag;
+
+		Image {
+			width: root.height;
+			height: root.height;
+			source: root.human ? @image-url("../assets/images/personIcon.png") : @image-url("../assets/images/botIcon.png");
+			colorize: Palette.Orange;
+			image-fit: contain;
+		}
+
+		pointer-event(event) => {
+			if (event.kind == PointerEventKind.down) {
+				root.drag-started();
+			} else if (event.kind == PointerEventKind.up) {
+				root.drag-ended();
+			}
+		}
+
+		states [
+			pressed when self.pressed && root.can_drag: {
+				touchArea.mouse-cursor: grabbing;
+			}
+			hover when self.has-hover && root.can_drag: {
+				touchArea.mouse-cursor: grab;
+			}
+		]
+	}
+
+	VerticalLayout {
+		alignment: start;
+		spacing: 10px;
+
+		xBG := Rectangle {
+            background: #18181840;
+            width: 30px;
+            height: 30px;
+            border-width: 4px;
+            border-color: Palette.Orange;
+            border-radius: 10px;
+
+            xTouchArea := TouchArea {
+                width: 30px;
+                height: 30px;
+
+                checkmark := Image {
+                    source: @image-url("../assets/images/x.png");
+                    image-fit: contain;
+                    width: 18px;
+                    height: 18px;
+                }
+
+                clicked => {root.remove();}
+            }
+
+            animate background { duration: 32ms; }
+
+            states [
+                hover when xTouchArea.has-hover: {
+                    xBG.background: #18181880;
+                    xTouchArea.mouse-cursor: pointer;
+                }
+                pressed when xTouchArea.pressed: {
+                    xBG.background: #181818c0;
+                    xTouchArea.mouse-cursor: pointer;
+                }
+            ]
+        }
+		BaseText {
+			text: username;
+			font-size: 20px;
+		}
+		if human_enabled: StylizedCheckbox {
+			text: "Human";
+			enabled: human;
+
+			toggled(value) => {root.toggle_human(value);}
+		}
+		HorizontalLayout {
+			BaseText {
+				text: "Team Number:";
+				font-size: 20px;
+			}
+			if team_enabled: StylizedSpinBox {
+				value: team;
+				minimum: 0;
+				maximum: 7;
+				height: 32px;
+				width: 50px;
+
+				changed(value) => {root.team_changed(value);}
+			}
+		}
+		if root.show_ready: BaseText {
+			text: root.ready ? "Ready" : "Not Ready";
+			font-size: 20px;
+		}
+	}
+}

@@ -1,596 +1,15 @@
 import {ScrollView} from "std-widgets.slint";
-import { 
-	BaseText, StylizedButton, StylizedCheckbox, StylizedSlider,
-	StylizedComboBox, StylizedTabView, StylizedSpinBox, Card,
-	PlayerDisplay, Palette, ConfirmationDialog
-} from "components.slint";
-
-///Game state which stores what scene is currently active.
-export enum SceneType {
-	MainMenu,
-	Setup,
-	Multiplayer,
-	Game,
-	Settings
-}
-
-enum HostType {
-	///Not in a game.
-	None,
-	SingleplayerSetup,
-	SingleplayerPlaying,
-	///Created a multiplayer game as the host.
-	Host,
-	///Joined a multiplayer game as a client.
-	Client
-}
-
-export struct Player {
-	username: string,
-	team: int,
-	is_human: bool,
-	local: bool,
-	x: length,
-	y: length
-}
-
-export enum Suit {
-	Hearts,
-	Clubs,
-	Diamonds,
-	Spades
-}
-
-export struct Card {
-	suit: Suit,
-	number: int
-}
-
-enum Comparison {
-	Equal,
-	LessOrEqual,
-	GreaterOrEqual,
-	Less,
-	Greater,
-	NotEqual
-}
-
-export struct Game {
-	join_code: string,
-	players: int,
-	max_players: int,
-	std_team: bool,
-	win_by_2: bool,
-	negative_scores: bool,
-	dealer_override: bool
-}
-
-export enum ErrorLocation {
-	None,
-	MainMenu,
-	MultiplayerPopup,
-	///Whichever of the remaining scenes the error occurred in (Multiplayer, Setup, Game)
-	Scene
-}
-
-@rust-attr(derive(bincode::Encode, bincode::Decode))
-export struct Settings {
-	master_volume: float,
-	music_volume: float,
-	ui_volume: float,
-	resolution: string,
-	framerate: string,
-	vsync: bool,
-	triple_buffering: bool,
-	pass_keybind: string,
-	bid_2_keybind: string,
-	bid_3_keybind: string,
-	bid_4_keybind: string,
-	bid_5_keybind: string,
-	play_card_1_keybind: string,
-	play_card_2_keybind: string,
-	play_card_3_keybind: string,
-	play_card_4_keybind: string,
-	play_card_5_keybind: string,
-	play_card_6_keybind: string,
-	toggle_settings_keybind: string
-}
-
-component SetupPlayer inherits HorizontalLayout {
-	in property <string> username;
-	in property <bool> human;
-	in property <int> team;
-	in property <bool> humanVisible;
-	in property <bool> teamVisible;
-
-    height: 256px;
-
-	touchArea := TouchArea {
-		width: root.height;
-        height: root.height;
-
-		Image {
-			width: root.height;
-			height: root.height;
-			source: root.human ? @image-url("../assets/images/personIcon.png") : @image-url("../assets/images/botIcon.png");
-			colorize: #000000;
-			image-fit: contain;
-		}
-
-		states [
-			pressed when self.pressed: {
-				touchArea.mouse-cursor: grabbing;
-			}
-			hover when self.has-hover: {
-				touchArea.mouse-cursor: grab;
-			}
-		]
-	}
-
-	VerticalLayout {
-		alignment: start;
-		spacing: 10px;
-
-		xBG := Rectangle {
-            background: #18181840;
-            width: 30px;
-            height: 30px;
-            border-width: 4px;
-            border-color: Palette.Orange;
-            border-radius: 10px;
-
-            xTouchArea := TouchArea {
-                width: 30px;
-                height: 30px;
-
-                checkmark := Image {
-                    source: @image-url("../assets/images/x.png");
-                    image-fit: contain;
-                    width: 18px;
-                    height: 18px;
-                }
-
-                clicked => {
-                    //TODO delete this player
-                }
-            }
-
-            animate background { duration: 32ms; }
-
-            states [
-                hover when xTouchArea.has-hover: {
-                    xBG.background: #18181880;
-                    xTouchArea.mouse-cursor: pointer;
-                }
-                pressed when xTouchArea.pressed: {
-                    xBG.background: #181818c0;
-                    xTouchArea.mouse-cursor: pointer;
-                }
-            ]
-        }
-		BaseText {
-			text: username;
-			font-size: 20px;
-		}
-		if humanVisible: StylizedCheckbox {
-			text: "Human";
-			enabled: human;
-		}
-		HorizontalLayout {
-			BaseText {
-				text: "Team Number:";
-				font-size: 20px;
-			}
-			if teamVisible: StylizedSpinBox {
-				value: team;
-				minimum: 0;
-				maximum: 7;
-			}
-		}
-	}
-}
-
-// Settings component that can be reused in both the settings scene and game popup
-component SettingsPanel {
-    in property <bool> show-back-button: true;
-    callback back;
-    
-    VerticalLayout {
-        padding: 20px;
-        spacing: 20px;
-
-        // Settings tabs
-        settings-tabs := StylizedTabView {
-            tabs: ["Audio", "Video", "Keybinds", "Account"];
-            
-            // Audio Settings
-            if settings-tabs.active-tab == 0 : VerticalLayout {
-                padding: 40px;
-                spacing: 30px;
-                
-                HorizontalLayout {
-                    spacing: 20px;
-					alignment: space-between;
-					width: 600px;
-                    Image {
-                        source: @image-url("../assets/images/volume-high.png");
-                        width: 32px;
-                        height: 32px;
-                    }
-                    BaseText {
-                        text: "Master Volume";
-                        font-size: 24px;
-                        vertical-alignment: center;
-                    }
-                    StylizedSlider {
-                        width: 300px;
-                        height: 32px;
-                        value: GlobalSettings.settings.master_volume;
-						step: 0.1;
-                    }
-                }
-                
-                HorizontalLayout {
-					spacing: 20px;
-					alignment: space-between;
-					width: 600px;
-                    Image {
-                        source: @image-url("../assets/images/volume-high.png");
-                        width: 32px;
-                        height: 32px;
-                    }
-                    BaseText {
-                        text: "Music Volume";
-                        font-size: 24px;
-                        vertical-alignment: center;
-                    }
-                    StylizedSlider {
-                        width: 300px;
-                        height: 32px;
-                        value: GlobalSettings.settings.music_volume;
-						step: 0.1;
-                    }
-                }
-                
-                HorizontalLayout {
-					spacing: 20px;
-					alignment: space-between;
-					width: 600px;
-                    Image {
-                        source: @image-url("../assets/images/volume-high.png");
-                        width: 32px;
-                        height: 32px;
-                    }
-                    BaseText {
-                        text: "UI Volume";
-                        font-size: 24px;
-                        vertical-alignment: center;
-                    }
-                    StylizedSlider {
-                        width: 300px;
-                        height: 32px;
-                        value: GlobalSettings.settings.ui_volume;
-						step: 0.1;
-                    }
-                }
-            }
-            
-            // Video Settings
-            if settings-tabs.active-tab == 1 : VerticalLayout {
-                padding: 40px;
-                spacing: 30px;
-                
-                HorizontalLayout {
-                    spacing: 20px;
-					alignment: space-between;
-					width: 500px;
-                    BaseText {
-                        text: "Resolution";
-                        font-size: 24px;
-                        vertical-alignment: center;
-                    }
-                    StylizedComboBox {
-                        width: 200px;
-                        height: 32px;
-                        choices: ["1920x1080", "1280x720", "800x600"];
-                        value: "1920x1080";
-                        selected(value) => {
-                            // Handle resolution change
-                        }
-                    }
-                }
-                
-                HorizontalLayout {
-                    spacing: 20px;
-					alignment: space-between;
-					width: 500px;
-                    BaseText {
-                        text: "Framerate";
-                        font-size: 24px;
-                        vertical-alignment: center;
-                    }
-                    StylizedComboBox {
-                        width: 200px;
-                        height: 32px;
-                        choices: ["120 FPS", "60 FPS", "30 FPS", "Unlimited"];
-                        value: GlobalSettings.settings.framerate;
-                        selected(value) => {
-                            // Handle framerate change
-                        }
-                    }
-                }
-                
-                HorizontalLayout {
-					spacing: 20px;
-					alignment: space-between;
-					width: 500px;
-                    BaseText {
-                        text: "VSync";
-                        font-size: 24px;
-                        vertical-alignment: center;
-                    }
-                    StylizedCheckbox {
-                        checked: GlobalSettings.settings.vsync;
-                    }
-                }
-                
-                HorizontalLayout {
-                    spacing: 20px;
-					alignment: space-between;
-					width: 500px;
-                    BaseText {
-                        text: "Triple Buffering";
-                        font-size: 24px;
-                        vertical-alignment: center;
-                    }
-                    StylizedCheckbox {
-                        checked: GlobalSettings.settings.triple_buffering;
-                    }
-                }
-            }
-            
-            // Keybinds Settings
-            if settings-tabs.active-tab == 2 : VerticalLayout {
-                padding: 40px;
-                spacing: 30px;
-                
-                // Bidding Keybinds
-                Rectangle {
-                    background: #18181840;
-                    border-radius: 8px;
-                    padding: 20px;
-					height: 285px;
-                    
-                    VerticalLayout {
-                        spacing: 15px;
-						alignment: start;
-                        
-                        BaseText {
-                            text: "Bidding";
-                            font-size: 28px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                        }
-                        
-                        for bind[i] in [
-                            { name: "Pass", key: GlobalSettings.settings.pass_keybind },
-                            { name: "Bid 2", key: GlobalSettings.settings.bid_2_keybind },
-                            { name: "Bid 3", key: GlobalSettings.settings.bid_3_keybind },
-                            { name: "Bid 4", key: GlobalSettings.settings.bid_4_keybind },
-                            { name: "Bid 5", key: GlobalSettings.settings.bid_5_keybind }
-                        ] : HorizontalLayout {
-                            spacing: 20px;
-                            alignment: space-around;
-                            width: 600px;
-                            
-                            Rectangle {
-								width: 200px;
-                                BaseText {
-                                    text: bind.name;
-                                    font-size: 24px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            
-                            Rectangle {
-								width: 100px;
-                                background: #ffffff20;
-                                border-radius: 4px;
-                                
-                                BaseText {
-                                    text: bind.key;
-                                    font-size: 20px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                
-                                TouchArea {
-                                    clicked => {
-                                        // TODO: Implement key binding logic
-                                    }
-                                }
-                            }
-                            
-                            StylizedButton {
-                                text: "Reset";
-                                width: 80px;
-                                height: 32px;
-                                font-size: 16px;
-                            }
-                        }
-                    }
-                }
-                
-                // Playing Cards Keybinds
-                Rectangle {
-                    background: #18181840;
-                    border-radius: 8px;
-                    padding: 20px;
-					height: 335px;
-                    
-                    VerticalLayout {
-                        spacing: 15px;
-						alignment: start;
-                        
-                        BaseText {
-                            text: "Playing Cards";
-                            font-size: 28px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                        }
-                        
-                        for bind[i] in [
-                            { name: "Play Card 1", key: GlobalSettings.settings.play_card_1_keybind },
-                            { name: "Play Card 2", key: GlobalSettings.settings.play_card_2_keybind },
-                            { name: "Play Card 3", key: GlobalSettings.settings.play_card_3_keybind },
-                            { name: "Play Card 4", key: GlobalSettings.settings.play_card_4_keybind },
-                            { name: "Play Card 5", key: GlobalSettings.settings.play_card_5_keybind },
-                            { name: "Play Card 6", key: GlobalSettings.settings.play_card_6_keybind }
-                        ] : HorizontalLayout {
-                            spacing: 20px;
-                            alignment: space-around;
-                            width: 600px;
-                            
-                            Rectangle { width: 200px;
-                                BaseText {
-                                    text: bind.name;
-                                    font-size: 24px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            
-                            Rectangle { width: 100px;
-                                background: #ffffff20;
-                                border-radius: 4px;
-                                
-                                BaseText {
-                                    text: bind.key;
-                                    font-size: 20px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                
-                                TouchArea {
-                                    clicked => {
-                                        // TODO: Implement key binding logic
-                                    }
-                                }
-                            }
-                            
-                            StylizedButton {
-                                text: "Reset";
-                                width: 80px;
-                                height: 32px;
-                                font-size: 16px;
-                            }
-                        }
-                    }
-                }
-                
-                // Other Keybinds
-                Rectangle {
-                    background: #18181840;
-                    border-radius: 8px;
-                    padding: 20px;
-					height: 100px;
-                    
-                    VerticalLayout {
-                        spacing: 15px;
-						alignment: start;
-                        
-                        BaseText {
-                            text: "Other";
-                            font-size: 28px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                        }
-                        
-                        HorizontalLayout {
-                            spacing: 20px;
-                            alignment: space-around;
-                            width: 600px;
-                            
-                            Rectangle {
-								width: 200px;
-                                BaseText {
-                                    text: "Toggle Settings";
-                                    font-size: 24px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                            }
-                            
-                            Rectangle {
-								width: 100px;
-                                background: #ffffff20;
-                                border-radius: 4px;
-                                
-                                BaseText {
-                                    text: GlobalSettings.settings.toggle_settings_keybind;
-                                    font-size: 20px;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                
-                                TouchArea {
-                                    clicked => {
-                                        // TODO: Implement key binding logic
-                                    }
-                                }
-                            }
-                            
-                            StylizedButton {
-                                text: "Reset";
-                                width: 80px;
-                                height: 32px;
-                                font-size: 16px;
-                            }
-                        }
-                    }
-                }
-            }
-
-			if settings-tabs.active-tab == 3 : VerticalLayout {
-				padding: 40px;
-				spacing: 30px;
-
-				/*
-				Account settings:
-
-				if signed-in:
-					display text: "Signed in as {username}"
-					logout button
-
-				if not signed-in:
-					sign-in button
-						//popup with login interface
-					sign-up button
-						//opens website in browser
-				*/	
-			}
-        }
-        
-        // Version display
-        BaseText {
-            text: "Version 0.1.0"; // TODO: Make this configurable
-            font-size: 16px;
-            horizontal-alignment: center;
-        }
-    }
-}
-
-component DarkScreen inherits Rectangle {
-	visible: false;
-    background: #00000080;
-    width: 100%;
-    height: 100%;
-}
-
-global GlobalSettings {
-	in-out property <Settings> settings;
-}
+import {SetupPlayerData, SceneType, HostType, ErrorLocation, Comparison, Card, Settings, Game} from "data_types.slint";
+import {SetupPlayer} from "setup_player.slint";
+import {GlobalSettings, Palette} from "global.slint";
+import {SettingsPanel} from "settings_panel.slint";
+import {BaseText} from "base_text.slint";
+import {StylizedButton} from "stylized_button.slint";
+import {StylizedCheckbox} from "stylized_checkbox.slint";
+import {StylizedComboBox} from "stylized_combo_box.slint";
+import {StylizedSpinBox} from "stylized_spin_box.slint";
+import {DarkScreen} from "dark_screen.slint";
+import {Card} from "card.slint";
 
 export component MainWindow inherits Window {
 	width: 1920px;
@@ -606,8 +25,9 @@ export component MainWindow inherits Window {
 	in-out property <string> error_message;
 	in-out property <SceneType> scene: SceneType.MainMenu;
 	in-out property <HostType> host: HostType.None;
+
 	// in property <[Player]> players: [];	//Use this for production
-	in-out property <[Player]> players:[	//use this for slint preview
+	in-out property <[SetupPlayerData]> players:[	//use this for slint preview
 		{username: "Player 1 (Me)", is_human: true, team: 0, local: true, x: 0px, y: 328.125px},
 		{username: "Player 2", is_human: false, team: 1, local: false, x: -371.231px, y: 232.091px},
 		{username: "Player 3", is_human: false, team: 0, local: false, x: -525px, y: 0px},
@@ -624,12 +44,15 @@ export component MainWindow inherits Window {
 		{join_code: "123458", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
 		{join_code: "123459", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true}
 	];
+
 	in-out property <bool> std_team_mode: true;
 	in-out property <bool> win_by_2: false;
 	in-out property <bool> negative_scores: true;
 	in-out property <bool> dealer_override: false;
 	in-out property <int> max_score: 21;
 	in-out property <int> max_players: 8;
+
+	in-out property <string> join_message: "Joining game...";
 
 	callback exit();
 	callback multiplayer_clicked();
@@ -735,8 +158,9 @@ export component MainWindow inherits Window {
 			}
 		}
 
-		// Multiplayer Popup
 		darkScreenMainMenu := DarkScreen {}
+		
+		// Multiplayer Popup
 		multiplayer-popup := PopupWindow {
 			width: 600px;
 			height: 600px;
@@ -755,8 +179,7 @@ export component MainWindow inherits Window {
 				// Main Options
 				options := VerticalLayout {
 					padding: 20px;
-					spacing: 80px;
-					alignment: center;
+					alignment: space-around;
 					width: parent.width;
 
 					StylizedButton {
@@ -821,13 +244,12 @@ export component MainWindow inherits Window {
 				// Join Game Interface
 				join := VerticalLayout {
 					visible: false;
-					spacing: 80px;
-					alignment: center;
-					padding: 40px;
-					width: parent.width;
+					alignment: space-around;
+					padding: 20px;
+					width: parent.width;					
 
 					Rectangle {
-						width: 500px;
+						width: 450px;
 						height: 80px;
 						border-width: 5px;
 						border-color: Palette.Gray;
@@ -849,7 +271,16 @@ export component MainWindow inherits Window {
 							vertical-alignment: center;
 							font-size: 32px;
 							color: Palette.Orange;
+							input-type: number;
 						}
+					}
+
+					join_message := BaseText {
+						visible: false;
+						text: root.join_message;
+						font-size: 24px;
+						horizontal-alignment: center;
+						vertical-alignment: center;
 					}
 
 					StylizedButton {
@@ -858,12 +289,8 @@ export component MainWindow inherits Window {
 						width: 450px;
 						enabled: input.text != "";
 						clicked => {
-							join.visible = false;
-							options.visible = true;
 							root.join_game(input.text);
-							multiplayer-popup.close();
-							root.host = HostType.Client;
-							root.set_state(root.scene, root.host);
+							join_message.visible = true;
 						}
 					}
 
@@ -873,6 +300,7 @@ export component MainWindow inherits Window {
 						width: 450px;
 						clicked => {
 							join.visible = false;
+							join_message.visible = false;
 							options.visible = true;
 						}
 					}
@@ -884,6 +312,7 @@ export component MainWindow inherits Window {
 		init => {
 			if root.error_location == ErrorLocation.MainMenu {
 				error-popup.show();
+				darkScreenMainMenu.visible = true;
 			}
 		}
 
@@ -924,6 +353,7 @@ export component MainWindow inherits Window {
 							root.error_location = ErrorLocation.None;
 							root.error_message = "";
 							error-popup.close();
+							darkScreenMainMenu.visible = false;
 						}
 					}
 				}
@@ -946,66 +376,8 @@ export component MainWindow inherits Window {
 			y: 25px;
 			font-size: 24px;
 			clicked => {
-				confirmLeave.show();
-			}
-		}
-
-		// Leave confirmation popup
-		confirmLeave := PopupWindow {
-			callback confirmed;
-			
-			width: 600px;
-			height: 200px;
-			x: 100px;
-			y: 100px;
-			close-policy: close-on-click-outside;
-			
-			Rectangle {
-				width: 100%;
-				height: 100%;
-				background: Palette.Green;
-				border-radius: 16px;
-				border-width: 2px;
-				border-color: Palette.Gray;
-				
-				VerticalLayout {
-					padding: 20px;
-					spacing: 20px;
-					
-					BaseText {
-						text: "Are you sure you want to leave the game setup?";
-						font-size: 24px;
-						horizontal-alignment: center;
-						wrap: true;
-					}
-					
-					HorizontalLayout {
-						alignment: space-around;
-						
-						StylizedButton {
-							text: "Yes";
-							width: 120px;
-							height: 40px;
-							font-size: 20px;
-							clicked => { 
-								root.scene = SceneType.MainMenu;
-								root.host = HostType.None;
-								root.set_state(root.scene, root.host);
-								confirmLeave.close();
-							}
-						}
-						
-						StylizedButton {
-							text: "No";
-							width: 120px;
-							height: 40px;
-							font-size: 20px;
-							clicked => { 
-								confirmLeave.close();
-							}
-						}
-					}
-				}
+				darkScreenSetup.visible = true;
+				confirmLeaveSetup.show();
 			}
 		}
 
@@ -1016,33 +388,28 @@ export component MainWindow inherits Window {
 			width: parent.width - 500px;
 			height: parent.height - 200px;
 			
-			for player[i] in root.players : PlayerDisplay {
+			for player[i] in root.players : SetupPlayer {
 				x: player.x + (parent.width - self.width) / 2;
 				y: player.y + (parent.height - self.height) / 2;
 				
 				username: player.username;
-				is-human: player.is_human;
+				human: player.is_human;
 				team: player.team;
-				is-local: player.local;
-				is-ready: false; // TODO: Add ready state to Player struct
-				is-current-turn: false;
-				is-setup-mode: true;
-				can-edit: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
-				size: 200px;
+				human_enabled: root.host == HostType.Host && !player.local;
+				team_enabled: player.local || root.host == HostType.SingleplayerSetup;
+				can_drag: root.host == HostType.Host || root.host == HostType.SingleplayerSetup;
+				ready: false;
+				show_ready: root.host != HostType.SingleplayerSetup;
+
+				remove => {root.remove_player(i);}
+				toggle_human(human) => {root.set_player_type(i, human);}
+				team_changed(team) => {root.set_player_team(i, team);}
 				
-				remove => {
-					// TODO: Implement player removal
-				}
-				
-				team-changed(new-team) => {
-					// TODO: Implement team change
-				}
-				
-				drag-started => {
+				drag_started => {
 					// TODO: Implement drag start
 				}
 				
-				drag-ended => {
+				drag_ended => {
 					// TODO: Implement drag end
 				}
 				
@@ -1189,6 +556,66 @@ export component MainWindow inherits Window {
 						text: "10"; // TODO: Implement countdown timer
 						font-size: 24px;
 						vertical-alignment: center;
+					}
+				}
+			}
+		}
+
+		darkScreenSetup := DarkScreen {}
+
+		confirmLeaveSetup := PopupWindow {
+			callback confirmed;
+			
+			width: 600px;
+			height: 200px;
+			x: 100px;
+			y: 100px;
+			close-policy: no-auto-close;
+			
+			Rectangle {
+				width: 100%;
+				height: 100%;
+				background: Palette.Green;
+				border-radius: 16px;
+				border-width: 2px;
+				border-color: Palette.Gray;
+				
+				VerticalLayout {
+					padding: 20px;
+					spacing: 20px;
+					
+					BaseText {
+						text: "Are you sure you want to leave the game setup?";
+						font-size: 24px;
+						horizontal-alignment: center;
+						wrap: true;
+					}
+					
+					HorizontalLayout {
+						alignment: space-around;
+						
+						StylizedButton {
+							text: "Yes";
+							width: 120px;
+							height: 40px;
+							font-size: 20px;
+							clicked => { 
+								root.scene = SceneType.MainMenu;
+								root.host = HostType.None;
+								root.set_state(root.scene, root.host);
+								confirmLeaveSetup.close();
+							}
+						}
+						
+						StylizedButton {
+							text: "No";
+							width: 120px;
+							height: 40px;
+							font-size: 20px;
+							clicked => { 
+								confirmLeaveSetup.close();
+							}
+						}
 					}
 				}
 			}
@@ -1621,21 +1048,21 @@ export component MainWindow inherits Window {
 			height: parent.height - 100px;
 			
 			// Other players
-			for player[i] in root.players : PlayerDisplay {
-				visible: !player.local;
-				x: player.x + (parent.width - self.width) / 2;
-				y: player.y + (parent.height - self.height) / 2;
+			// for player[i] in root.players : PlayerDisplay {
+			// 	visible: !player.local;
+			// 	x: player.x + (parent.width - self.width) / 2;
+			// 	y: player.y + (parent.height - self.height) / 2;
 				
-				username: player.username;
-				is-human: player.is_human;
-				team: player.team;
-				is-local: player.local;
-				is-ready: false;
-				is-current-turn: false; // TODO: Get from game state
-				is-setup-mode: false;
-				can-edit: false;
-				size: 150px;
-			}
+			// 	username: player.username;
+			// 	is-human: player.is_human;
+			// 	team: player.team;
+			// 	is-local: player.local;
+			// 	is-ready: false;
+			// 	is-current-turn: false; // TODO: Get from game state
+			// 	is-setup-mode: false;
+			// 	can-edit: false;
+			// 	size: 150px;
+			// }
 			
 			// Center pile
 			Rectangle {
@@ -1811,16 +1238,14 @@ export component MainWindow inherits Window {
 		}
 		
 		// Game menu overlay
-		darkScreenGame := DarkScreen {
-			visible: false;
-		}
+		darkScreenGame := DarkScreen {}
 		
 		gameMenu := PopupWindow {
 			width: 400px;
 			height: 500px;
 			x: (parent.width - self.width) / 2;
 			y: (parent.height - self.height) / 2;
-			close-policy: close-on-click-outside;
+			close-policy: no-auto-close;
 
 			Rectangle {
 				background: Palette.Green;
@@ -1844,7 +1269,7 @@ export component MainWindow inherits Window {
 						text: "Leave Game";
 						font-size: 24px;
 						clicked => {
-							leave-game-dialog.visible = true;
+							confirmLeaveGame.show();
 						}
 					}
 					
@@ -1858,41 +1283,87 @@ export component MainWindow inherits Window {
 					}
 				}
 			}
-		}
-		
-		// Settings popup
-		settings-popup := PopupWindow {
-			x: (parent.width - 800px) / 2;
-			y: (parent.height - 600px) / 2;
-			width: 800px;
-			height: 600px;
-			close-policy: close-on-click-outside;
 
-			Rectangle {
-				background: Palette.Green;
-				border-radius: 16px;
-				border-width: 2px;
-				border-color: Palette.Gray;
+			// Settings popup
+			settings-popup := PopupWindow {
+				x: (parent.width - 800px) / 2;
+				y: (parent.height - 600px) / 2;
+				width: 800px;
+				height: 600px;
+				close-policy: no-auto-close;
 
-				SettingsPanel {
-					show-back-button: true;
-					back => {
-						settings-popup.close();
+				Rectangle {
+					background: Palette.Green;
+					border-radius: 16px;
+					border-width: 2px;
+					border-color: Palette.Gray;
+
+					SettingsPanel {
+						show-back-button: true;
+						back => {
+							settings-popup.close();
+						}
 					}
 				}
 			}
-		}
 
-		// Leave game confirmation dialog
-		leave-game-dialog := ConfirmationDialog {
-			message: "Are you sure you want to leave the game?";
-			
-			confirmed => {
-				root.scene = SceneType.MainMenu;
-				root.host = HostType.None;
-				root.set_state(root.scene, root.host);
-				darkScreenGame.visible = false;
-				gameMenu.close();
+			// Leave game confirmation dialog
+			confirmLeaveGame := PopupWindow {
+				callback confirmed;
+				
+				width: 600px;
+				height: 200px;
+				x: 100px;
+				y: 100px;
+				close-policy: no-auto-close;
+				
+				Rectangle {
+					width: 100%;
+					height: 100%;
+					background: Palette.Green;
+					border-radius: 16px;
+					border-width: 2px;
+					border-color: Palette.Gray;
+					
+					VerticalLayout {
+						padding: 20px;
+						spacing: 20px;
+						
+						BaseText {
+							text: "Are you sure you want to leave the game?";
+							font-size: 24px;
+							horizontal-alignment: center;
+							wrap: true;
+						}
+						
+						HorizontalLayout {
+							alignment: space-around;
+							
+							StylizedButton {
+								text: "Yes";
+								width: 120px;
+								height: 40px;
+								font-size: 20px;
+								clicked => { 
+									root.scene = SceneType.MainMenu;
+									root.host = HostType.None;
+									root.set_state(root.scene, root.host);
+									confirmLeaveGame.close();
+								}
+							}
+							
+							StylizedButton {
+								text: "No";
+								width: 120px;
+								height: 40px;
+								font-size: 20px;
+								clicked => { 
+									confirmLeaveGame.close();
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 	}

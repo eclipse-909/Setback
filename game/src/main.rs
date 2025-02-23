@@ -1,24 +1,29 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use {
+	bincode::{
+		config::standard,
+		Encode, Decode, BorrowDecode,
+		enc::Encoder, de::{Decoder, BorrowDecoder},
+		error::{EncodeError, DecodeError}
+	},
+	keyring::Entry,
 	shared::{
 		game::{GameBuilder, GameRuntime},
-		ServerConnection, GameEvent, PlayerType, GameMeta, Error, Ssp, GameFilter, Protocol, PlayerData, RoundScores, PublicGame
+		Error, GameEvent, GameFilter, GameMeta, PlayerData, PlayerType, Protocol, PublicGame, RoundScores, ServerConnection, Ssp
 	},
-	slint::{ModelRc, SharedString, Weak},
+	slint::{Model, ModelRc, SharedString, Weak},
 	std::{
 		env,
 		f32::consts::PI,
 		fs::{self, File},
-		path::{PathBuf, Path},
+		path::{Path, PathBuf},
 		sync::{Arc, LazyLock, RwLock, RwLockWriteGuard}
 	},
 	tokio::{
 		runtime::{Handle, Runtime},
 		sync::mpsc::{unbounded_channel, UnboundedSender}
-	},
-	bincode::config::standard,
-	keyring::Entry
+	}
 };
 
 slint::include_modules!();
@@ -73,8 +78,18 @@ fn main() -> Result<(), slint::PlatformError> {
 					UiEvent::PromptCredentials => {}
 					UiEvent::ConnectionSuccess => {}
 					UiEvent::AuthenticationError => {}
-					UiEvent::UpdateTeam{index, team} => {}
-					UiEvent::UpdatePlayerType {index, human} => {}
+					UiEvent::UpdateTeam{index, team} => {
+						let players: ModelRc<SetupPlayerData> = window.get_players();
+						let mut player: SetupPlayerData = players.row_data(index as usize).unwrap();
+						player.team = team;
+						players.set_row_data(index as usize, player);
+					}
+					UiEvent::UpdatePlayerType{index, human} => {
+						let players: ModelRc<SetupPlayerData> = window.get_players();
+						let mut player: SetupPlayerData = players.row_data(index as usize).unwrap();
+						player.is_human = human;
+						players.set_row_data(index as usize, player);
+					}
 					UiEvent::UpdatePlayers(players) => {
 						window.set_players(ModelRc::from(players.as_slice()));
 					}
@@ -122,7 +137,9 @@ fn main() -> Result<(), slint::PlatformError> {
 					UiEvent::GameOver(items) => {}
 					UiEvent::DealCards => {}
 					UiEvent::UpdateHand(hand) => {}
-					UiEvent::StartGame => {}
+					UiEvent::StartGame => {
+						window.set_scene(SceneType::Game);
+					}
 					UiEvent::EnterSetup{host} => {
 						window.set_scene(SceneType::Setup);
 						window.set_host(if host {HostType::Host} else {HostType::Client});
@@ -235,7 +252,7 @@ enum UiEvent {
 	AuthenticationError,
 	UpdateTeam{index: u8, team: i32},
 	UpdatePlayerType{index: u8, human: bool},
-	UpdatePlayers(Vec<Player>),
+	UpdatePlayers(Vec<SetupPlayerData>),
 	UpdatePublicGames(Vec<PublicGame>),
 	UpdateGame(GameMeta),
 	UnrecoverableError(String),
@@ -286,8 +303,8 @@ impl From<Card> for shared::Card {
 	}
 }
 
-impl Default for Settings {
-	fn default() -> Self {
+impl Settings {
+	fn new() -> Self {
 		Settings {
 			master_volume: 100.0,
 			music_volume: 100.0,
@@ -309,6 +326,82 @@ impl Default for Settings {
 			play_card_6_keybind: SharedString::from("6"),
 			toggle_settings_keybind: SharedString::from("esc")
 		}
+	}
+}
+
+impl Encode for Settings {
+	fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
+		Encode::encode(&self.master_volume, encoder)?;
+		Encode::encode(&self.music_volume, encoder)?;
+		Encode::encode(&self.ui_volume, encoder)?;
+		Encode::encode(&self.resolution.to_string(), encoder)?;
+		Encode::encode(&self.framerate.to_string(), encoder)?;
+		Encode::encode(&self.vsync, encoder)?;
+		Encode::encode(&self.triple_buffering, encoder)?;
+		Encode::encode(&self.pass_keybind.to_string(), encoder)?;
+		Encode::encode(&self.bid_2_keybind.to_string(), encoder)?;
+		Encode::encode(&self.bid_3_keybind.to_string(), encoder)?;
+		Encode::encode(&self.bid_4_keybind.to_string(), encoder)?;
+		Encode::encode(&self.bid_5_keybind.to_string(), encoder)?;
+		Encode::encode(&self.play_card_1_keybind.to_string(), encoder)?;
+		Encode::encode(&self.play_card_2_keybind.to_string(), encoder)?;
+		Encode::encode(&self.play_card_3_keybind.to_string(), encoder)?;
+		Encode::encode(&self.play_card_4_keybind.to_string(), encoder)?;
+		Encode::encode(&self.play_card_5_keybind.to_string(), encoder)?;
+		Encode::encode(&self.play_card_6_keybind.to_string(), encoder)?;
+		Encode::encode(&self.toggle_settings_keybind.to_string(), encoder)
+	}
+}
+
+impl Decode for Settings {
+	fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
+		Ok(Settings {
+			master_volume: Decode::decode(decoder)?,
+			music_volume: Decode::decode(decoder)?,
+			ui_volume: Decode::decode(decoder)?,
+			resolution: SharedString::from(<String as Decode>::decode(decoder)?),
+			framerate: SharedString::from(<String as Decode>::decode(decoder)?),
+			vsync: Decode::decode(decoder)?,
+			triple_buffering: Decode::decode(decoder)?,
+			pass_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			bid_2_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			bid_3_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			bid_4_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			bid_5_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			play_card_1_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			play_card_2_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			play_card_3_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			play_card_4_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			play_card_5_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			play_card_6_keybind: SharedString::from(<String as Decode>::decode(decoder)?),
+			toggle_settings_keybind: SharedString::from(<String as Decode>::decode(decoder)?)
+		})
+	}
+}
+
+impl<'de> BorrowDecode<'de> for Settings {
+	fn borrow_decode<D: BorrowDecoder<'de>>(decoder: &mut D) -> Result<Self, DecodeError> {
+		Ok(Settings {
+			master_volume: BorrowDecode::borrow_decode(decoder)?,
+			music_volume: BorrowDecode::borrow_decode(decoder)?,
+			ui_volume: BorrowDecode::borrow_decode(decoder)?,
+			resolution: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			framerate: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			vsync: BorrowDecode::borrow_decode(decoder)?,
+			triple_buffering: BorrowDecode::borrow_decode(decoder)?,
+			pass_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			bid_2_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			bid_3_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			bid_4_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			bid_5_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			play_card_1_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			play_card_2_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			play_card_3_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			play_card_4_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			play_card_5_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			play_card_6_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?),
+			toggle_settings_keybind: SharedString::from(<String as BorrowDecode<'de>>::borrow_decode(decoder)?)
+		})
 	}
 }
 
@@ -396,13 +489,13 @@ fn save_settings(settings: Settings) {
 
 ///Loads settings from disk
 fn load_settings() -> Settings {
-	match &mut File::open(SETTINGS_PATH.as_path()) {
+	match File::open(SETTINGS_PATH.as_path()) {
 		Ok(mut file) => {
 			bincode::decode_from_std_read(&mut file, standard()).unwrap()
 		}
 		Err(_) => {
-			let settings: Settings = Settings::default();
-			save_settings(settings);
+			let settings: Settings = Settings::new();
+			bincode::encode_into_std_write(&settings, &mut File::create(SETTINGS_PATH.as_path()).unwrap(), standard()).unwrap();
 			settings
 		}
 	}
@@ -550,7 +643,7 @@ fn add_player(setback_game: Arc<RwLock<SetbackGame>>) {
 	match &mut game.host_type {
 		Host::SingleplayerSetup(game_builder) => {
 			game_builder.add_ai();
-			let players: Vec<Player> = as_ui_player_vec(local_player_index, game_builder.game.players.as_slice());
+			let players: Vec<SetupPlayerData> = as_ui_player_vec(local_player_index, game_builder.game.players.as_slice());
 			game.event_tx.send(UiEvent::UpdatePlayers(players)).unwrap();
 		}
 		Host::Host => {
@@ -566,7 +659,7 @@ fn remove_player(setback_game: Arc<RwLock<SetbackGame>>, index: u8) {
 	match &mut game.host_type {
 		Host::SingleplayerSetup(game_builder) => {
 			game_builder.game.players.remove(index as usize);
-			let players: Vec<Player> = as_ui_player_vec(local_player_index, game_builder.game.players.as_slice());
+			let players: Vec<SetupPlayerData> = as_ui_player_vec(local_player_index, game_builder.game.players.as_slice());
 			game.event_tx.send(UiEvent::UpdatePlayers(players)).unwrap();
 		}
 		Host::Host => {
@@ -751,16 +844,16 @@ fn ssp_callback(game: Arc<RwLock<SetbackGame>>) -> impl Fn(Option<Ssp>) + Send +
 
 //Util functions
 
-fn as_ui_player_vec(local_player_index: u8, players: &[impl AsRef<PlayerData>]) -> Vec<Player> {
+fn as_ui_player_vec(local_player_index: u8, players: &[impl AsRef<PlayerData>]) -> Vec<SetupPlayerData> {
 	const ELLIPSE_RADIUS: f32 = 525.;
 	const ELLIPSE_HEIGHT_RATIO: f32 = 0.625;
 
-	let mut players: Vec<Player> = players
+	let mut players: Vec<SetupPlayerData> = players
 		.iter()
 		.enumerate()
 		.map(|(index, player)| {
 			let theta: f32 = 2. * PI * index as f32 / players.len() as f32 + 3. * PI / 2.;
-			Player {
+			SetupPlayerData {
 				local: false,
 				is_human: !matches!(player.as_ref().player_type, PlayerType::AI),
 				team: player.as_ref().team_id as i32,
@@ -769,7 +862,7 @@ fn as_ui_player_vec(local_player_index: u8, players: &[impl AsRef<PlayerData>]) 
 				y: ELLIPSE_HEIGHT_RATIO * theta.sin() * ELLIPSE_RADIUS
 			}
 		})
-		.collect::<Vec<Player>>();
+		.collect::<Vec<SetupPlayerData>>();
 	players[local_player_index as usize].local = true;
 	players
 }
