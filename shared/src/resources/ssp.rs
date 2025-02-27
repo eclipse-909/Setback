@@ -12,7 +12,7 @@ use {
 };
 
 ///Setback Server Protocol
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug)]
 pub struct Ssp {
 	pub version: Version,
 	///0 = server/game, other = specific client_id
@@ -44,7 +44,7 @@ impl Ssp {
 }
 
 ///Version for SSP, not the game
-#[derive(Encode, Decode, PartialEq)]
+#[derive(Encode, Decode, PartialEq, Debug)]
 pub struct Version(u8, u8, u8);
 impl Version {
 	pub const LATEST: Version = Version(0, 1, 0);
@@ -57,7 +57,7 @@ impl Version {
 ///When a request is sent, the caller will not wait for a response.
 ///You must handle the response the same way you would handle a spontaneous message.
 #[repr(u8)]
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug)]
 pub enum Protocol {
 	///Client ---SyncID--> Server<br>
 	///Client <--SyncID--- Server<br>
@@ -185,7 +185,7 @@ pub enum Protocol {
 }
 
 ///Admins can use these messages to mess with the server with admin privileges.
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug)]
 pub enum AdminMessage {
 	///Admin ---Authorize--> Server<br>
 	///Admin <--AuthorizeResponse--- Server<br>
@@ -214,7 +214,7 @@ pub enum AdminMessage {
 	NumActiveGames(u8)
 }
 
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug)]
 pub struct PublicGame {
 	pub players: u8,
 	pub join_code: u32,

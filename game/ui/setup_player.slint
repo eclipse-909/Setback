@@ -12,15 +12,18 @@ export component SetupPlayer inherits HorizontalLayout {
 	in property <bool> can_drag;
 	in property <bool> ready;
 	in property <bool> show_ready;
+	in-out property <bool> is_dragging;
+	private property <length> drag_offset_x;
+	private property <length> drag_offset_y;
 
 	callback remove;
 	callback toggle_human(human: bool);
     callback team_changed(team: int);
-    callback drag_started;
-    callback drag_ended;
-    callback position_changed(x: length, y: length);
+    // callback drag_started;
+    // callback drag_ended;
+    // callback position_changed(x: length, y: length);
 
-    height: 200px;
+    height: 175px;
 
 	touchArea := TouchArea {
 		width: root.height;
@@ -37,9 +40,14 @@ export component SetupPlayer inherits HorizontalLayout {
 
 		pointer-event(event) => {
 			if (event.kind == PointerEventKind.down) {
-				root.drag-started();
+				root.drag_offset_x = root.x - (self.absolute-position.x + self.mouse-x);
+				root.drag_offset_y = root.y - (self.absolute-position.y + self.mouse-y);
+				root.is_dragging = true;
 			} else if (event.kind == PointerEventKind.up) {
-				root.drag-ended();
+				root.is_dragging = false;
+			} else if (event.kind == PointerEventKind.move && root.is_dragging) {
+				root.x = self.absolute-position.x + self.mouse-x + root.drag_offset_x;
+				root.y = self.absolute-position.y + self.mouse-y + root.drag_offset_y;
 			}
 		}
 
@@ -102,7 +110,7 @@ export component SetupPlayer inherits HorizontalLayout {
 
 			toggled(value) => {root.toggle_human(value);}
 		}
-		HorizontalLayout {
+		VerticalLayout {
 			BaseText {
 				text: "Team Number:";
 				font-size: 20px;
@@ -111,8 +119,8 @@ export component SetupPlayer inherits HorizontalLayout {
 				value: team;
 				minimum: 0;
 				maximum: 7;
-				height: 32px;
-				width: 50px;
+				height: 25px;
+				width: 25px;
 
 				changed(value) => {root.team_changed(value);}
 			}

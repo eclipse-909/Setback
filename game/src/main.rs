@@ -7,6 +7,7 @@ use {
 		enc::Encoder, de::{Decoder, BorrowDecoder},
 		error::{EncodeError, DecodeError}
 	},
+	env_logger::{Builder, Env},
 	keyring::Entry,
 	shared::{
 		game::{GameBuilder, GameRuntime},
@@ -18,7 +19,7 @@ use {
 		f32::consts::PI,
 		fs::{self, File},
 		path::{Path, PathBuf},
-		sync::{Arc, LazyLock, RwLock, RwLockWriteGuard}
+		sync::{Arc, LazyLock, RwLock, RwLockWriteGuard, RwLockReadGuard}
 	},
 	tokio::{
 		runtime::{Handle, Runtime},
@@ -43,11 +44,35 @@ static SETTINGS_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
 	PROJ_DIR.join(".config")
 });
 
-static LOG_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
-	PROJ_DIR.join("log.txt")
-});
+static LOG_TX: std::sync::OnceLock<UnboundedSender<Log>> = std::sync::OnceLock::new();
 
 const SERVICE: &str = "com.github.setback-game.setback";
+
+macro_rules! info {
+	($($args:expr),*) => {
+		LOG_TX.get().unwrap().send(Log::Info(format!($($args),*))).unwrap();
+	};
+}
+macro_rules! warn {
+	($($args:expr),*) => {
+		LOG_TX.get().unwrap().send(Log::Warn(format!($($args),*))).unwrap();
+	};
+}
+macro_rules! error {
+	($($args:expr),*) => {
+		LOG_TX.get().unwrap().send(Log::Error(format!($($args),*))).unwrap();
+	};
+}
+macro_rules! debug {
+	($($args:expr),*) => {
+		LOG_TX.get().unwrap().send(Log::Debug(format!($($args),*))).unwrap();
+	};
+}
+macro_rules! trace {
+	($($args:expr),*) => {
+		LOG_TX.get().unwrap().send(Log::Trace(format!($($args),*))).unwrap();
+	};
+}
 
 fn main() -> Result<(), slint::PlatformError> {
 	//Tokio runtime
@@ -55,6 +80,24 @@ fn main() -> Result<(), slint::PlatformError> {
 		.enable_all()
 		.build()
 		.unwrap();
+
+	//logger
+	let (log_tx, mut log_rx) = unbounded_channel();
+	LOG_TX.set(log_tx).unwrap();
+	runtime.spawn(async move {
+		Builder::from_env(Env::default().default_filter_or("trace"))
+			.target(env_logger::Target::Pipe(Box::new(File::create(PROJ_DIR.join("log.txt")).unwrap())))
+			.init();
+		while let Some(log) = log_rx.recv().await {
+			match log {
+				Log::Info(message) => log::info!("{}", message),
+				Log::Warn(message) => log::warn!("{}", message),
+				Log::Error(message) => log::error!("{}", message),
+				Log::Debug(message) => log::debug!("{}", message),
+				Log::Trace(message) => log::trace!("{}", message)
+			}
+		}
+	});
 
 	//Game state
 	let (event_tx, mut event_rx) = unbounded_channel();
@@ -75,9 +118,16 @@ fn main() -> Result<(), slint::PlatformError> {
 		while let Some(event) = event_rx.recv().await {
 			window_weak.upgrade_in_event_loop(move |window| {
 				match event {
-					UiEvent::PromptCredentials => {}
-					UiEvent::ConnectionSuccess => {}
-					UiEvent::AuthenticationError => {}
+					UiEvent::PromptCredentials => {
+						window.set_multiplayer_popup_state(MultiplayerPopupState::PromptCredentials);
+					}
+					UiEvent::ConnectionSuccess => {
+						window.set_multiplayer_popup_state(MultiplayerPopupState::Options);
+						window.set_login_message(SharedString::from("Logging in..."));
+					}
+					UiEvent::AuthenticationError => {
+						window.set_login_message(SharedString::from("Invalid username or password."));
+					}
 					UiEvent::UpdateTeam{index, team} => {
 						let players: ModelRc<SetupPlayerData> = window.get_players();
 						let mut player: SetupPlayerData = players.row_data(index as usize).unwrap();
@@ -131,8 +181,13 @@ fn main() -> Result<(), slint::PlatformError> {
 					UiEvent::RepromptCard => {}
 					UiEvent::PlayerBid {index, bid} => {}
 					UiEvent::PlayerPlayedCard {index, card} => {}
-					UiEvent::PlayerReadyUp{index, ready} => {}
-					UiEvent::PlayerTurn {index} => {}
+					UiEvent::PlayerReadyUp{index, ready} => {
+						let players: ModelRc<SetupPlayerData> = window.get_players();
+						let mut player: SetupPlayerData = players.row_data(index as usize).unwrap();
+						player.ready = ready;
+						players.set_row_data(index as usize, player);
+					}
+					UiEvent::PlayerTurn{index} => {}
 					UiEvent::RoundScores(round_scores) => {}
 					UiEvent::GameOver(items) => {}
 					UiEvent::DealCards => {}
@@ -162,8 +217,7 @@ fn main() -> Result<(), slint::PlatformError> {
 	main_window.on_save_settings(save_settings);
 	main_window.on_load_settings(load_settings);
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
-	let runtime_clone: Handle = runtime.handle().clone();
-	main_window.on_set_state(move|scene, host|set_state(game_clone.clone(), runtime_clone.clone(), scene, host));
+	main_window.on_set_state(move|scene, host|set_state(game_clone.clone(), scene, host));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
 	main_window.on_add_player(move||add_player(game_clone.clone()));
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
@@ -198,7 +252,17 @@ fn main() -> Result<(), slint::PlatformError> {
 	let game_clone: Arc<RwLock<SetbackGame>> = game.clone();
 	main_window.on_set_player_type(move|index, human|set_player_type(game_clone.clone(), index as u8, human));
 
+	info!("Setback game started.");
+
 	main_window.run()
+}
+
+enum Log {
+	Info(String),
+	Warn(String),
+	Error(String),
+	Debug(String),
+	Trace(String)
 }
 
 ///Game state for the app
@@ -239,7 +303,9 @@ enum Host {
 	None,
 	SingleplayerSetup(GameBuilder),
 	SingleplayerPlaying(GameRuntime),
-	///Created a multiplayer game as the host. This indicates that this player can edit the game settings in the setup. In game, this is the same as Client.
+	///Created a multiplayer game as the host.
+	//This indicates that this player can edit the game settings in the setup.
+	//In game, this is the same as Client.
 	Host,
 	///Joined a multiplayer game as a client. Cannot edit the game settings in the setup.
 	Client
@@ -409,11 +475,22 @@ impl<'de> BorrowDecode<'de> for Settings {
 
 ///Prompts user for credentials if necessary or creates connection to server with saved credentials.
 fn multiplayer_clicked(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle) {
+	{
+		let game: RwLockReadGuard<SetbackGame> = setback_game.read().unwrap();
+		if game.connection.is_some() {
+			game.event_tx.send(UiEvent::ConnectionSuccess).unwrap();
+			info!("Already connected to server.");
+			return;
+		}
+	}
+	info!("Looking for saved username.");
 	let path: &Path = USERNAME_PATH.as_path();
 	match fs::read_to_string(path) {
 		Ok(username) => {
+			info!("Found saved username, looking for password from secure storage.");
 			match Entry::new(SERVICE, username.as_str()).unwrap().get_password() {
 				Ok(password) => {
+					info!("Found password in secure storage, connecting to server.");
 					runtime.spawn(async move {
 						match ServerConnection::new_connection(
 							username,
@@ -422,14 +499,17 @@ fn multiplayer_clicked(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle) 
 							handle_error(setback_game.clone())
 						).await {
 							Ok(connection) => {
+								info!("Connected to server.");
 								let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 								game.connection = Some(connection);
 								game.event_tx.send(UiEvent::ConnectionSuccess).unwrap();
 							}
 							Err(error) => {
 								if let Error::Authentication = error {
+									info!("Authentication error, prompting user for credentials.");
 									setback_game.write().unwrap().event_tx.send(UiEvent::AuthenticationError).unwrap();
 								} else {
+									error!("Unexpected error connecting to server.");
 									setback_game.write().unwrap().event_tx.send(UiEvent::RecoverableError(error.to_string(), ErrorLocation::MultiplayerPopup)).unwrap();
 								}
 							}
@@ -437,14 +517,19 @@ fn multiplayer_clicked(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle) 
 					});
 				}
 				Err(keyring::Error::NoEntry) => {
+					info!("No password found, prompting user for credentials.");
 					File::create(path).unwrap();
 					setback_game.write().unwrap().event_tx.send(UiEvent::PromptCredentials).unwrap();
 				}
-				Err(keyring::Error::Ambiguous(_)) => {panic!("Ambiguous credentials")}//TODO handle error
+				Err(keyring::Error::Ambiguous(_)) => {
+					error!("Ambiguous credentials. User may need to manually remove conflicting password from secure storage. Prompting user for credentials.");
+					setback_game.write().unwrap().event_tx.send(UiEvent::PromptCredentials).unwrap();
+				}
 				Err(_) => {unreachable!()}
 			}
 		}
 		Err(_) => {
+			info!("No saved username found, prompting user for credentials.");
 			File::create(path).unwrap();
 			setback_game.write().unwrap().event_tx.send(UiEvent::PromptCredentials).unwrap();
 		}
@@ -454,6 +539,7 @@ fn multiplayer_clicked(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle) 
 ///When the user submits their credentials, this function is called.
 fn handle_credentials(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle, username: SharedString, password: SharedString) {
 	runtime.spawn(async move {
+		info!("Attempting to connect to server with provided credentials.");
 		let username: String = username.to_string();
 		let password: String = password.to_string();
 		match ServerConnection::new_connection(
@@ -463,18 +549,21 @@ fn handle_credentials(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle, u
 			handle_error(setback_game.clone())
 		).await {
 			Ok(connection) => {
+				info!("Connected to server.");
 				let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 				game.connection = Some(connection);
 				game.event_tx.send(UiEvent::ConnectionSuccess).unwrap();
 				fs::write(USERNAME_PATH.as_path(), username.as_str()).unwrap();
 				if let Err(keyring::Error::Ambiguous(_)) = Entry::new(SERVICE, username.as_str()).unwrap().set_password(password.as_str()) {
-					panic!("Ambiguous credentials");
+					error!("Ambiguous credentials. User may need to manually remove conflicting password from secure storage.");
 				}
 			}
 			Err(error) => {
 				if let Error::Authentication = error {
+					info!("Authentication error, reprompting user for credentials.");
 					setback_game.write().unwrap().event_tx.send(UiEvent::AuthenticationError).unwrap();
 				} else {
+					error!("Unexpected error connecting to server.");
 					setback_game.write().unwrap().event_tx.send(UiEvent::RecoverableError(error.to_string(), ErrorLocation::MultiplayerPopup)).unwrap();
 				}
 			}
@@ -504,110 +593,110 @@ fn load_settings() -> Settings {
 //singleplayer and multiplayer functions
 
 ///Sets the game state to the given scene and host.
-fn set_state(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle, scene: SceneType, host: HostType) {
-	runtime.spawn(async move {
-		let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
-		match game.scene_type {
-			Scene::MainMenu => {
-				match scene {
-					SceneType::Game => {unreachable!("You should not be able to change the scene to a game when you're in the main menu.")}
-					_ => {game.scene_type = scene.into();}
-				}
-			}
-			Scene::Setup => {
-				match scene {
-					SceneType::Multiplayer |
-					SceneType::Settings => {unreachable!("You should not be able to change the scene to a multiplayer or settings when you're in the setup.")}
-					_ => {game.scene_type = scene.into();}
-				}
-			}
-			Scene::Multiplayer => {
-				match scene {
-					SceneType::Game |
-					SceneType::Settings => {unreachable!("You should not be able to change the scene to a game or settings when you're in the multiplayer.")}
-					_ => {game.scene_type = scene.into();}
-				}
-			}
-			Scene::Game => {
-				match scene {
-					SceneType::Setup |
-					SceneType::Game => {unreachable!("You should not be able to change the scene to a setup or game when you're in the game.")}
-					_ => {game.scene_type = scene.into();}
-				}
-			}
-			Scene::Settings => {
-				match scene {
-					SceneType::Setup |
-					SceneType::Multiplayer | SceneType::Game => {unreachable!("You should not be able to change the scene to a setup or game when you're in the settings.")}
-					_ => {game.scene_type = scene.into();}
-				}
+fn set_state(setback_game: Arc<RwLock<SetbackGame>>, scene: SceneType, host: HostType) {
+	info!("Setting scene to {:?} and host to {:?}.", scene, host);
+	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
+	match game.scene_type {
+		Scene::MainMenu => {
+			match scene {
+				SceneType::Game => {unreachable!("You should not be able to change the scene to a game when you're in the main menu.")}
+				_ => {game.scene_type = scene.into();}
 			}
 		}
-		match &game.host_type {
-			Host::None => {
-				match host {
-					HostType::None | HostType::Host | HostType::Client => {}
-					HostType::SingleplayerSetup => {
-						//starting singleplayer game
-						game.connection = None;
-						game.host_type = Host::SingleplayerSetup(GameBuilder::default());
-					}
-					_ => {unreachable!("Illegal change in host type.")}
-				}
-			}
-			Host::SingleplayerSetup(_) => {
-				match host {
-					HostType::None => {game.host_type = Host::None;}//leaving the singleplayer game setup
-					HostType::SingleplayerSetup => {}//no change in host
-					HostType::SingleplayerPlaying => {
-						//starting singleplayer game
-						let Host::SingleplayerSetup(game_builder) = std::mem::replace(&mut game.host_type, Host::None) else {unreachable!()};
-						let game_runtime: GameRuntime = game_builder.start_game();
-						game.host_type = Host::SingleplayerPlaying(game_runtime);
-					}
-					_ => {unreachable!("Illegal change in host type.")}
-				}
-			}
-			Host::SingleplayerPlaying(game_runtime) => {
-				match host {
-					HostType::None => {
-						//leaving the singleplayer game
-						game_runtime.cancel_token.cancel();
-						game.host_type = Host::None;
-					}
-					HostType::SingleplayerPlaying => {}//no change in host
-					_ => {unreachable!("Illegal change in host type.")}
-				}
-			}
-			Host::Host => {
-				match host {
-					HostType::None => {
-						//leaving the multiplayer game
-						game.connection = None;
-						game.host_type = Host::None;
-					}
-					HostType::Host => {}//no change in host
-					_ => {unreachable!("Illegal change in host type.")}
-				}
-			}
-			Host::Client => {
-				match host {
-					HostType::None => {
-						//leaving the multiplayer game
-						game.connection = None;
-						game.host_type = Host::None;
-					}
-					HostType::Client => {}//no change in host
-					_ => {unreachable!("Illegal change in host type.")}
-				}
+		Scene::Setup => {
+			match scene {
+				SceneType::Multiplayer |
+				SceneType::Settings => {unreachable!("You should not be able to change the scene to a multiplayer or settings when you're in the setup.")}
+				_ => {game.scene_type = scene.into();}
 			}
 		}
-	});
+		Scene::Multiplayer => {
+			match scene {
+				SceneType::Game |
+				SceneType::Settings => {unreachable!("You should not be able to change the scene to a game or settings when you're in the multiplayer.")}
+				_ => {game.scene_type = scene.into();}
+			}
+		}
+		Scene::Game => {
+			match scene {
+				SceneType::Setup |
+				SceneType::Game => {unreachable!("You should not be able to change the scene to a setup or game when you're in the game.")}
+				_ => {game.scene_type = scene.into();}
+			}
+		}
+		Scene::Settings => {
+			match scene {
+				SceneType::Setup |
+				SceneType::Multiplayer | SceneType::Game => {unreachable!("You should not be able to change the scene to a setup or game when you're in the settings.")}
+				_ => {game.scene_type = scene.into();}
+			}
+		}
+	}
+	match &game.host_type {
+		Host::None => {
+			match host {
+				HostType::None | HostType::Host | HostType::Client => {}
+				HostType::SingleplayerSetup => {
+					//starting singleplayer game
+					game.connection = None;
+					game.host_type = Host::SingleplayerSetup(GameBuilder::default());
+				}
+				_ => {unreachable!("Illegal change in host type.")}
+			}
+		}
+		Host::SingleplayerSetup(_) => {
+			match host {
+				HostType::None => {game.host_type = Host::None;}//leaving the singleplayer game setup
+				HostType::SingleplayerSetup => {}//no change in host
+				HostType::SingleplayerPlaying => {
+					//starting singleplayer game
+					let Host::SingleplayerSetup(game_builder) = std::mem::replace(&mut game.host_type, Host::None) else {unreachable!()};
+					let game_runtime: GameRuntime = game_builder.start_game();
+					game.host_type = Host::SingleplayerPlaying(game_runtime);
+				}
+				_ => {unreachable!("Illegal change in host type.")}
+			}
+		}
+		Host::SingleplayerPlaying(game_runtime) => {
+			match host {
+				HostType::None => {
+					//leaving the singleplayer game
+					game_runtime.cancel_token.cancel();
+					game.host_type = Host::None;
+				}
+				HostType::SingleplayerPlaying => {}//no change in host
+				_ => {unreachable!("Illegal change in host type.")}
+			}
+		}
+		Host::Host => {
+			match host {
+				HostType::None => {
+					//leaving the multiplayer game
+					game.connection = None;
+					game.host_type = Host::None;
+				}
+				HostType::Host => {}//no change in host
+				_ => {unreachable!("Illegal change in host type.")}
+			}
+		}
+		Host::Client => {
+			match host {
+				HostType::None => {
+					//leaving the multiplayer game
+					game.connection = None;
+					game.host_type = Host::None;
+				}
+				HostType::Client => {}//no change in host
+				_ => {unreachable!("Illegal change in host type.")}
+			}
+		}
+	}
 }
 
 ///Generic error handler.
 fn handle_error(setback_game: Arc<RwLock<SetbackGame>>) -> impl Fn(Error) + Send + 'static {
 	move |error: Error| {
+		warn!("Received error from server: {:?}.", error);
 		match error {
 			Error::Indeterminate |
 			Error::Authentication |
@@ -638,6 +727,7 @@ fn handle_error(setback_game: Arc<RwLock<SetbackGame>>) -> impl Fn(Error) + Send
 }
 
 fn add_player(setback_game: Arc<RwLock<SetbackGame>>) {
+	info!("Adding player.");
 	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 	let local_player_index: u8 = game.local_player_index;
 	match &mut game.host_type {
@@ -654,6 +744,7 @@ fn add_player(setback_game: Arc<RwLock<SetbackGame>>) {
 }
 
 fn remove_player(setback_game: Arc<RwLock<SetbackGame>>, index: u8) {
+	info!("Removing player at index {}.", index);
 	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 	let local_player_index: u8 = game.local_player_index;
 	match &mut game.host_type {
@@ -671,6 +762,7 @@ fn remove_player(setback_game: Arc<RwLock<SetbackGame>>, index: u8) {
 }
 
 fn set_player_team(setback_game: Arc<RwLock<SetbackGame>>, index: u8, team: i32) {
+	info!("Setting player team at index {} to team {}.", index, team);
 	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 	match &mut game.host_type {
 		Host::SingleplayerSetup(game_builder) => {
@@ -685,6 +777,7 @@ fn set_player_team(setback_game: Arc<RwLock<SetbackGame>>, index: u8, team: i32)
 }
 
 fn make_bid(setback_game: Arc<RwLock<SetbackGame>>, bid: i32) {
+	info!("Making bid of {}.", bid);
 	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 	let local_player_index: u8 = game.local_player_index;
 	match &mut game.host_type {
@@ -700,6 +793,7 @@ fn make_bid(setback_game: Arc<RwLock<SetbackGame>>, bid: i32) {
 }
 
 fn play_card(setback_game: Arc<RwLock<SetbackGame>>, card: Card) {
+	info!("Playing card: {:?}.", card);
 	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 	let local_player_index: u8 = game.local_player_index;
 	let card: shared::Card = card.into();
@@ -718,10 +812,12 @@ fn play_card(setback_game: Arc<RwLock<SetbackGame>>, card: Card) {
 //multiplayer only functions
 
 fn create_game(setback_game: Arc<RwLock<SetbackGame>>, public: bool) {
+	info!("Creating game.");
 	setback_game.write().unwrap().connection.as_mut().unwrap().send_create_game(public);
 }
 
 fn join_game(setback_game: Arc<RwLock<SetbackGame>>, code: SharedString) {
+	info!("Joining game with code: {}.", code);
 	setback_game.write().unwrap().connection.as_mut().unwrap().send_join_game(code.to_string().parse::<u32>().unwrap());
 }
 
@@ -736,6 +832,7 @@ fn search_games(
 	negative_scores: bool,
 	dealer_override: bool
 ) {
+	info!("Searching for public games.");
 	setback_game.write().unwrap().connection.as_mut().unwrap().send_search_games(GameFilter {
 		std_team_mode,
 		win_by_2,
@@ -757,6 +854,7 @@ fn send_game_meta(
 	max_score: i8,
 	max_players: u8
 ) {
+	info!("Sending game meta.");
 	setback_game.write().unwrap().connection.as_mut().unwrap().send_game_meta(GameMeta {
 		std_team_mode,
 		win_by_2,
@@ -768,16 +866,19 @@ fn send_game_meta(
 }
 
 fn ready_up(setback_game: Arc<RwLock<SetbackGame>>, ready: bool) {
+	info!("Readying up.");
 	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();	
 	let local_player_index: u8 = game.local_player_index;
 	game.connection.as_mut().unwrap().send_ready(ready, local_player_index);
 }
 
 fn logout(setback_game: Arc<RwLock<SetbackGame>>, runtime: Handle) {
+	info!("Logging out.");
 	setback_game.write().unwrap().connection.as_mut().unwrap().logout(runtime);
 }
 
 fn set_player_type(setback_game: Arc<RwLock<SetbackGame>>, index: u8, human: bool) {
+	info!("Setting player type at index {} to {}.", index, if human { "human" } else { "AI" });
 	let mut game: RwLockWriteGuard<SetbackGame> = setback_game.write().unwrap();
 	assert!(matches!(game.host_type, Host::Host), "Only the host can set player types.");
 	game.connection.as_mut().unwrap().send_update_player_type(index, human);
@@ -789,6 +890,7 @@ fn ssp_callback(game: Arc<RwLock<SetbackGame>>) -> impl Fn(Option<Ssp>) + Send +
 		let mut game: RwLockWriteGuard<SetbackGame> = game.write().unwrap();
 		match message {
 			Some(ssp) => {
+				info!("Received message from server: {:?}.", ssp);
 				match ssp.protocol {
 					Protocol::SyncID => {}
 					Protocol::Err(error) => {
@@ -835,6 +937,7 @@ fn ssp_callback(game: Arc<RwLock<SetbackGame>>) -> impl Fn(Option<Ssp>) + Send +
 				}
 			}
 			None => {
+				info!("Connection lost.");
 				game.connection = None;
 				game.event_tx.send(UiEvent::UnrecoverableError(String::from("Connection lost."))).unwrap();
 			}
@@ -858,6 +961,10 @@ fn as_ui_player_vec(local_player_index: u8, players: &[impl AsRef<PlayerData>]) 
 				is_human: !matches!(player.as_ref().player_type, PlayerType::AI),
 				team: player.as_ref().team_id as i32,
 				username: SharedString::from(&player.as_ref().username),
+				ready: match player.as_ref().player_type {
+					PlayerType::MultiplayerHuman{ready,..} => ready,
+					_ => true
+				},
 				x: theta.cos() * ELLIPSE_RADIUS,
 				y: ELLIPSE_HEIGHT_RATIO * theta.sin() * ELLIPSE_RADIUS
 			}

@@ -1,5 +1,5 @@
 import {ScrollView} from "std-widgets.slint";
-import {SetupPlayerData, SceneType, HostType, ErrorLocation, Comparison, Card, Settings, Game} from "data_types.slint";
+import {SetupPlayerData, SceneType, HostType, ErrorLocation, Comparison, Card, Settings, Game, MultiplayerPopupState} from "data_types.slint";
 import {SetupPlayer} from "setup_player.slint";
 import {GlobalSettings, Palette} from "global.slint";
 import {SettingsPanel} from "settings_panel.slint";
@@ -23,6 +23,7 @@ export component MainWindow inherits Window {
 
 	in-out property <ErrorLocation> error_location: ErrorLocation.None;
 	in-out property <string> error_message;
+	in-out property <MultiplayerPopupState> multiplayer_popup_state: MultiplayerPopupState.Loading;
 	in-out property <SceneType> scene: SceneType.MainMenu;
 	in-out property <HostType> host: HostType.None;
 
@@ -53,6 +54,7 @@ export component MainWindow inherits Window {
 	in-out property <int> max_players: 8;
 
 	in-out property <string> join_message: "Joining game...";
+	in-out property <string> login_message: "Logging in...";
 
 	callback exit();
 	callback multiplayer_clicked();
@@ -123,7 +125,7 @@ export component MainWindow inherits Window {
 			alignment: center;
 			width: 450px;
 
-			singleplayer := StylizedButton {
+			StylizedButton {
 				text: "Singleplayer";
 				font-size: 42px;
 				clicked => {
@@ -133,16 +135,17 @@ export component MainWindow inherits Window {
 				}
 			}
 
-			multiplayer := StylizedButton {
+			StylizedButton {
 				text: "Multiplayer";
 				font-size: 42px;
 				clicked => {
+					root.multiplayer_clicked();
 					multiplayer-popup.show();
 					darkScreenMainMenu.visible = true;
 				}
 			}
 
-			settings := StylizedButton {
+			StylizedButton {
 				text: "Settings";
 				font-size: 42px;
 				clicked => {
@@ -151,7 +154,7 @@ export component MainWindow inherits Window {
 				}
 			}
 
-			exit := StylizedButton {
+			StylizedButton {
 				text: "Exit";
 				font-size: 42px;
 				clicked => { root.exit(); }
@@ -176,8 +179,11 @@ export component MainWindow inherits Window {
 				border-width: 10px;
 				border-radius: 16px;
 
+				//The following are the 4 states of the multiplayer popup
+
 				// Main Options
 				options := VerticalLayout {
+					visible: root.multiplayer_popup_state == MultiplayerPopupState.Options;
 					padding: 20px;
 					alignment: space-around;
 					width: parent.width;
@@ -213,8 +219,7 @@ export component MainWindow inherits Window {
 						font-size: 32px;
 						width: 450px;
 						clicked => {
-							options.visible = false;
-							join.visible = true;
+							root.multiplayer_popup_state = MultiplayerPopupState.JoinGame;
 						}
 					}
 
@@ -241,9 +246,134 @@ export component MainWindow inherits Window {
 					}
 				}
 
+				//loading to get credentials and connect to server
+				loading := VerticalLayout {
+					visible: root.multiplayer_popup_state == MultiplayerPopupState.Loading;
+					alignment: space-around;
+					padding: 20px;
+					width: parent.width;
+
+					BaseText {
+						text: "Loading...";
+						font-size: 24px;
+						horizontal-alignment: center;
+					}
+				}
+
+				//prompting user for credentials
+				prompt_credentials := VerticalLayout {
+					visible: root.multiplayer_popup_state == MultiplayerPopupState.PromptCredentials;
+					alignment: space-around;
+					padding: 20px;
+					width: parent.width;
+
+					Rectangle {
+						width: 450px;
+						height: 80px;
+						border-width: 5px;
+						border-color: Palette.Gray;
+						border-radius: 8px;
+						background: white.darker(0.1);
+
+						username_preview := BaseText {
+							text: "Enter username...";
+							font-size: 24px;
+							vertical-alignment: center;
+							x: 15px;
+							opacity: username_input.text == "" ? 0.5 : 0;
+						}
+
+						username_input := TextInput {
+							width: 100%;
+							height: 100%;
+							horizontal-alignment: center;
+							vertical-alignment: center;
+							font-size: 32px;
+							color: Palette.Orange;
+						}
+					}
+
+					Rectangle {
+						width: 450px;
+						height: 80px;
+						border-width: 5px;
+						border-color: Palette.Gray;
+						border-radius: 8px;
+						background: white.darker(0.1);
+
+						password_preview := BaseText {
+							text: "Enter password...";
+							font-size: 24px;
+							vertical-alignment: center;
+							x: 15px;
+							opacity: password_input.text == "" ? 0.5 : 0;
+						}
+
+						password_input := TextInput {
+							width: 100%;
+							height: 100%;
+							horizontal-alignment: center;
+							vertical-alignment: center;
+							font-size: 32px;
+							color: Palette.Orange;
+						}
+					}
+
+					auth_message := BaseText {
+						visible: false;
+						text: root.login_message;
+						font-size: 24px;
+						horizontal-alignment: center;
+						vertical-alignment: center;
+					}
+
+					VerticalLayout {
+						padding: 20px;
+						width: parent.width;
+						
+						BaseText {
+							text: "Create Account Here:";
+							font-size: 24px;
+							horizontal-alignment: center;
+							vertical-alignment: center;
+						}
+	
+						Text {
+							text: "https://www.setback.com/signup";
+							font-size: 24px;
+							horizontal-alignment: center;
+							vertical-alignment: center;
+							color: #0000EE;
+						}
+					}
+
+					StylizedButton {
+						text: "Login";
+						font-size: 32px;
+						width: 450px;
+						clicked => {
+							auth_message.visible = true;
+							root.handle_credentials(username_input.text, password_input.text);
+						}
+					}
+
+					StylizedButton {
+						text: "Close";
+						font-size: 32px;
+						width: 450px;
+						clicked => {
+							auth_message.visible = false;
+							auth_message.text = "Logging in...";
+							root.multiplayer_popup_state = MultiplayerPopupState.Loading;
+							multiplayer-popup.close();
+							darkScreenMainMenu.visible = false;
+						}
+					}
+				}
+
 				// Join Game Interface
 				join := VerticalLayout {
-					visible: false;
+					visible: root.multiplayer_popup_state == MultiplayerPopupState.JoinGame;
 					alignment: space-around;
 					padding: 20px;
 					width: parent.width;					
@@ -256,15 +386,15 @@ export component MainWindow inherits Window {
 						border-radius: 8px;
 						background: white.darker(0.1);
 
-						preview := BaseText {
+						join_code_preview := BaseText {
 							text: "Enter game code...";
 							font-size: 24px;
 							vertical-alignment: center;
 							x: 15px;
-							opacity: input.text == "" ? 0.5 : 0;
+							opacity: join_code_input.text == "" ? 0.5 : 0;
 						}
 
-						input := TextInput {
+						join_code_input := TextInput {
 							width: 100%;
 							height: 100%;
 							horizontal-alignment: center;
@@ -276,7 +406,7 @@ export component MainWindow inherits Window {
 					}
 
 					join_message := BaseText {
-						visible: false;
+						visible: join_message_visible;
 						text: root.join_message;
 						font-size: 24px;
 						horizontal-alignment: center;
@@ -287,10 +417,10 @@ export component MainWindow inherits Window {
 						text: "Join";
 						font-size: 32px;
 						width: 450px;
-						enabled: input.text != "";
+						enabled: join_code_input.text != "";
 						clicked => {
-							root.join_game(input.text);
-							join_message.visible = true;
+							root.join_game(join_code_input.text);
+							join_message_visible = true;
 						}
 					}
 
@@ -299,20 +429,23 @@ export component MainWindow inherits Window {
 						font-size: 32px;
 						width: 450px;
 						clicked => {
-							join.visible = false;
-							join_message.visible = false;
-							options.visible = true;
+							join_message_visible = false;
+							root.multiplayer_popup_state = MultiplayerPopupState.Options;
 						}
 					}
 				}
 			}
 		}
 
+		in-out property <bool> join_message_visible: false;
+
 		//error popup
 		init => {
 			if root.error_location == ErrorLocation.MainMenu {
 				error-popup.show();
 				darkScreenMainMenu.visible = true;
+				root.multiplayer_popup_state = MultiplayerPopupState.Loading;
+				join_message_visible = false;
 			}
 		}
 
@@ -383,7 +516,7 @@ export component MainWindow inherits Window {
 
 		// Player arrangement area
 		if root.players.length != 0: Rectangle {
-			x: 100px;
+			x: 525px;
 			y: 100px;
 			width: parent.width - 500px;
 			height: parent.height - 200px;
@@ -398,23 +531,23 @@ export component MainWindow inherits Window {
 				human_enabled: root.host == HostType.Host && !player.local;
 				team_enabled: player.local || root.host == HostType.SingleplayerSetup;
 				can_drag: root.host == HostType.Host || root.host == HostType.SingleplayerSetup;
-				ready: false;
+				ready: player.ready;
 				show_ready: root.host != HostType.SingleplayerSetup;
 
 				remove => {root.remove_player(i);}
 				toggle_human(human) => {root.set_player_type(i, human);}
 				team_changed(team) => {root.set_player_team(i, team);}
 				
-				drag_started => {
-					// TODO: Implement drag start
-				}
+				// drag_started => {
+				// 	// TODO: Implement drag start
+				// }
 				
-				drag_ended => {
-					// TODO: Implement drag end
-				}
+				// drag_ended => {
+				// 	// TODO: Implement drag end
+				// }
 				
-				animate x { duration: 300ms; easing: ease; }
-				animate y { duration: 300ms; easing: ease; }
+				// animate x { duration: 300ms; easing: ease; }
+				// animate y { duration: 300ms; easing: ease; }
 			}
 		}
 
@@ -445,7 +578,7 @@ export component MainWindow inherits Window {
 					
 					BaseText {
 						text: "Team Mode:";
-						font-size: 20px;
+						font-size: 24px;
 						vertical-alignment: center;
 					}
 					
@@ -482,11 +615,14 @@ export component MainWindow inherits Window {
 				// Max Score
 				HorizontalLayout {
 					spacing: 10px;
+					height: 30px;
 					
 					BaseText {
 						text: "Max Score:";
-						font-size: 20px;
+						font-size: 24px;
 						vertical-alignment: center;
+						height: 30px;
+						width: 120px;
 					}
 					
 					StylizedSpinBox {
@@ -494,17 +630,22 @@ export component MainWindow inherits Window {
 						minimum: 1;
 						maximum: 99;
 						enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
+						height: 30px;
+						width: 40px;
 					}
 				}
 				
 				// Max Players
 				HorizontalLayout {
 					spacing: 10px;
-					
+					height: 30px;
+
 					BaseText {
 						text: "Max Players:";
-						font-size: 20px;
+						font-size: 24px;
 						vertical-alignment: center;
+						height: 30px;
+						width: 120px;
 					}
 					
 					StylizedSpinBox {
@@ -512,6 +653,8 @@ export component MainWindow inherits Window {
 						minimum: 2;
 						maximum: 8;
 						enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
+						height: 30px;
+						width: 40px;
 					}
 				}
 				
@@ -604,6 +747,7 @@ export component MainWindow inherits Window {
 								root.host = HostType.None;
 								root.set_state(root.scene, root.host);
 								confirmLeaveSetup.close();
+								darkScreenSetup.visible = false;
 							}
 						}
 						
@@ -614,6 +758,7 @@ export component MainWindow inherits Window {
 							font-size: 20px;
 							clicked => { 
 								confirmLeaveSetup.close();
+								darkScreenSetup.visible = false;
 							}
 						}
 					}

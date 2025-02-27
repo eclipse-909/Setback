@@ -23,7 +23,7 @@ pub const A: u8 = 14;
 pub const CARDS_PER_PLAYER: u8 = 6;
 pub const MAX_GAME_METAS: u8 = 253;
 
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug)]
 pub struct PlayerData {
 	pub player_type: PlayerType,
 	pub username: String,
@@ -97,6 +97,7 @@ impl AsRef<PlayerData> for Player {
     }
 }
 
+#[derive(Debug)]
 #[repr(u8)]
 pub enum PlayerType {
 	///Yourself in singleplayer.
@@ -195,7 +196,7 @@ impl Suit {
 	pub fn iter() -> IntoIter<Self, 4> {[Self::Hearts, Self::Clubs, Self::Diamonds, Self::Spades].into_iter()}
 }
 
-#[derive(Encode, Decode, Clone)]
+#[derive(Encode, Decode, Clone, Debug)]
 pub struct GameMeta {
 	pub std_team_mode: bool,
 	pub win_by_2: bool,
@@ -208,7 +209,7 @@ impl Default for GameMeta {
 	fn default() -> Self {Self {std_team_mode: true, max_score: 21, win_by_2: false, negative_scores: true, dealer_override: false, max_players: 8}}
 }
 
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug)]
 pub struct GameFilter {
 	pub std_team_mode: bool,
 	pub win_by_2: bool,
@@ -236,7 +237,7 @@ impl Comparison {
 	}
 }
 
-#[derive(Encode, Decode, Clone)]
+#[derive(Encode, Decode, Clone, Debug)]
 pub struct Team {
 	//the cards the team collects after winning a turn
 	pub pile: Vec<Card>,
@@ -247,7 +248,7 @@ impl Default for Team {
 	fn default() -> Self {Self {pile: Vec::with_capacity((MAX_PLAYERS * CARDS_PER_PLAYER) as usize), score: 0}}
 }
 
-#[derive(Encode, Decode, Clone)]
+#[derive(Encode, Decode, Clone, Debug)]
 pub struct GameData {
 	pub teams: Vec<Team>,
 	pub trump: Suit,

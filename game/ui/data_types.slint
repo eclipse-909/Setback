@@ -23,6 +23,7 @@ export struct SetupPlayerData {
 	team: int,
 	is_human: bool,
 	local: bool,
+	ready: bool,
 	x: length,
 	y: length
 }
@@ -86,4 +87,11 @@ export struct Settings {
 	play_card_5_keybind: string,
 	play_card_6_keybind: string,
 	toggle_settings_keybind: string
+}
+
+export enum MultiplayerPopupState {
+	Loading,
+	PromptCredentials,
+	Options,
+	JoinGame
 }

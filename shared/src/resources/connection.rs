@@ -17,7 +17,7 @@ use {
 		io::{AsyncWriteExt, AsyncReadExt}
 	},
 	tokio_util::sync::CancellationToken,
-	bincode::{Decode, Encode, config::standard},
+	bincode::config::standard,
 	serde::{Deserialize, Serialize},
 	reqwest::{Client, StatusCode}
 };
@@ -214,14 +214,58 @@ pub struct ClientConnection {
 	pub ready: bool
 }
 
+impl std::fmt::Debug for ClientConnection {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "ClientConnection")
+	}
+}
+
 impl ClientConnection {
 	///The TcpListener must accept a connection and then pass the TcpStream to this function.
-	pub async fn new_connection(tcp_stream: TcpStream) -> Self {
-		todo!()
-		//Read one message for authentication
+	pub async fn new_connection(tcp_stream: TcpStream, ssp_callback: impl Fn(Option<Ssp>) + Send + Sync + 'static, on_write_error: impl Fn(Error) + Send + 'static) -> Option<Self> {
+		let (mut reader, mut writer) = tcp_stream.into_split();
+		//Wait for SyncID message
+		let (account_id, mut reader, mut writer) = tokio::time::timeout(std::time::Duration::from_secs(10), async move {
+			let mut buffer: Vec<u8> = Vec::with_capacity(std::mem::size_of::<Ssp>());
+			let ssp: Ssp = Self::read(&mut reader, &mut buffer).await.ok()?;
+			if matches!(ssp.protocol, Protocol::SyncID) {
+				Self::write(&mut writer, Ssp::new(Protocol::SyncID)).await.ok()?;
+				Some((ssp.src_id, reader, writer))
+			} else {
+				None
+			}
+		}).await.ok()??;
+
+		//Read thread
+		let cancellation_token: CancellationToken = CancellationToken::new();
+		let read_cancel_token: CancellationToken = cancellation_token.clone();
+		tokio::spawn(async move {tokio::select! {
+			_ = async move {
+				let mut buffer: Vec<u8> = Vec::with_capacity(std::mem::size_of::<Ssp>());
+				loop {
+					ssp_callback(Self::read(&mut reader, &mut buffer).await.ok());
+				}
+			} => {}
+			_ = read_cancel_token.cancelled() => {}
+		}});
+
+		//Write thread
+		let (message_tx, mut message_rx) = unbounded_channel();
+		let write_cancel_token: CancellationToken = cancellation_token.clone();
+		tokio::spawn(async move {tokio::select! {
+			_ = async move {
+				while let Some(ssp) = message_rx.recv().await {
+					if let Err(error) = Self::write(&mut writer, ssp).await {
+						on_write_error(error);
+					}
+				}
+				//TODO do I need to handle the post-error here? If so, how?
+			} => {}
+			_ = write_cancel_token.cancelled() => {}
+		}});
+
 		//construct the client connection
-		//begin the message loop
-		//being writing loop
+		Some(Self {message_tx, cancellation_token, account_id, ready: false})
 	}
 
 	//TODO make a function for each protocol for convenience
@@ -247,7 +291,7 @@ pub struct AccountData {
 	pub last_active: String
 }
 
-#[derive(Debug, Serialize, Deserialize, Encode, Decode)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LoginCredentials {
 	pub username: String,
 	pub password: String,
