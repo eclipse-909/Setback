@@ -3,62 +3,62 @@ import {Palette} from "global.slint";
 
 // Enhanced checkbox with animation and custom styling
 export component StylizedCheckbox {
-    in property <string> text;
-    in property <bool> enabled: true;
-    in-out property <bool> checked;
-    in property <length> size: 24px;
-    callback toggled(bool);
+	in property <string> text;
+	in property <bool> enabled: true;
+	in-out property <bool> checked;
+	in property <length> size: 24px;
+	callback toggled(bool);
 
-    HorizontalLayout {
-        spacing: size / 2;
-        alignment: start;
+	HorizontalLayout {
+		spacing: size / 2;
+		alignment: start;
 
-        Rectangle {
-            width: root.size;
-            height: root.size;
-            background: root.enabled ? #18181840 : #18181820;
-            border-radius: size / 4;
-            border-width: 2px;
-            border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
+		Rectangle {
+			width: root.size;
+			height: root.size;
+			background: root.enabled ? #18181840 : #18181820;
+			border-radius: size / 4;
+			border-width: 2px;
+			border-color: root.enabled ? Palette.Orange : Palette.Orange.darker(0.3);
 
-            touchArea := TouchArea {
-                enabled: root.enabled;
-                clicked => {
-                    if (root.enabled) {
-                        root.checked = !root.checked;
-                        root.toggled(root.checked);
-                    }
-                }
-            }
+			touchArea := TouchArea {
+				enabled: root.enabled;
+				clicked => {
+					if (root.enabled) {
+						root.checked = !root.checked;
+						root.toggled(root.checked);
+					}
+				}
+			}
 
-            Image {
-                visible: root.checked;
-                source: @image-url("../assets/images/checkmark.png");
-                width: parent.width * 0.8;
-                height: parent.height * 0.8;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-            }
+			Image {
+				visible: root.checked;
+				source: @image-url("../assets/images/checkmark.png");
+				width: parent.width * 0.8;
+				height: parent.height * 0.8;
+				x: (parent.width - self.width) / 2;
+				y: (parent.height - self.height) / 2;
+			}
 
-            animate background { duration: 100ms; }
-            animate border-color { duration: 100ms; }
+			animate background { duration: 100ms; }
+			animate border-color { duration: 100ms; }
 
-            states [
-                pressed when root.enabled && touchArea.pressed: {
-                    background: #18181880;
-                    border-color: Palette.Orange.darker(0.2);
-                }
-                hover when root.enabled && touchArea.has-hover: {
-                    background: #18181860;
-                    touchArea.mouse-cursor: pointer;
-                }
-            ]
-        }
+			states [
+				pressed when root.enabled && touchArea.pressed: {
+					background: #18181880;
+					border-color: Palette.Orange.darker(0.2);
+				}
+				hover when root.enabled && touchArea.has-hover: {
+					background: #18181860;
+					touchArea.mouse-cursor: pointer;
+				}
+			]
+		}
 
-        BaseText {
-            text: root.text;
-            font-size: root.size;
-            vertical-alignment: center;
-        }
-    }
+		BaseText {
+			text: root.text;
+			font-size: root.size;
+			vertical-alignment: center;
+		}
+	}
 }

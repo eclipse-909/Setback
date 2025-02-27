@@ -22,7 +22,7 @@ export component SetupPlayer inherits HorizontalLayout {
 
 	callback remove;
 	callback toggle_human(human: bool);
-    callback team_changed(team: int);
+	callback team_changed(team: int);
 
 	animate x, y { duration: animation_duration; easing: ease; }
 
@@ -31,11 +31,11 @@ export component SetupPlayer inherits HorizontalLayout {
 		root.og_y = root.y;
 	}
 
-    height: 175px;
+	height: 175px;
 
 	touchArea := TouchArea {
 		width: root.height;
-        height: root.height;
+		height: root.height;
 		enabled: root.can_drag;
 
 		Image {
@@ -78,40 +78,40 @@ export component SetupPlayer inherits HorizontalLayout {
 		spacing: 10px;
 
 		xBG := Rectangle {
-            background: #18181840;
-            width: 30px;
-            height: 30px;
-            border-width: 4px;
-            border-color: Palette.Orange;
-            border-radius: 10px;
+			background: #18181840;
+			width: 30px;
+			height: 30px;
+			border-width: 4px;
+			border-color: Palette.Orange;
+			border-radius: 10px;
 
-            xTouchArea := TouchArea {
-                width: 30px;
-                height: 30px;
+			xTouchArea := TouchArea {
+				width: 30px;
+				height: 30px;
 
-                checkmark := Image {
-                    source: @image-url("../assets/images/x.png");
-                    image-fit: contain;
-                    width: 18px;
-                    height: 18px;
-                }
+				checkmark := Image {
+					source: @image-url("../assets/images/x.png");
+					image-fit: contain;
+					width: 18px;
+					height: 18px;
+				}
 
-                clicked => {root.remove();}
-            }
+				clicked => {root.remove();}
+			}
 
-            animate background { duration: 32ms; }
+			animate background { duration: 32ms; }
 
-            states [
-                hover when xTouchArea.has-hover: {
-                    xBG.background: #18181880;
-                    xTouchArea.mouse-cursor: pointer;
-                }
-                pressed when xTouchArea.pressed: {
-                    xBG.background: #181818c0;
-                    xTouchArea.mouse-cursor: pointer;
-                }
-            ]
-        }
+			states [
+				hover when xTouchArea.has-hover: {
+					xBG.background: #18181880;
+					xTouchArea.mouse-cursor: pointer;
+				}
+				pressed when xTouchArea.pressed: {
+					xBG.background: #181818c0;
+					xTouchArea.mouse-cursor: pointer;
+				}
+			]
+		}
 		BaseText {
 			text: username;
 			font-size: 20px;

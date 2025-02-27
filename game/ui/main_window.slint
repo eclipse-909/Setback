@@ -546,25 +546,27 @@ export component MainWindow inherits Window {
 			x: parent.width - 550px;
 			y: 50px;
 			width: 500px;
-			height: 1000px;
+			height: 950px;
 			background: #18181840;
-			padding: 20px;
 			
 			VerticalLayout {
 				spacing: 20px;
-				alignment: center;
+				alignment: start;
 				padding: 20px;
+				height: 100%;
 				
 				BaseText {
 					text: "Settings";
 					font-size: 32px;
 					horizontal-alignment: center;
+					height: 40px;
 				}
 				
 				// Team Mode
 				HorizontalLayout {
 					spacing: 10px;
 					width: 350px;
+					height: 32px;
 					
 					BaseText {
 						text: "Team Mode:";
@@ -586,6 +588,7 @@ export component MainWindow inherits Window {
 					text: "Win by 2";
 					checked: root.win_by_2;
 					enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
+					height: 32px;
 				}
 				
 				// Negative Scores
@@ -593,6 +596,7 @@ export component MainWindow inherits Window {
 					text: "Negative Scores";
 					checked: root.negative_scores;
 					enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
+					height: 32px;
 				}
 				
 				// Dealer Override
@@ -600,19 +604,19 @@ export component MainWindow inherits Window {
 					text: "Dealer Override";
 					checked: root.dealer_override;
 					enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
+					height: 32px;
 				}
 				
 				// Max Score
 				HorizontalLayout {
 					spacing: 10px;
-					height: 30px;
+					height: 32px;
 					
 					BaseText {
 						text: "Max Score:";
 						font-size: 24px;
 						vertical-alignment: center;
-						height: 30px;
-						width: 120px;
+						width: 140px;
 					}
 					
 					StylizedSpinBox {
@@ -620,22 +624,21 @@ export component MainWindow inherits Window {
 						minimum: 1;
 						maximum: 99;
 						enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
-						height: 30px;
 						width: 40px;
+						height: 32px;
 					}
 				}
 				
 				// Max Players
 				HorizontalLayout {
 					spacing: 10px;
-					height: 30px;
-
+					height: 32px;
+					
 					BaseText {
 						text: "Max Players:";
 						font-size: 24px;
 						vertical-alignment: center;
-						height: 30px;
-						width: 120px;
+						width: 140px;
 					}
 					
 					StylizedSpinBox {
@@ -643,8 +646,8 @@ export component MainWindow inherits Window {
 						minimum: 2;
 						maximum: 8;
 						enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
-						height: 30px;
 						width: 40px;
+						height: 32px;
 					}
 				}
 				
@@ -652,17 +655,19 @@ export component MainWindow inherits Window {
 				if root.host == HostType.SingleplayerSetup || root.host == HostType.Host : StylizedButton {
 					text: "Add Player";
 					font-size: 24px;
+					height: 40px;
 					clicked => {
-						// TODO: Implement add player
+						root.add_player();
 					}
 				}
 				
-				Rectangle { height: 20px; } // Spacer
+				Rectangle { height: 300px; } // Spacer
 				
 				// Start/Ready button
 				StylizedButton {
 					text: root.host == HostType.SingleplayerSetup ? "Start" : "Ready";
 					font-size: 32px;
+					height: 50px;
 					clicked => {
 						if (root.host == HostType.SingleplayerSetup) {
 							root.host = HostType.SingleplayerPlaying;
@@ -678,6 +683,7 @@ export component MainWindow inherits Window {
 				if root.host != HostType.SingleplayerSetup : HorizontalLayout {
 					alignment: center;
 					spacing: 10px;
+					height: 32px;
 					
 					BaseText {
 						text: "Starting in:";
