@@ -12,16 +12,24 @@ export component SetupPlayer inherits HorizontalLayout {
 	in property <bool> can_drag;
 	in property <bool> ready;
 	in property <bool> show_ready;
-	in-out property <bool> is_dragging;
+	in property <int> index;
+	private property <bool> is_dragging;
 	private property <length> drag_offset_x;
 	private property <length> drag_offset_y;
+	private property <length> og_x;
+	private property <length> og_y;
+	private property <duration> animation_duration: 300ms;
 
 	callback remove;
 	callback toggle_human(human: bool);
     callback team_changed(team: int);
-    // callback drag_started;
-    // callback drag_ended;
-    // callback position_changed(x: length, y: length);
+
+	animate x, y { duration: animation_duration; easing: ease; }
+
+	init => {
+		root.og_x = root.x;
+		root.og_y = root.y;
+	}
 
     height: 175px;
 
@@ -40,11 +48,15 @@ export component SetupPlayer inherits HorizontalLayout {
 
 		pointer-event(event) => {
 			if (event.kind == PointerEventKind.down) {
+				root.animation_duration = 0ms;
 				root.drag_offset_x = root.x - (self.absolute-position.x + self.mouse-x);
 				root.drag_offset_y = root.y - (self.absolute-position.y + self.mouse-y);
 				root.is_dragging = true;
 			} else if (event.kind == PointerEventKind.up) {
+				root.animation_duration = 300ms;
 				root.is_dragging = false;
+				root.x = root.og_x;
+				root.y = root.og_y;
 			} else if (event.kind == PointerEventKind.move && root.is_dragging) {
 				root.x = self.absolute-position.x + self.mouse-x + root.drag_offset_x;
 				root.y = self.absolute-position.y + self.mouse-y + root.drag_offset_y;

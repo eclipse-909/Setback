@@ -2,10 +2,7 @@
 
 use {
 	bincode::{
-		config::standard,
-		Encode, Decode, BorrowDecode,
-		enc::Encoder, de::{Decoder, BorrowDecoder},
-		error::{EncodeError, DecodeError}
+		config::standard, de::{BorrowDecoder, Decoder}, enc::Encoder, error::{DecodeError, EncodeError}, BorrowDecode, Decode, Encode
 	},
 	env_logger::{Builder, Env},
 	keyring::Entry,
@@ -13,13 +10,9 @@ use {
 		game::{GameBuilder, GameRuntime},
 		Error, GameEvent, GameFilter, GameMeta, PlayerData, PlayerType, Protocol, PublicGame, RoundScores, ServerConnection, Ssp
 	},
-	slint::{Model, ModelRc, SharedString, Weak},
+	slint::{Model, ModelRc, SharedString, Weak, VecModel},
 	std::{
-		env,
-		f32::consts::PI,
-		fs::{self, File},
-		path::{Path, PathBuf},
-		sync::{Arc, LazyLock, RwLock, RwLockWriteGuard, RwLockReadGuard}
+		any::Any, env, f32::consts::PI, fs::{self, File}, path::{Path, PathBuf}, sync::{Arc, LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}
 	},
 	tokio::{
 		runtime::{Handle, Runtime},
@@ -85,9 +78,20 @@ fn main() -> Result<(), slint::PlatformError> {
 	let (log_tx, mut log_rx) = unbounded_channel();
 	LOG_TX.set(log_tx).unwrap();
 	runtime.spawn(async move {
-		Builder::from_env(Env::default().default_filter_or("trace"))
-			.target(env_logger::Target::Pipe(Box::new(File::create(PROJ_DIR.join("log.txt")).unwrap())))
-			.init();
+		//logger
+		#[cfg(debug_assertions)]
+		{
+			// In debug builds, use default behavior (stderr)
+			Builder::from_env(Env::default().default_filter_or("trace"))
+				.init();
+		}
+		#[cfg(not(debug_assertions))]
+		{
+			// In release builds, log to file
+			Builder::from_env(Env::default().default_filter_or("trace"))
+				.target(env_logger::Target::Pipe(Box::new(File::create(PROJ_DIR.join("log.txt")).unwrap())))
+				.init();
+		}
 		while let Some(log) = log_rx.recv().await {
 			match log {
 				Log::Info(message) => log::info!("{}", message),
@@ -143,6 +147,16 @@ fn main() -> Result<(), slint::PlatformError> {
 					UiEvent::UpdatePlayers(players) => {
 						window.set_players(ModelRc::from(players.as_slice()));
 					}
+					// UiEvent::UpdatePlayer{index, num_players} => {
+					// 	let players_model: ModelRc<SetupPlayerData> = window.get_players();
+					// 	let players: &VecModel<SetupPlayerData> = players_model
+					// 		.as_any()
+					// 		.downcast_ref::<VecModel<SetupPlayerData>>()
+					// 		.unwrap();
+					// 	let mut player = players.remove(index as usize);
+					// 	(player.x, player.y) = ellipse_position(index, num_players);
+					// 	players.insert(index as usize, player);
+					// }
 					UiEvent::UpdatePublicGames(public_games) => {
 						let games: Vec<Game> = public_games
 							.iter()
@@ -947,10 +961,10 @@ fn ssp_callback(game: Arc<RwLock<SetbackGame>>) -> impl Fn(Option<Ssp>) + Send +
 
 //Util functions
 
-fn as_ui_player_vec(local_player_index: u8, players: &[impl AsRef<PlayerData>]) -> Vec<SetupPlayerData> {
-	const ELLIPSE_RADIUS: f32 = 525.;
-	const ELLIPSE_HEIGHT_RATIO: f32 = 0.625;
+const ELLIPSE_RADIUS: f32 = 525.;
+const ELLIPSE_HEIGHT_RATIO: f32 = 0.625;
 
+fn as_ui_player_vec(local_player_index: u8, players: &[impl AsRef<PlayerData>]) -> Vec<SetupPlayerData> {
 	let mut players: Vec<SetupPlayerData> = players
 		.iter()
 		.enumerate()
@@ -965,8 +979,8 @@ fn as_ui_player_vec(local_player_index: u8, players: &[impl AsRef<PlayerData>]) 
 					PlayerType::MultiplayerHuman{ready,..} => ready,
 					_ => true
 				},
-				x: theta.cos() * ELLIPSE_RADIUS,
-				y: ELLIPSE_HEIGHT_RATIO * theta.sin() * ELLIPSE_RADIUS
+				x: -theta.cos() * ELLIPSE_RADIUS,
+				y: -ELLIPSE_HEIGHT_RATIO * theta.sin() * ELLIPSE_RADIUS
 			}
 		})
 		.collect::<Vec<SetupPlayerData>>();

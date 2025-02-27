@@ -30,6 +30,7 @@ push() {
 }
 
 alias build_game='cargo build -p game --profile=game-debug'
+alias run_game='cargo run -p game --profile=game-debug'
 
 alias cloc_setback='cloc --include-ext=rs,slint,html,js,css,sql,sh,toml,md --exclude-dir=target,.idea,.git .'
 

@@ -521,7 +521,7 @@ export component MainWindow inherits Window {
 			width: parent.width - 500px;
 			height: parent.height - 200px;
 			
-			for player[i] in root.players : SetupPlayer {
+			for player[i] in root.players: SetupPlayer {
 				x: player.x + (parent.width - self.width) / 2;
 				y: player.y + (parent.height - self.height) / 2;
 				
@@ -533,21 +533,11 @@ export component MainWindow inherits Window {
 				can_drag: root.host == HostType.Host || root.host == HostType.SingleplayerSetup;
 				ready: player.ready;
 				show_ready: root.host != HostType.SingleplayerSetup;
+				index: i;
 
 				remove => {root.remove_player(i);}
 				toggle_human(human) => {root.set_player_type(i, human);}
 				team_changed(team) => {root.set_player_team(i, team);}
-				
-				// drag_started => {
-				// 	// TODO: Implement drag start
-				// }
-				
-				// drag_ended => {
-				// 	// TODO: Implement drag end
-				// }
-				
-				// animate x { duration: 300ms; easing: ease; }
-				// animate y { duration: 300ms; easing: ease; }
 			}
 		}
 
