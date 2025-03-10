@@ -2,7 +2,11 @@
 
 use {
 	bincode::{
-		config::standard, de::{BorrowDecoder, Decoder}, enc::Encoder, error::{DecodeError, EncodeError}, BorrowDecode, Decode, Encode
+		config::standard,
+		de::{BorrowDecoder, Decoder},
+		enc::Encoder,
+		error::{DecodeError, EncodeError},
+		BorrowDecode, Decode, Encode
 	},
 	env_logger::{Builder, Env},
 	keyring::Entry,
@@ -10,9 +14,13 @@ use {
 		game::{GameBuilder, GameRuntime},
 		Error, GameEvent, GameFilter, GameMeta, PlayerData, PlayerType, Protocol, PublicGame, RoundScores, ServerConnection, Ssp
 	},
-	slint::{Model, ModelRc, SharedString, Weak, VecModel},
+	slint::{Model, ModelRc, SharedString, Weak},
 	std::{
-		any::Any, env, f32::consts::PI, fs::{self, File}, path::{Path, PathBuf}, sync::{Arc, LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}
+		env,
+		f32::consts::PI,
+		fs::{self, File},
+		path::{Path, PathBuf},
+		sync::{Arc, LazyLock, RwLock, RwLockReadGuard, RwLockWriteGuard}
 	},
 	tokio::{
 		runtime::{Handle, Runtime},
@@ -83,12 +91,14 @@ fn main() -> Result<(), slint::PlatformError> {
 		{
 			// In debug builds, use default behavior (stderr)
 			Builder::from_env(Env::default().default_filter_or("trace"))
+				.format_timestamp_micros()
 				.init();
 		}
 		#[cfg(not(debug_assertions))]
 		{
 			// In release builds, log to file
 			Builder::from_env(Env::default().default_filter_or("trace"))
+				.format_timestamp_micros()
 				.target(env_logger::Target::Pipe(Box::new(File::create(PROJ_DIR.join("log.txt")).unwrap())))
 				.init();
 		}
@@ -146,6 +156,7 @@ fn main() -> Result<(), slint::PlatformError> {
 					}
 					UiEvent::UpdatePlayers(players) => {
 						window.set_players(ModelRc::from(players.as_slice()));
+						debug!("Players updated");
 					}
 					// UiEvent::UpdatePlayer{index, num_players} => {
 					// 	let players_model: ModelRc<SetupPlayerData> = window.get_players();
@@ -614,6 +625,9 @@ fn set_state(setback_game: Arc<RwLock<SetbackGame>>, scene: SceneType, host: Hos
 		Scene::MainMenu => {
 			match scene {
 				SceneType::Game => {unreachable!("You should not be able to change the scene to a game when you're in the main menu.")}
+				SceneType::Setup => {
+					game.event_tx.send(UiEvent::UpdatePlayers(ModelRc::from(Vec::new().as_slice()))).unwrap();
+				}
 				_ => {game.scene_type = scene.into();}
 			}
 		}
@@ -628,6 +642,9 @@ fn set_state(setback_game: Arc<RwLock<SetbackGame>>, scene: SceneType, host: Hos
 			match scene {
 				SceneType::Game |
 				SceneType::Settings => {unreachable!("You should not be able to change the scene to a game or settings when you're in the multiplayer.")}
+				SceneType::Setup => {
+					game.event_tx.send(UiEvent::UpdatePlayers(ModelRc::from(Vec::new().as_slice()))).unwrap();
+				}
 				_ => {game.scene_type = scene.into();}
 			}
 		}

@@ -12,6 +12,7 @@ export component SetupPlayer inherits HorizontalLayout {
 	in property <bool> can_drag;
 	in property <bool> ready;
 	in property <bool> show_ready;
+	in property <bool> can_remove;
 	in property <int> index;
 	private property <bool> is_dragging;
 	private property <length> drag_offset_x;
@@ -47,12 +48,12 @@ export component SetupPlayer inherits HorizontalLayout {
 		}
 
 		pointer-event(event) => {
-			if (event.kind == PointerEventKind.down) {
+			if (event.kind == PointerEventKind.down && !root.is_dragging && event.button == PointerEventButton.left) {
 				root.animation_duration = 0ms;
 				root.drag_offset_x = root.x - (self.absolute-position.x + self.mouse-x);
 				root.drag_offset_y = root.y - (self.absolute-position.y + self.mouse-y);
 				root.is_dragging = true;
-			} else if (event.kind == PointerEventKind.up) {
+			} else if (event.kind == PointerEventKind.up && root.is_dragging && event.button == PointerEventButton.left) {
 				root.animation_duration = 300ms;
 				root.is_dragging = false;
 				root.x = root.og_x;
@@ -61,6 +62,9 @@ export component SetupPlayer inherits HorizontalLayout {
 				root.x = self.absolute-position.x + self.mouse-x + root.drag_offset_x;
 				root.y = self.absolute-position.y + self.mouse-y + root.drag_offset_y;
 			}
+			// if (event.kind == PointerEventKind.move && !root.is_dragging) {
+			// 	debug("moving player", root.index);
+			// }
 		}
 
 		states [
@@ -84,10 +88,12 @@ export component SetupPlayer inherits HorizontalLayout {
 			border-width: 4px;
 			border-color: Palette.Orange;
 			border-radius: 10px;
+			visible: root.can_remove;
 
 			xTouchArea := TouchArea {
 				width: 30px;
 				height: 30px;
+				enabled: root.can_remove;
 
 				checkmark := Image {
 					source: @image-url("../assets/images/x.png");

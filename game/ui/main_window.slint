@@ -27,24 +27,24 @@ export component MainWindow inherits Window {
 	in-out property <SceneType> scene: SceneType.MainMenu;
 	in-out property <HostType> host: HostType.None;
 
-	// in property <[Player]> players: [];	//Use this for production
-	in-out property <[SetupPlayerData]> players:[	//use this for slint preview
-		{username: "Player 1 (Me)", is_human: true, team: 0, local: true, x: 0px, y: 328.125px},
-		{username: "Player 2", is_human: false, team: 1, local: false, x: -371.231px, y: 232.091px},
-		{username: "Player 3", is_human: false, team: 0, local: false, x: -525px, y: 0px},
-        {username: "Player 4", is_human: false, team: 1, local: false, x: -371.231px, y: -232.091px},
-        {username: "Player 5", is_human: false, team: 0, local: false, x: 0px, y: -328.125px},
-        {username: "Player 6", is_human: false, team: 1, local: false, x: 371.231px, y: -232.091px},
-        {username: "Player 7", is_human: false, team: 0, local: false, x: 525px, y: 0px},
-        {username: "Player 8", is_human: false, team: 1, local: false, x: 371.231px, y: 232.091px}
-	];
-	// in property <[Game]> games: [];	//Use this for production
-	in-out property <[Game]> games:[	//use this for slint preview
-		{join_code: "123456", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
-		{join_code: "123457", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
-		{join_code: "123458", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
-		{join_code: "123459", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true}
-	];
+	in-out property <[SetupPlayerData]> players: [];	//Use this for production
+	// in-out property <[SetupPlayerData]> players:[	//use this for slint preview
+	// 	{username: "Player 1 (Me)", is_human: true, team: 0, local: true, x: 0px, y: 328.125px},
+	// 	{username: "Player 2", is_human: false, team: 1, local: false, x: -371.231px, y: 232.091px},
+	// 	{username: "Player 3", is_human: false, team: 0, local: false, x: -525px, y: 0px},
+    //     {username: "Player 4", is_human: false, team: 1, local: false, x: -371.231px, y: -232.091px},
+    //     {username: "Player 5", is_human: false, team: 0, local: false, x: 0px, y: -328.125px},
+    //     {username: "Player 6", is_human: false, team: 1, local: false, x: 371.231px, y: -232.091px},
+    //     {username: "Player 7", is_human: false, team: 0, local: false, x: 525px, y: 0px},
+    //     {username: "Player 8", is_human: false, team: 1, local: false, x: 371.231px, y: 232.091px}
+	// ];
+	in-out property <[Game]> games: [];	//Use this for production
+	// in-out property <[Game]> games:[	//use this for slint preview
+	// 	{join_code: "123456", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
+	// 	{join_code: "123457", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
+	// 	{join_code: "123458", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true},
+	// 	{join_code: "123459", players: 2, max_players: 4, std_team: true, win_by_2: true, negative_scores: false, dealer_override: true}
+	// ];
 
 	in-out property <bool> std_team_mode: true;
 	in-out property <bool> win_by_2: false;
@@ -533,6 +533,7 @@ export component MainWindow inherits Window {
 				can_drag: root.host == HostType.Host || root.host == HostType.SingleplayerSetup;
 				ready: player.ready;
 				show_ready: root.host != HostType.SingleplayerSetup;
+				can_remove: (root.host == HostType.Host && !player.local) || root.players.length > 4;
 				index: i;
 
 				remove => {root.remove_player(i);}
@@ -641,9 +642,9 @@ export component MainWindow inherits Window {
 						width: 140px;
 					}
 					
-					StylizedSpinBox {
+					max_players := StylizedSpinBox {
 						value: root.max_players;
-						minimum: 2;
+						minimum: 4;
 						maximum: 8;
 						enabled: root.host == HostType.SingleplayerSetup || root.host == HostType.Host;
 						width: 40px;
@@ -652,7 +653,7 @@ export component MainWindow inherits Window {
 				}
 				
 				// Add Player button
-				if root.host == HostType.SingleplayerSetup || root.host == HostType.Host : StylizedButton {
+				if root.players.length < max_players.value && (root.host == HostType.SingleplayerSetup || root.host == HostType.Host): StylizedButton {
 					text: "Add Player";
 					font-size: 24px;
 					height: 40px;
@@ -764,7 +765,7 @@ export component MainWindow inherits Window {
 	}
 
 	//Multiplayer
-	if root.scene == SceneType.Multiplayer : Rectangle {
+	if root.scene == SceneType.Multiplayer: Rectangle {
 		width: 100%;
 		height: 100%;
 		background: Palette.Green;
