@@ -42,7 +42,6 @@ impl Ssp {
 	}
 }
 
-///Version for SSP, not the game
 #[derive(Encode, Decode, PartialEq, Debug)]
 pub struct Version(u8, u8, u8);
 impl Version {

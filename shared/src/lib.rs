@@ -149,4 +149,10 @@ pub mod game {
 		pub event_emitter: UnboundedReceiver<GameEvent>,
 		pub prompt_senders: Vec<(Sender<u8>, Sender<Card>)>
 	}
+
+	impl Drop for GameRuntime {
+		fn drop(&mut self) {
+			self.cancel_token.cancel();
+		}
+	}
 }
