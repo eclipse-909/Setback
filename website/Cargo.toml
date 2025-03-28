@@ -1,18 +1,18 @@
 [package]
 name = "website"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 shared = { path = "../shared" }
-actix-web = { version = "4.9.0", features = ["rustls-0_23"] }
+actix-web = { version = "4.10.2", features = ["rustls-0_23"] }
 jsonwebtoken = "9.3.1"
-chrono = "0.4.39"
+chrono = "0.4.40"
 actix-files = "0.6.6"
 actix-session = { version = "0.10.1", features = ["cookie-session"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "tls-native-tls", "mysql", "sqlite", "chrono"] }#Sqlite can be a dev-dep
-serde = { version = "1.0.217", features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
 futures-util = "0.3.31"
-serde_json = "1.0.138"
+serde_json = "1.0.140"
 lazy_static = "1.5.0"
 dotenv = "0.15.0"

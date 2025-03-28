@@ -147,7 +147,7 @@ impl Encode for PlayerType {
 	}
 }
 
-impl Decode for PlayerType {
+impl<Context> Decode<Context> for PlayerType {
 	fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
 		let player_type: u8 = Decode::decode(decoder)?;
 		match player_type {
@@ -161,7 +161,7 @@ impl Decode for PlayerType {
 	}
 }
 
-impl<'de> BorrowDecode<'de> for PlayerType {
+impl<'de, Context> BorrowDecode<'de, Context> for PlayerType {
 	fn borrow_decode<D: BorrowDecoder<'de>>(decoder: &mut D) -> Result<Self, DecodeError> {
 		let player_type: u8 = Decode::decode(decoder)?;
 		match player_type {

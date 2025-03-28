@@ -19,7 +19,6 @@ pub struct Ssp {
 	pub src_id: u32,
 	///the context of the data being sent (see enum Protocol)
 	pub protocol: Protocol
-	//TODO authentication token/key?
 }
 
 impl Ssp {

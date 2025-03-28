@@ -13,7 +13,7 @@ use {
 			TcpStream,
 			tcp::{OwnedWriteHalf, OwnedReadHalf}
 		},
-		sync::mpsc::{UnboundedSender, unbounded_channel},
+		sync::mpsc::{UnboundedReceiver, unbounded_channel},
 		io::{AsyncWriteExt, AsyncReadExt}
 	},
 	tokio_util::sync::CancellationToken,
@@ -23,6 +23,7 @@ use {
 };
 
 pub const SERVER_PORT: u16 = 42069;
+pub const PAGE_SIZE: usize = 4096;
 
 const SERVER_SOCKET: SocketAddrV4 = if cfg!(debug_assertions) {
 	SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), SERVER_PORT)
@@ -41,34 +42,31 @@ macro_rules! website {
 }
 
 ///This standardizes the method of communication between the server and clients by putting the logic in one place.
-pub trait SetbackConnection {
-	fn writer(&mut self) -> &mut UnboundedSender<Ssp>;
-	#[inline(always)]
-	fn send(&mut self, ssp: Ssp) {self.writer().send(ssp).unwrap();}
-	fn write(write_half: &mut OwnedWriteHalf, ssp: Ssp) -> impl Future<Output = Result<(), Error>> {async move {
-		let mut bytes: Vec<u8> = bincode::encode_to_vec(ssp, standard()).unwrap();
+trait SetbackConnection {
+	fn writer(&mut self) -> &mut OwnedWriteHalf;
+	///Returns whether the write was successful.
+	fn write(&mut self, ssp: Ssp) -> impl Future<Output = bool> {async move {
+		let bytes: Vec<u8> = bincode::encode_to_vec(ssp, standard()).unwrap();
 		//prefix with 2-byte length
-		let mut message: Vec<u8> = (bytes.len() as u16).to_le_bytes().to_vec();
-		message.append(&mut bytes);
-		write_half.write_all(message.as_slice()).await.map_err(|_|Error::NetworkIO)
+		self.writer().write_u16_le(bytes.len() as u16).await.is_ok() && self.writer().write_all(bytes.as_slice()).await.is_ok()
 	}}
-	fn read(read_half: &mut OwnedReadHalf, buffer: &mut Vec<u8>) -> impl Future<Output = Result<Ssp, Error>> {async move {
+	fn read(reader: &mut OwnedReadHalf, buffer: &mut Vec<u8>) -> impl Future<Output = Result<Ssp, Error>> {async move {
 		//read the 2-byte length prefix
-		let len: u16 = read_half.read_u16_le().await.map_err(|_|Error::NetworkIO)?;
+		let len: u16 = reader.read_u16_le().await.map_err(|_|Error::NetworkIO)?;
 		if len > buffer.len() as u16 {
 			buffer.resize(len as usize, 0);
 		}
-		read_half.read_exact(&mut buffer[..len as usize]).await.map_err(|_|Error::NetworkIO)?;
+		reader.read_exact(&mut buffer[..len as usize]).await.map_err(|_|Error::NetworkIO)?;
 		Ok(Ssp::decode(&mut buffer[..len as usize]).unwrap())
 	}}
 }
 
 ///Connection to the server, owned by the client.
 pub struct ServerConnection {
-	message_tx: UnboundedSender<Ssp>,
-	pub cancellation_token: CancellationToken,
+	tcp_writer: OwnedWriteHalf,
 	api: Client,
-	pub account_id: u32,//TODO I might just store this in the client's session cookies rather than in this struct
+	cancellation_token: CancellationToken,
+	pub account_id: u32,
 	pub ready: bool
 }
 
@@ -78,7 +76,7 @@ impl ServerConnection {
 	///Use the [callback] to handle when a message is received or when there's an error.
 	///The tcp stream stops listening when the callback is invoked with a ClientError, or when [Self::shutdown] is called.
 	///Returning None means it couldn't connect to the server.
-	pub async fn new_connection(username: String, password: String, ssp_callback: impl Fn(Option<Ssp>) + Send + Sync + 'static, on_write_error: impl Fn(Error) + Send + 'static) -> Result<Self, Error> {
+	pub async fn new_connection(username: String, password: String) -> Result<Self, Error> {
 		//set up reqwest client
 		let api: Client = Client::builder()
 			.cookie_store(true)
@@ -88,7 +86,6 @@ impl ServerConnection {
 		//login and get account_id
 		let account_id: u32 = api
 			//TODO fix the URL to match the updated API
-			//TODO username and password need to be filtered/sanitized/verified
 			.post(website!("api/login"))
 			.json(&LoginCredentials {username, password})
 			.send()
@@ -107,97 +104,100 @@ impl ServerConnection {
 			.value()
 			.parse::<u32>()
 			.map_err(|_|Error::ServerError)?;
-		
-		//Read thread
-		let (mut reader, mut writer) = TcpStream::connect(SERVER_SOCKET).await.map_err(|_|Error::NetworkIO)?.into_split();
+
+		//Spawn task to read messages from server
+		let (mut reader, writer) = TcpStream::connect(SERVER_SOCKET).await.map_err(|_|Error::NetworkIO)?.into_split();
 		let cancellation_token: CancellationToken = CancellationToken::new();
 		let read_cancel_token: CancellationToken = cancellation_token.clone();
 		tokio::spawn(async move {tokio::select! {
 			_ = async move {
-				let mut buffer: Vec<u8> = Vec::with_capacity(std::mem::size_of::<Ssp>());
+				let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
 				loop {
-					ssp_callback(Self::read(&mut reader, &mut buffer).await.ok());
+					match Self::read(&mut reader, &mut buffer).await {
+						Ok(ssp) => todo!(),
+						Err(err) => todo!()
+					}
 				}
 			} => {}
 			_ = read_cancel_token.cancelled() => {}
 		}});
 
-		//Write thread
-		let (message_tx, mut message_rx) = unbounded_channel();
-		let write_cancel_token: CancellationToken = cancellation_token.clone();
-		tokio::spawn(async move {tokio::select! {
-			_ = async move {
-				while let Some(ssp) = message_rx.recv().await {
-					if let Err(error) = Self::write(&mut writer, ssp).await {
-						on_write_error(error);
-					}
-				}
-				//TODO do I need to handle the post-error here? If so, how?
-			} => {}
-			_ = write_cancel_token.cancelled() => {}
-		}});
-
-		let mut server_connection: Self = Self {message_tx, cancellation_token, api, account_id, ready: false};
-		server_connection.send(Ssp::new_with_src(Protocol::SyncID, account_id));
+		let mut server_connection: Self = Self {
+			tcp_writer: writer,
+			api,
+			cancellation_token,
+			account_id,
+			ready: false
+		};
+		if !server_connection.write(Ssp::new_with_src(Protocol::SyncID, server_connection.account_id)).await {
+			return Err(Error::NetworkIO);
+		}
 		Ok(server_connection)
 	}
-
-	pub fn send_error(&mut self, err: Error) {
-		self.send(Ssp::new_with_src(Protocol::Err(err), self.account_id))
+	
+	///Returns whether the write was successful.
+	pub async fn send_create_game(&mut self, public: bool) -> bool {
+		self.write(Ssp::new_with_src(Protocol::CreateGame{public}, self.account_id)).await
 	}
 	
-	pub fn send_create_game(&mut self, public: bool) {
-		self.send(Ssp::new_with_src(Protocol::CreateGame{public}, self.account_id))
-	}
-	
-	pub fn send_join_game(&mut self, code: u32) {
-		self.send(Ssp::new_with_src(Protocol::JoinGame{code}, self.account_id))
+	///Returns whether the write was successful.
+	pub async fn send_join_game(&mut self, code: u32) -> bool {
+		self.write(Ssp::new_with_src(Protocol::JoinGame{code}, self.account_id)).await
 	}
 
-	pub fn send_search_games(&mut self, filter: GameFilter) {
-		self.send(Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id))
+	///Returns whether the write was successful.
+	pub async fn send_search_games(&mut self, filter: GameFilter) -> bool {
+		self.write(Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id)).await
 	}
 
 	///Host-only
-	pub fn send_game_meta(&mut self, meta_data: GameMeta) {
-		self.send(Ssp::new_with_src(Protocol::GameMeta(meta_data), self.account_id))
+	///Returns whether the write was successful.
+	pub async fn send_game_meta(&mut self, meta_data: GameMeta) -> bool {
+		self.write(Ssp::new_with_src(Protocol::GameMeta(meta_data), self.account_id)).await
 	}
 
-	pub fn send_update_team(&mut self, index: u8, team: u8) {
-		self.send(Ssp::new_with_src(Protocol::UpdatePlayerTeam{index, team}, self.account_id))
+	///Returns whether the write was successful.
+	pub async fn send_update_team(&mut self, index: u8, team: u8) -> bool {
+		self.write(Ssp::new_with_src(Protocol::UpdatePlayerTeam{index, team}, self.account_id)).await
 	}
 
-	pub fn send_update_player_type(&mut self, index: u8, human: bool) {
-		self.send(Ssp::new_with_src(Protocol::UpdatePlayerType{index, human}, self.account_id))
+	///Returns whether the write was successful.
+	pub async fn send_update_player_type(&mut self, index: u8, human: bool) -> bool {
+		self.write(Ssp::new_with_src(Protocol::UpdatePlayerType{index, human}, self.account_id)).await
 	}
 
-	pub fn send_ready(&mut self, is_ready: bool, index: u8) {
-		self.send(Ssp::new_with_src(Protocol::Ready{is_ready, index}, self.account_id))
+	///Returns whether the write was successful.
+	pub async fn send_ready(&mut self, is_ready: bool, index: u8) -> bool {
+		self.write(Ssp::new_with_src(Protocol::Ready{is_ready, index}, self.account_id)).await
 	}
 
-	pub fn send_game_event(&mut self, event: GameEvent) {
-		self.send(Ssp::new_with_src(Protocol::GameEvent(event), self.account_id))
+	///Returns whether the write was successful.
+	pub async fn send_game_event(&mut self, event: GameEvent) -> bool {
+		self.write(Ssp::new_with_src(Protocol::GameEvent(event), self.account_id)).await
 	}
 
 	///Host-only
-	pub fn send_add_player(&mut self) {
-		self.send(Ssp::new_with_src(Protocol::AddPlayer, self.account_id))
+	///Returns whether the write was successful.
+	pub async fn send_add_player(&mut self) -> bool {
+		self.write(Ssp::new_with_src(Protocol::AddPlayer, self.account_id)).await
 	}
 
 	///Host-only
-	pub fn send_remove_player(&mut self, index: u8) {
-		self.send(Ssp::new_with_src(Protocol::RemovePlayer{index}, self.account_id))
+	///Returns whether the write was successful.
+	pub async fn send_remove_player(&mut self, index: u8) -> bool {
+		self.write(Ssp::new_with_src(Protocol::RemovePlayer{index}, self.account_id)).await
 	}
 	
 	///Logs out of your account by clearing session cookies.
-	pub fn logout(&mut self, runtime: tokio::runtime::Handle) {
-		runtime.spawn(self.api.get(website!("api/account/logout")).send());
+	///Returns whether the write was successful.
+	pub async fn logout(&mut self) -> bool {
+		self.api.get(website!("api/account/logout")).send().await.is_ok()
 	}
 }
 
 impl SetbackConnection for ServerConnection {
 	#[inline(always)]
-	fn writer(&mut self) -> &mut UnboundedSender<Ssp> {&mut self.message_tx}
+	fn writer(&mut self) -> &mut OwnedWriteHalf {&mut self.tcp_writer}
 }
 
 impl Drop for ServerConnection {
@@ -208,7 +208,8 @@ impl Drop for ServerConnection {
 
 ///Connection to the client, owned by the server.
 pub struct ClientConnection {
-	message_tx: UnboundedSender<Ssp>,
+	tcp_writer: OwnedWriteHalf,
+	pub ssp_rx: UnboundedReceiver<Result<Ssp, Error>>,
 	cancellation_token: CancellationToken,
 	pub account_id: u32,
 	pub ready: bool
@@ -222,50 +223,38 @@ impl std::fmt::Debug for ClientConnection {
 
 impl ClientConnection {
 	///The TcpListener must accept a connection and then pass the TcpStream to this function.
-	pub async fn new_connection(tcp_stream: TcpStream, ssp_callback: impl Fn(Option<Ssp>) + Send + Sync + 'static, on_write_error: impl Fn(Error) + Send + 'static) -> Option<Self> {
-		let (mut reader, mut writer) = tcp_stream.into_split();
-		//Wait for SyncID message
-		let (account_id, mut reader, mut writer) = tokio::time::timeout(std::time::Duration::from_secs(10), async move {
-			let mut buffer: Vec<u8> = Vec::with_capacity(std::mem::size_of::<Ssp>());
+	///If the connection is not valid, it returns None and the TcpStream is handled and closed in this function.
+	///If the connection is valid, the returned [Self] contains the TcpStream's writer and a channel for receiving SSP messages.
+	pub async fn new_connection(tcp_stream: TcpStream) -> Option<Self> {
+		let (mut reader, writer) = tcp_stream.into_split();
+		let cancellation_token: CancellationToken = CancellationToken::new();
+		let read_cancel_token: CancellationToken = cancellation_token.clone();
+		let (ssp_tx, ssp_rx) = unbounded_channel();
+		let mut client_connection: Self = Self {tcp_writer: writer, ssp_rx, cancellation_token, account_id: 0, ready: false};
+
+		//Wait 5 seconds for SyncID message
+		let (mut reader, mut buffer, client_connection) = tokio::time::timeout(std::time::Duration::from_secs(5), async move {
+			let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
 			let ssp: Ssp = Self::read(&mut reader, &mut buffer).await.ok()?;
 			if matches!(ssp.protocol, Protocol::SyncID) {
-				Self::write(&mut writer, Ssp::new(Protocol::SyncID)).await.ok()?;
-				Some((ssp.src_id, reader, writer))
+				client_connection.account_id = ssp.src_id;
+				if !client_connection.write(Ssp::new(Protocol::SyncID)).await {
+					return None;
+				}
+				Some((reader, buffer, client_connection))
 			} else {
 				None
 			}
 		}).await.ok()??;
 
-		//Read thread
-		let cancellation_token: CancellationToken = CancellationToken::new();
-		let read_cancel_token: CancellationToken = cancellation_token.clone();
+		//Spawn task to read messages from TcpStream and send them to the channel
 		tokio::spawn(async move {tokio::select! {
-			_ = async move {
-				let mut buffer: Vec<u8> = Vec::with_capacity(std::mem::size_of::<Ssp>());
-				loop {
-					ssp_callback(Self::read(&mut reader, &mut buffer).await.ok());
-				}
-			} => {}
+			_ = async move {loop {ssp_tx.send(Self::read(&mut reader, &mut buffer).await).unwrap();}} => {}
 			_ = read_cancel_token.cancelled() => {}
 		}});
 
-		//Write thread
-		let (message_tx, mut message_rx) = unbounded_channel();
-		let write_cancel_token: CancellationToken = cancellation_token.clone();
-		tokio::spawn(async move {tokio::select! {
-			_ = async move {
-				while let Some(ssp) = message_rx.recv().await {
-					if let Err(error) = Self::write(&mut writer, ssp).await {
-						on_write_error(error);
-					}
-				}
-				//TODO do I need to handle the post-error here? If so, how?
-			} => {}
-			_ = write_cancel_token.cancelled() => {}
-		}});
-
 		//construct the client connection
-		Some(Self {message_tx, cancellation_token, account_id, ready: false})
+		Some(client_connection)
 	}
 
 	//TODO make a function for each protocol for convenience
@@ -273,7 +262,7 @@ impl ClientConnection {
 
 impl SetbackConnection for ClientConnection {
 	#[inline(always)]
-	fn writer(&mut self) -> &mut UnboundedSender<Ssp> {&mut self.message_tx}
+	fn writer(&mut self) -> &mut OwnedWriteHalf {&mut self.tcp_writer}
 }
 
 impl Drop for ClientConnection {

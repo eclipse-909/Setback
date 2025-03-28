@@ -1,12 +1,12 @@
 [package]
 name = "shared"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-bincode = "2.0.0-rc.3"
-tokio = { version = "1.43.0", features = ["full"] }
-tokio-util = "0.7.13"
+bincode = "2.0.1"
+tokio = { version = "1.44.1", features = ["full"] }
+tokio-util = "0.7.14"
 rand = "0.9.0"
-serde = { version = "1.0.217", features = ["derive"] }
-reqwest = { version = "0.12.12", features = ["cookies", "json"] }
+serde = { version = "1.0.219", features = ["derive"] }
+reqwest = { version = "0.12.15", features = ["cookies", "json"] }
