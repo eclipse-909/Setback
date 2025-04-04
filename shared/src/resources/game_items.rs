@@ -1,13 +1,16 @@
 use {
 	super::{
 		util::{Error, MAX_PLAYERS},
-		connection::ClientConnection
+		connection::ClientConnection,
+		game::Game
 	},
 	std::{
 		array::IntoIter,
-		fmt::{Display, Debug, Formatter}
+		fmt::{Display, Debug, Formatter},
+		sync::{Arc, RwLock}
 	},
-	tokio::sync::mpsc::{Sender, Receiver, channel},
+	tokio::sync::mpsc::{Sender, UnboundedReceiver},
+	tokio_util::sync::CancellationToken,
 	bincode::{
 		Decode, Encode, BorrowDecode,
 		enc::Encoder,
@@ -23,81 +26,46 @@ pub const A: u8 = 14;
 pub const CARDS_PER_PLAYER: u8 = 6;
 pub const MAX_GAME_METAS: u8 = 253;
 
-#[derive(Encode, Decode, Debug)]
-pub struct PlayerData {
+#[derive(Encode, Decode)]
+pub struct Player {
 	pub player_type: PlayerType,
 	pub username: String,
 	pub hand: Vec<Card>,
 	pub team_id: u8
 }
-impl PlayerData {
-	fn new(player_type: PlayerType, username: String, hand: Vec<Card>, team_id: u8) -> Self {
-		Self {player_type, username, hand, team_id}
-	}
-}
-impl AsRef<PlayerData> for PlayerData {
-	#[inline(always)]
-    fn as_ref(&self) -> &PlayerData {
-        self
-    }
-}
-
-pub struct Player {
-	pub player_data: PlayerData,
-	pub bid_tx: Sender<u8>,
-	pub bid_rx: Receiver<u8>,
-	pub card_tx: Sender<Card>,
-	pub card_rx: Receiver<Card>
-}
 impl Player {
 	pub fn new_singleplayer_self(team_id: u8) -> Self {
-		let (bid_tx, bid_rx) = channel::<u8>(1);
-		let (card_tx, card_rx) = channel::<Card>(1);
 		Self {
+			player_type: PlayerType::SingleplayerSelf,
 			//TODO load username from disk
-			player_data: PlayerData::new(PlayerType::SingleplayerSelf, String::from("Me"), Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
-			bid_tx,
-			bid_rx,
-			card_tx,
-			card_rx
+			username: String::from("Me"),
+			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
+			team_id
 		}
 	}
 
 	///Empty slot for a human player in multiplayer. This function should only be called by the server.
-	pub async fn new_human_empty(team_id: u8) -> Self {
-		let (bid_tx, bid_rx) = channel::<u8>(1);
-		let (card_tx, card_rx) = channel::<Card>(1);
+	pub fn new_human_empty(team_id: u8) -> Self {
 		Self {
-			player_data: PlayerData::new(PlayerType::HumanEmpty, String::from("Waiting for player to connect..."), Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
-			bid_tx,
-			bid_rx,
-			card_tx,
-			card_rx
+			player_type: PlayerType::HumanEmpty,
+			username: String::from("Waiting for player to connect..."),
+			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
+			team_id
 		}
 	}
 
 	pub fn new_ai(team_id: u8) -> Self {
-		let (bid_tx, bid_rx) = channel::<u8>(1);
-		let (card_tx, card_rx) = channel::<Card>(1);
 		Self {
-			player_data: PlayerData::new(PlayerType::AI, String::from("Bot"), Vec::with_capacity(CARDS_PER_PLAYER as usize), team_id),
-			bid_tx,
-			bid_rx,
-			card_tx,
-			card_rx
+			player_type: PlayerType::AI,
+			username: String::from("Bot"),
+			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
+			team_id
 		}
 	}
 	
-	pub fn can_follow(&self, lead: Suit) -> bool { self.player_data.hand.iter().any(|card| {card.suit == lead}) }
-}
-impl AsRef<PlayerData> for Player {
-	#[inline(always)]
-    fn as_ref(&self) -> &PlayerData {
-        &self.player_data
-    }
+	pub fn can_follow(&self, lead: Suit) -> bool { self.hand.iter().any(|card| {card.suit == lead}) }
 }
 
-#[derive(Debug)]
 #[repr(u8)]
 pub enum PlayerType {
 	///Yourself in singleplayer.
@@ -175,7 +143,7 @@ impl<'de, Context> BorrowDecode<'de, Context> for PlayerType {
 	}
 }
 
-#[derive(Encode, Decode, Clone, Copy, PartialEq, Debug)]
+#[derive(Encode, Decode, Clone, Copy, PartialEq)]
 pub struct Card {pub suit: Suit, pub number: u8}
 impl Display for Card {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -196,20 +164,23 @@ impl Suit {
 	pub fn iter() -> IntoIter<Self, 4> {[Self::Hearts, Self::Clubs, Self::Diamonds, Self::Spades].into_iter()}
 }
 
-#[derive(Encode, Decode, Clone, Debug)]
-pub struct GameMeta {
-	pub std_team_mode: bool,
-	pub win_by_2: bool,
-	pub negative_scores: bool,
-	pub dealer_override: bool,
-	pub max_score: i8,
-	pub max_players: u8
-}
-impl Default for GameMeta {
-	fn default() -> Self {Self {std_team_mode: true, max_score: 21, win_by_2: false, negative_scores: true, dealer_override: false, max_players: 8}}
+///A struct to handle communication between the game and the players.
+///
+///[GameBuilder::start_game] moves the game into the function and starts the event loop.
+pub struct GameRuntime {
+	pub game: Arc<RwLock<Game>>,
+	pub cancel_token: CancellationToken,
+	pub event_emitter: UnboundedReceiver<GameEvent>,
+	pub prompt_senders: Vec<(Sender<u8>, Sender<Card>)>
 }
 
-#[derive(Encode, Decode, Debug)]
+impl Drop for GameRuntime {
+	fn drop(&mut self) {
+		self.cancel_token.cancel();
+	}
+}
+
+#[derive(Encode, Decode)]
 pub struct GameFilter {
 	pub std_team_mode: bool,
 	pub win_by_2: bool,
@@ -222,7 +193,7 @@ pub struct GameFilter {
 }
 
 #[repr(u8)]
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Encode, Decode)]
 pub enum Comparison {Equal, LessOrEqual, GreaterOrEqual, Less, Greater, NotEqual}
 impl Comparison {
 	pub fn compare<T: PartialOrd>(&self, a: T, b: T) -> bool {
@@ -237,7 +208,7 @@ impl Comparison {
 	}
 }
 
-#[derive(Encode, Decode, Clone, Debug)]
+#[derive(Encode, Decode)]
 pub struct Team {
 	//the cards the team collects after winning a turn
 	pub pile: Vec<Card>,
@@ -246,36 +217,6 @@ pub struct Team {
 }
 impl Default for Team {
 	fn default() -> Self {Self {pile: Vec::with_capacity((MAX_PLAYERS * CARDS_PER_PLAYER) as usize), score: 0}}
-}
-
-#[derive(Encode, Decode, Clone, Debug)]
-pub struct GameData {
-	pub teams: Vec<Team>,
-	pub trump: Suit,
-	pub lead: Suit,
-	///the index of the player whose turn it is
-	pub turn_index: u8,
-	///the turn number in the round (0..=6 where turn 0 is the bidding turn)
-	pub turn_number: u8,
-	///the index of the player who led this turn
-	pub lead_index: u8,
-	pub dealer_index: u8,
-	pub round_number: u8
-}
-
-impl Default for GameData {
-	fn default() -> Self {
-		Self {
-			teams: Vec::with_capacity(MAX_PLAYERS as usize),
-			trump: Suit::Hearts,
-			lead: Suit::Hearts,
-			turn_index: 0,
-			turn_number: 0,
-			lead_index: 0,
-			dealer_index: 0,
-			round_number: 0
-		}
-	}
 }
 
 #[derive(Encode, Decode, Debug)]
@@ -291,7 +232,7 @@ pub struct RoundScores {
 ///Events that can be sent from the game to the player.
 ///The game will emit these events in singleplayer.
 ///In multiplayer, the TCP stream will receive [Ssp] messages from the server, which may contain these events.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode)]
 #[repr(u8)]
 pub enum GameEvent {
 	///Index player bid the amount

@@ -1,8 +1,5 @@
 use {
-	shared::{
-		game::{GameBuilder, GameRuntime},
-		Card, GameEvent, Player
-	},
+	shared::{Card, GameEvent, Player, SetupData, GameRuntime},
 	std::io::{stdin, stdout, Write},
 	tokio::sync::mpsc::Sender
 };
@@ -10,12 +7,8 @@ use {
 ///This is essentially an integration test
 #[tokio::main]
 async fn main() {
-	let mut game: GameBuilder = GameBuilder::default();
-	game.game.players.push(Player::new_singleplayer_self(0));
-	for _ in 1..8 {
-		game.add_ai();
-	}
-	let mut game_runtime: GameRuntime = game.start_game();
+	let mut setup: SetupData = SetupData::new_singleplayer();
+	let mut game_runtime: GameRuntime = setup.start_game();
 	tokio::select! {
 		_ = async {
 			loop {

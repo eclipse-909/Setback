@@ -1,7 +1,7 @@
 use {
 	bincode::{Decode, Encode},
 	std::{
-		fmt::{Debug, Display, Formatter},
+		fmt::{Display, Formatter},
 		future::Future
 	},
 	tokio::{
@@ -16,7 +16,7 @@ pub const MAX_PLAYERS: u8 = 8;
 pub const MIN_PLAYERS: u8 = 4;
 
 #[repr(u8)]
-#[derive(Encode, Decode, Clone, Debug)]
+#[derive(Encode, Decode, Debug)]
 pub enum Error {
 	Indeterminate,
 	Authentication,

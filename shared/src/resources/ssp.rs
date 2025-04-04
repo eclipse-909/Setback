@@ -1,7 +1,9 @@
 use {
 	super::{
 		util::Error,
-		game_items::{PlayerData, GameFilter, GameMeta, GameData, GameEvent}
+		game_items::{Player, GameFilter, GameEvent},
+		game::Game,
+		setup_data::SetupData
 	},
 	bincode::{
 		Decode,
@@ -12,7 +14,7 @@ use {
 };
 
 ///Setback Server Protocol
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode)]
 pub struct Ssp {
 	pub version: Version,
 	///0 = server/game, other = specific client_id
@@ -42,7 +44,7 @@ impl Ssp {
 	}
 }
 
-#[derive(Encode, Decode, PartialEq, Debug)]
+#[derive(Encode, Decode, PartialEq)]
 pub struct Version(u8, u8, u8);
 impl Version {
 	pub const LATEST: Version = Version(0, 1, 0);
@@ -55,7 +57,7 @@ impl Version {
 ///When a request is sent, the caller will not wait for a response.
 ///You must handle the response the same way you would handle a spontaneous message.
 #[repr(u8)]
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode)]
 pub enum Protocol {
 	///Client ---SyncID--> Server<br>
 	///Client <--SyncID--- Server<br>
@@ -98,7 +100,7 @@ pub enum Protocol {
 	///Client <--Game--- Server<br>
 	///Response only<br><br>
 	///Server sends game info when client creates or joins a game.
-	Game(GameMeta, Vec<PlayerData>, bool),
+	Game{setup_data: SetupData, is_host: bool},
 	///Client ---SearchGames--> Server<br>
 	///Client <--PublicGames--- Server<br>
 	///Request only<br><br>
@@ -116,7 +118,7 @@ pub enum Protocol {
 	///Host only on request<br><br>
 	///Host can update the settings in the lobby which gets sent to the game.
 	///The game updates its state and propagates the message to all other clients.
-	GameMeta(GameMeta),
+	SetupData(SetupData),
 	///Client ---UpdatePlayerTeam--> Game<br>
 	///All-Clients <--UpdatePlayerTeam--- Game<br>
 	///Request and response<br>
@@ -137,7 +139,7 @@ pub enum Protocol {
 	///Response only<br><br>
 	///When information about multiple players changes or the number of players changes.
 	///The game updates its state and propagates the message to all other clients.
-	Players{players: Vec<PlayerData>, local_player_index: u8},
+	Players{players: Vec<Player>, local_player_index: u8},
 	///Client ---Ready--> Game<br>
 	///All-Clients <--Ready--- Game<br>
 	///Request and response<br>
@@ -153,7 +155,7 @@ pub enum Protocol {
 	///Response only<br>
 	///Spontaneous<br><br>
 	///Used to sync data between clients.
-	GameData(GameData),
+	GameData(Game),
 	///Client <--GameEvent--- Game<br>
 	///Spontaneous<br><br>
 	///OR<br><br>
@@ -183,7 +185,7 @@ pub enum Protocol {
 }
 
 ///Admins can use these messages to mess with the server with admin privileges.
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode)]
 pub enum AdminMessage {
 	///Admin ---Authorize--> Server<br>
 	///Admin <--AuthorizeResponse--- Server<br>
@@ -212,9 +214,8 @@ pub enum AdminMessage {
 	NumActiveGames(u8)
 }
 
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode)]
 pub struct PublicGame {
-	pub players: u8,
 	pub join_code: u32,
-	pub game_meta: GameMeta,
+	pub setup_data: SetupData
 }

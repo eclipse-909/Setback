@@ -2,7 +2,8 @@ use {
 	super::{
 		ssp::{Ssp, Protocol},
 		util::Error,
-		game_items::{GameFilter, GameMeta, GameEvent}
+		game_items::{GameFilter, GameEvent},
+		setup_data::SetupData
 	},
 	std::{
 		net::{Ipv4Addr, SocketAddrV4},
@@ -42,7 +43,7 @@ macro_rules! website {
 }
 
 ///This standardizes the method of communication between the server and clients by putting the logic in one place.
-trait SetbackConnection {
+pub trait SetbackConnection {
 	fn writer(&mut self) -> &mut OwnedWriteHalf;
 	///Returns whether the write was successful.
 	fn write(&mut self, ssp: Ssp) -> impl Future<Output = bool> {async move {
@@ -66,6 +67,7 @@ pub struct ServerConnection {
 	tcp_writer: OwnedWriteHalf,
 	api: Client,
 	cancellation_token: CancellationToken,
+	pub ssp_rx: UnboundedReceiver<Result<Ssp, Error>>,
 	pub account_id: u32,
 	pub ready: bool
 }
@@ -109,14 +111,12 @@ impl ServerConnection {
 		let (mut reader, writer) = TcpStream::connect(SERVER_SOCKET).await.map_err(|_|Error::NetworkIO)?.into_split();
 		let cancellation_token: CancellationToken = CancellationToken::new();
 		let read_cancel_token: CancellationToken = cancellation_token.clone();
+		let (ssp_tx, ssp_rx) = unbounded_channel();
 		tokio::spawn(async move {tokio::select! {
 			_ = async move {
 				let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
 				loop {
-					match Self::read(&mut reader, &mut buffer).await {
-						Ok(ssp) => todo!(),
-						Err(err) => todo!()
-					}
+					ssp_tx.send(Self::read(&mut reader, &mut buffer).await).unwrap();
 				}
 			} => {}
 			_ = read_cancel_token.cancelled() => {}
@@ -126,6 +126,7 @@ impl ServerConnection {
 			tcp_writer: writer,
 			api,
 			cancellation_token,
+			ssp_rx,
 			account_id,
 			ready: false
 		};
@@ -152,8 +153,8 @@ impl ServerConnection {
 
 	///Host-only
 	///Returns whether the write was successful.
-	pub async fn send_game_meta(&mut self, meta_data: GameMeta) -> bool {
-		self.write(Ssp::new_with_src(Protocol::GameMeta(meta_data), self.account_id)).await
+	pub async fn send_game_meta(&mut self, setup_data: SetupData) -> bool {
+		self.write(Ssp::new_with_src(Protocol::SetupData(setup_data), self.account_id)).await
 	}
 
 	///Returns whether the write was successful.
@@ -215,12 +216,6 @@ pub struct ClientConnection {
 	pub ready: bool
 }
 
-impl std::fmt::Debug for ClientConnection {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "ClientConnection")
-	}
-}
-
 impl ClientConnection {
 	///The TcpListener must accept a connection and then pass the TcpStream to this function.
 	///If the connection is not valid, it returns None and the TcpStream is handled and closed in this function.
@@ -271,7 +266,7 @@ impl Drop for ClientConnection {
 	}
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 pub struct AccountData {
 	///alias for rowid in sqlite
 	pub account_id: u32,
@@ -280,7 +275,7 @@ pub struct AccountData {
 	pub last_active: String
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct LoginCredentials {
 	pub username: String,
 	pub password: String,
