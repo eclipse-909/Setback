@@ -1,0 +1,18 @@
+[package]
+name = "setback_website"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+actix-files.workspace = true
+actix-session.workspace = true
+actix-web.workspace = true
+chrono.workspace = true
+dotenv.workspace = true
+futures-util.workspace = true
+jsonwebtoken.workspace = true
+lazy_static.workspace = true
+libsetback.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true

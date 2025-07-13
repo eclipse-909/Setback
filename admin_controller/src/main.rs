@@ -2,10 +2,11 @@ use {
 	std::{
 		io::stdin,
 		fmt::{self, Display},
-		sync::RwLock
+		sync::RwLock,
+		pin::Pin
 	},
-	shared::{
-		ServerConnection, SetbackConnection, Ssp, Protocol, Error, AdminMessage
+	libsetback::{
+		ClientConnection, SetbackConnection, ssp, Protocol, Error, AdminMessage
 	},
 	tokio::sync::mpsc::{Sender, Receiver, channel},
 	tokio_util::sync::CancellationToken
@@ -14,7 +15,7 @@ use {
 struct AdminCommand {
 	command: &'static str,
 	description: &'static str,
-	action: fn(&mut ServerConnection, &Sender<bool>, u32)
+	action: fn(&mut ClientConnection, &Sender<bool>, u32) -> Pin<Box<dyn Future<Output=()> + Send>>,
 }
 
 impl Display for AdminCommand {
@@ -24,11 +25,11 @@ impl Display for AdminCommand {
 }
 
 const ADMIN_COMMANDS: &[AdminCommand] = &[
-	AdminCommand{command: "exit", description: "Exit the admin console.", action: |_,_,_| {
+	AdminCommand{command: "exit", description: "Exit the admin console.", action: Box::pin(async |_,_,_| {
 		println!("Disconnected");
 		std::process::exit(0);
-	}},
-	AdminCommand{command: "help", description: "Show this help message.", action: |_,tx,_| {
+	})},
+	AdminCommand{command: "help", description: "Show this help message.", action: async |_,tx,_| {
 		println!("Available commands:");
 		for cmd in ADMIN_COMMANDS {
 			println!("{}", cmd);
@@ -36,23 +37,23 @@ const ADMIN_COMMANDS: &[AdminCommand] = &[
 		tx.try_send(true).unwrap();
 	}},
 	AdminCommand{command: "login", description: "Login and authorize as an admin.", action: authorize},
-	AdminCommand{command: "disable", description: "Disable the ability for users to create a new game.\n  Must be authorized.", action: |conn, _, account_id| {
-		conn.send(Ssp::new_with_src(Protocol::Admin(AdminMessage::DisableCreateGame), account_id));
-	}},
-	AdminCommand{command: "enable", description: "Enable the ability for users to create a new game.\n  Must be authorized.", action: |conn, _, account_id| {
-		conn.send(Ssp::new_with_src(Protocol::Admin(AdminMessage::EnableCreateGame), account_id));
-	}},
-	AdminCommand{command: "numgames", description: "Show the number of active games.\n  Must be authorized.", action: |conn, _, account_id| {
-		conn.send(Ssp::new_with_src(Protocol::Admin(AdminMessage::NumActiveGames(0)), account_id));
-	}}
+	AdminCommand{command: "disable", description: "Disable the ability for users to create a new game.\n  Must be authorized.", action: Box::pin(async |conn, _, account_id| {
+		conn.write(ssp::new_with_src(Protocol::Admin(AdminMessage::DisableCreateGame), account_id)).await;
+	})},
+	AdminCommand{command: "enable", description: "Enable the ability for users to create a new game.\n  Must be authorized.", action: Box::pin(async |conn, _, account_id| {
+		conn.write(ssp::new_with_src(Protocol::Admin(AdminMessage::EnableCreateGame), account_id)).await;
+	})},
+	AdminCommand{command: "numgames", description: "Show the number of active games.\n  Must be authorized.", action: Box::pin(async |conn, _, account_id| {
+		conn.write(ssp::new_with_src(Protocol::Admin(AdminMessage::NumActiveGames(0)), account_id)).await;
+	})}
 ];
 
 static PROMPT_STR: RwLock<String> = RwLock::new(String::new());
 
-fn authorize(conn: &mut ServerConnection, _: &Sender<bool>, account_id: u32) {
+fn authorize(conn: &mut ClientConnection, _: &'static Sender<bool>, account_id: u32) -> Pin<Box<dyn Future<Output = ()> + Send>> {Box::pin(async move {
 	let admin_password: String = rpassword::prompt_password("Enter the admin password: ").unwrap();
-	conn.send(Ssp::new_with_src(Protocol::Admin(AdminMessage::Authorize{admin_password}), account_id));
-}
+	conn.write(ssp::new_with_src(Protocol::Admin(AdminMessage::Authorize{admin_password}), account_id)).await;
+})}
 
 #[tokio::main]
 async fn main() {
@@ -71,7 +72,7 @@ async fn main() {
 	let cancellation_token: CancellationToken = CancellationToken::new();
 	let (ssp_waiter_tx, mut ssp_waiter_rx): (Sender<bool>, Receiver<bool>) = channel(1);
 	println!("Connecting to server...");
-	let mut connection: ServerConnection = match ServerConnection::new_connection(
+	let mut connection: ClientConnection = match ClientConnection::new_connection(
 		username.clone(),
 		password,
 		ssp_callback(cancellation_token.clone(), ssp_waiter_tx.clone(), username),
@@ -85,7 +86,7 @@ async fn main() {
 	};
 	println!("Logged-in and connected to server");
 	let account_id: u32 = connection.account_id;
-	authorize(&mut connection, &ssp_waiter_tx, account_id);
+	authorize(&mut connection, &ssp_waiter_tx, account_id).await;
 	let mut command: String = String::new();
 	*PROMPT_STR.write().unwrap() = String::from("Setback-User> ");
 	loop {

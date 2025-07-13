@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setback - Main Menu</title>
+    <style>
+        /* Color Palette & Theme Variables */
+        :root {
+            --primary-green: #0d5d2e;
+            --secondary-green: #1a7a3e;
+            --accent-gold: #d4af37;
+            --light-gold: #f4e87c;
+            --dark-gold: #b8941f;
+            --cream: #f5f5dc;
+            --dark-brown: #2c1810;
+            --medium-brown: #4a2c1a;
+            --light-brown: #8b6f47;
+            --card-shadow: rgba(0, 0, 0, 0.3);
+            --text-shadow: rgba(0, 0, 0, 0.5);
+            --border-radius: 12px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Georgia', serif;
+            background: linear-gradient(135deg, var(--primary-green) 0%, var(--secondary-green) 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--cream);
+            overflow: hidden;
+        }
+
+        /* Background pattern overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                radial-gradient(circle at 25% 25%, rgba(212, 175, 55, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 75% 75%, rgba(212, 175, 55, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .main-menu {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            max-width: 500px;
+            width: 90%;
+            padding: 40px;
+            background: rgba(44, 24, 16, 0.9);
+            border-radius: var(--border-radius);
+            box-shadow:
+                0 20px 60px var(--card-shadow),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            border: 2px solid var(--accent-gold);
+            backdrop-filter: blur(10px);
+        }
+
+        .logo-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 40px;
+        }
+
+        .logo-placeholder {
+            width: 120px;
+            height: 120px;
+            background: linear-gradient(45deg, var(--accent-gold), var(--light-gold));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            border: 4px solid var(--dark-gold);
+            box-shadow: 0 8px 20px var(--card-shadow);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .logo-placeholder::before {
+            content: '♠♦♣♥';
+            font-size: 24px;
+            color: var(--dark-brown);
+            text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.3);
+        }
+
+        .game-title {
+            font-size: 48px;
+            font-weight: bold;
+            color: var(--accent-gold);
+            text-shadow: 3px 3px 6px var(--text-shadow);
+            margin-bottom: 10px;
+            letter-spacing: 2px;
+            text-align: center;
+        }
+
+        .game-subtitle {
+            font-size: 16px;
+            color: var(--light-gold);
+            text-shadow: 1px 1px 2px var(--text-shadow);
+            font-style: italic;
+            margin-bottom: 20px;
+        }
+
+        .menu-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            width: 100%;
+        }
+
+        .menu-button {
+            background: linear-gradient(135deg, var(--secondary-green) 0%, var(--primary-green) 100%);
+            color: var(--cream);
+            border: 2px solid var(--accent-gold);
+            padding: 16px 32px;
+            font-size: 18px;
+            font-family: 'Georgia', serif;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: bold;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .menu-button::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.6s ease;
+        }
+
+        .menu-button:hover {
+            background: linear-gradient(135deg, var(--accent-gold) 0%, var(--dark-gold) 100%);
+            color: var(--dark-brown);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .menu-button:hover::before {
+            left: 100%;
+        }
+
+        .menu-button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        .menu-button.primary {
+            background: linear-gradient(135deg, var(--accent-gold) 0%, var(--dark-gold) 100%);
+            color: var(--dark-brown);
+            border-color: var(--light-gold);
+        }
+
+        .menu-button.primary:hover {
+            background: linear-gradient(135deg, var(--light-gold) 0%, var(--accent-gold) 100%);
+            border-color: var(--cream);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            width: 100%;
+        }
+
+        .button-group .menu-button {
+            flex: 1;
+            font-size: 16px;
+            padding: 14px 20px;
+        }
+
+        .version-text {
+            margin-top: 30px;
+            font-size: 12px;
+            color: var(--light-brown);
+            text-align: center;
+            opacity: 0.7;
+        }
+
+        /* Card suit decorations */
+        .decoration {
+            position: absolute;
+            font-size: 60px;
+            opacity: 0.1;
+            color: var(--accent-gold);
+            pointer-events: none;
+        }
+
+        .decoration.top-left {
+            top: 20px;
+            left: 20px;
+        }
+
+        .decoration.top-right {
+            top: 20px;
+            right: 20px;
+        }
+
+        .decoration.bottom-left {
+            bottom: 20px;
+            left: 20px;
+        }
+
+        .decoration.bottom-right {
+            bottom: 20px;
+            right: 20px;
+        }
+
+        /* Responsive design */
+        @media (max-width: 600px) {
+            .main-menu {
+                padding: 30px 20px;
+            }
+
+            .game-title {
+                font-size: 36px;
+            }
+
+            .menu-button {
+                font-size: 16px;
+                padding: 14px 24px;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Background decorations -->
+    <div class="decoration top-left">♠</div>
+    <div class="decoration top-right">♦</div>
+    <div class="decoration bottom-left">♣</div>
+    <div class="decoration bottom-right">♥</div>
+
+    <div class="main-menu">
+        <div class="logo-section">
+            <!-- Replace this div with your actual logo image -->
+            <!-- <div class="logo-placeholder"></div> -->
+            <img src="./images/cardsIcon.png" alt="Setback Logo" class="logo-placeholder">
+            <h1 class="game-title">Setback</h1>
+            <p class="game-subtitle">Classic Card Game</p>
+        </div>
+
+        <div class="menu-buttons">
+            <button class="menu-button primary">Single Player</button>
+            <button class="menu-button primary">Multiplayer</button>
+
+            <div class="button-group">
+                <button class="menu-button">Settings</button>
+                <button class="menu-button">Exit Game</button>
+            </div>
+        </div>
+
+        <div class="version-text">Version 0.1.0</div>
+    </div>
+</body>
+</html>

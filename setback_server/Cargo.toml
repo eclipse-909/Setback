@@ -1,0 +1,10 @@
+[package]
+name = "setback_server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bincode.workspace = true
+libsetback.workspace = true
+rand.workspace = true
+tokio.workspace = true

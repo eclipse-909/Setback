@@ -1,11 +1,11 @@
 [workspace]
 members = [
 	"admin_controller",
-	"game",
-	"server",
-	"shared",
-	"terminal_game",
-	"website"
+	"libsetback",
+	"setback",
+	"setback_server",
+	"setback_website",
+	"terminal_game"
 ]
 resolver = "2"
 
@@ -18,19 +18,73 @@ overflow-checks = true
 opt-level = 0
 incremental = true
 
-[profile.dev]
-opt-level = 1
-
-[profile.dev.package."terminal_game"]
+[profile.game-debug.package."libsetback"]
 inherits = "game-debug"
 
-[profile.dev.package."shared"]
-inherits = "game-debug"
-
-[profile.dev.package."*"]
+[profile.game-debug.package."*"]
 opt-level = 3
 
 [profile.release]
-codegen-units = 1
+lto = true
 opt-level = 3
-lto = "fat"
+codegen-units = 1
+incremental = false
+debug = false
+
+[workspace.dependencies]
+actix-files = "0.6.6"
+actix-session = { version = "0.10.1", features = ["cookie-session"] }
+actix-web = { version = "4.11.0", features = ["rustls-0_23"] }
+bevy = { version = "0.16.1", default-features = false, features = [
+	"async_executor",
+	"bevy_asset",
+	"bevy_audio",
+	"bevy_color",
+	"bevy_core_pipeline",
+	"bevy_input_focus",
+	"bevy_log",
+	"bevy_picking",
+	"bevy_render",
+	"bevy_sprite",
+	"bevy_sprite_picking_backend",
+	"bevy_state",
+	"bevy_text",
+	"bevy_ui",
+	"bevy_ui_picking_backend",
+	"bevy_window",
+	"bevy_winit",
+	"custom_cursor",
+	"default_font",
+	"multi_threaded",
+	"png",
+	"std",
+	"sysinfo_plugin",
+	"x11",
+	"bevy_debug_stepping",
+	"bevy_image",
+	"bevy_ui_debug",
+	"wayland"
+] }
+bevy_framepace = "0.19.1"
+bevy-inspector-egui = "0.31.0"
+bincode = "2.0.1"
+blake3 = { version = "1.5", features = ["pure"] }
+chrono = "0.4.41"
+dotenv = "0.15.0"
+futures-util = "0.3.31"
+image = "0.25.6"
+jsonwebtoken = "9.3.1"
+keyring = { version = "3.6.2", features = ["linux-native-async-persistent", "windows-native", "crypto-rust", "vendored", "tokio"] }
+lazy_static = "1.5.0"
+libsetback = { path = "./libsetback" }
+log = { version = "0.4.27", features = ["max_level_debug", "release_max_level_warn"] }
+rand = "0.9.1"
+reqwest = { version = "0.12.22", features = ["cookies", "json"] }
+rpassword = "7.4.0"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-native-tls", "mysql", "sqlite", "chrono"] }#Sqlite can be a dev-dep
+tokio = { version = "1.46.1", features = ["full"] }
+tokio-util = "0.7.15"
+winit = "0.30.11"
+whoami = "1.6.0"

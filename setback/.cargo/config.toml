@@ -1,0 +1,20 @@
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld", "-Zshare-generics=y"]
+
+[target.x86_64-pc-windows-msvc]
+linker = "lld"
+rustflags = [
+	"-Lnative=/home/eclipse/.xwin/crt/lib/x86_64",
+	"-Lnative=/home/eclipse/.xwin/sdk/lib/um/x86_64",
+	"-Lnative=/home/eclipse/.xwin/sdk/lib/ucrt/x86_64"
+]
+
+[unstable]
+codegen-backend = true
+
+[profile.game-debug]
+codegen-backend = "cranelift"
+
+[profile.game-debug.package."*"]
+codegen-backend = "llvm"

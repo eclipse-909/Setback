@@ -1,13 +1,13 @@
 use {
-	shared::{Card, GameEvent, Player, SetupData, GameRuntime},
+	// shared::{Card, GameEvent, SetupData, GameRuntime},
+	libsetback::{Card, GameEvent, SetupData, GameRuntime},
 	std::io::{stdin, stdout, Write},
 	tokio::sync::mpsc::Sender
 };
 
-///This is essentially an integration test
 #[tokio::main]
 async fn main() {
-	let mut setup: SetupData = SetupData::new_singleplayer();
+	let setup: SetupData = SetupData::new_singleplayer();
 	let mut game_runtime: GameRuntime = setup.start_game();
 	tokio::select! {
 		_ = async {
