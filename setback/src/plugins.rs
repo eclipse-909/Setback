@@ -12,7 +12,11 @@ use {
 		bevy_egui::EguiPlugin,
 		quick::WorldInspectorPlugin
 	},
-	std::collections::HashMap
+	std::{
+		collections::HashMap,
+		task::{Context, Poll}
+	},
+	futures::StreamExt
 };
 
 /// Adds egui inspector. This will mess up the cursor because egui overwrites the cursor image on every frame..
@@ -22,7 +26,7 @@ impl Plugin for DebugPlugin {
 	fn build(&self, app: &mut App) {
 		if cfg!(debug_assertions) {
 			app
-				.add_plugins(EguiPlugin { enable_multipass_for_primary_context: true })
+				.add_plugins(EguiPlugin::default())
         		.add_plugins(WorldInspectorPlugin::new());
 		}
 	}
@@ -152,4 +156,27 @@ fn animate_cursor(
 	atlas.index = frames[current_frame];
 	cursor_atlas.current_frame = current_frame;
 	cursor_atlas.frame_timer = new_timer();
+}
+
+/// Adds custom cursors
+pub struct AsyncTaskPlugin;
+
+impl Plugin for AsyncTaskPlugin {
+	fn build(&self, app: &mut App) {
+		app
+			.init_resource::<TaskSchedule>()
+			.add_systems(Update, execute_tasks);
+	}
+}
+
+fn execute_tasks(mut commands: Commands, mut tasks: ResMut<TaskSchedule>) {
+	let waker = futures::task::noop_waker();
+	let mut context = Context::from_waker(&waker);
+	loop {
+		match tasks.0.poll_next_unpin(&mut context) {
+			Poll::Ready(Some(mut command_queue)) => commands.append(&mut command_queue),
+			Poll::Ready(None) => return,
+			Poll::Pending => {}
+		}
+	}
 }

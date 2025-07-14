@@ -120,7 +120,7 @@ async fn main() {
 							let Ok((Ssp{
 								version,
 								src_id,
-								protocol: Protocol::SyncID
+								protocol: Protocol::Connect
 							},_)) = bincode::decode_from_slice::<Ssp, Configuration>(&buf[..n as usize], standard()) else {return false;};
 							if version != Version::LATEST {return false;}
 							id = src_id;
@@ -133,7 +133,7 @@ async fn main() {
 				continue;
 			}
 			client_guard.account_id = id;
-			if client_guard.message_client(&ssp::new(Protocol::SyncID)).await.is_err() {continue;}
+			if client_guard.message_client(&ssp::new(Protocol::Connect)).await.is_err() {continue;}
 			drop(client_guard);
 
 			//manage client in concurrent task

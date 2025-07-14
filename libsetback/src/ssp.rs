@@ -66,15 +66,15 @@ impl Display for Version {
 #[repr(u8)]
 #[derive(Encode, Decode)]
 pub enum Protocol {
-	///Client ---SyncID--> Server<br>
-	///Client <--SyncID--- Server<br>
+	///Client ---Connect--> Server<br>
+	///Client <--Connect--- Server<br>
 	///Request and response<br><br>
 	///Client sends its account_id to the server when client connects to server.
-	///There is a small window between the client connecting and the client sending a SyncID message.
+	///There is a small window between the client connecting and the client sending a Connect message.
 	///The client must send this to authenticate before attempting to send any other messages.
 	///The server will disconnect the client if it doesn't send this message immediately after connecting.
-	///The server will send a SyncID message to the client in response once the client is authenticated.
-	SyncID,
+	///The server will send a Connect message to the client in response once the client is authenticated.
+	Connect(u16),
 	///Server ---Disconnect--> Self/Game<br>
 	///Internal<br><br>
 	///The server detects when the client disconnects and sends this to the owner server or game

@@ -116,7 +116,7 @@ fn ssp_callback(cancel_token: CancellationToken, ssp_waiter_tx: Sender<bool>, us
 		match message {
 			Some(ssp) => {
 				match ssp.protocol {
-					Protocol::SyncID => {}
+					Protocol::Connect => {}
 					Protocol::Admin(admin_message) => {
 						match admin_message {
 							AdminMessage::Authorize{..} => unreachable!("Authorize message should not be sent to the admin"),

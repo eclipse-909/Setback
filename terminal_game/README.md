@@ -1,0 +1,2 @@
+# terminal_game
+This is a CLI version of the Setback game. It primarily serves as an integration test, but you are still a player in the game. It's not fully automated. Because of this, this crate may be removed after automated integration tests have been added.

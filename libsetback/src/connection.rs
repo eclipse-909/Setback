@@ -1,5 +1,4 @@
 use {
-	std::sync::Arc,
 	bincode::config::standard,
 	reqwest::{Client, StatusCode},
 	tokio::{
@@ -50,48 +49,24 @@ pub struct ServerConnection {
 }
 
 impl ServerConnection {
+	///- Logs in via http request to api.
+	///- Connects to Setback dedicated server on accept port.
+	///- Reconnects to server on client port.
+	///- Listens for messages from server in background task and sends them via mpsc channel.
+	///
 	///Possible errors are:
 	///- [Error::NetworkIO]
 	///- [Error::Authentication]
 	///- [Error::ServerError]
-	pub async fn new_connection(username: String, password: String, api: Arc<Client>) -> Result<Self, Error> {
+	pub async fn new_connection(username: String, password: String, api: Client) -> Result<Self, Error> {
 		//login and get account_id
-		let account_id: u32 = api
-			.post(website!(URL_API_LOGIN))
-			.json(&LoginCredentials {username, password})
-			.send()
-			.await
-			.map_err(|_|Error::NetworkIO)?
-			.error_for_status()
-			.map_err(|err| {
-				match err.status() {
-					Some(StatusCode::UNAUTHORIZED) => Error::Authentication,
-					//TODO handle other status codes
-					_ => Error::ServerError
-				}
-			})?
-			.cookies()
-			.find(|cookie| cookie.name() == "account_id")
-			.ok_or(Error::ServerError)?
-			.value()
-			.parse::<u32>()
-			.map_err(|_|Error::ServerError)?;
+		let account_id: u32 = api.login(username, password).await?;
 		
-		//Spawn task to read messages from server
-		let (mut reader, writer) = TcpStream::connect(SERVER_SOCKET).await.map_err(|_|Error::NetworkIO)?.into_split();
+		//Connect to server
+		let (mut reader, writer) = TcpStream::connect(server(ACCEPT_PORT)).await.map_err(|_|Error::NetworkIO)?.into_split();
 		let cancellation_token: CancellationToken = CancellationToken::new();
 		let read_cancel_token: CancellationToken = cancellation_token.clone();
 		let (ssp_tx, ssp_rx) = unbounded_channel();
-		tokio::spawn(async move {tokio::select! {
-			_ = async move {
-				let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
-				loop {
-					ssp_tx.send(Self::read(&mut reader, &mut buffer).await).unwrap();
-				}
-			} => {}
-			_ = read_cancel_token.cancelled() => {}
-		}});
-		
 		let mut server_connection: Self = Self {
 			tcp_writer: writer,
 			cancellation_token,
@@ -99,9 +74,29 @@ impl ServerConnection {
 			account_id,
 			ready: false
 		};
-		if !server_connection.write(Ssp::new_with_src(Protocol::SyncID, server_connection.account_id)).await {
+		
+		//authenticate, get client port, connect to client port
+		if !server_connection.write(Ssp::new_with_src(Protocol::Connect(0), account_id)).await {
 			return Err(Error::NetworkIO);
 		}
+		let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
+		let ssp = Self::read(&mut reader, &mut buffer).await?;
+		let Protocol::Connect(client_port) = ssp.protocol else {
+			return Err(Error::ServerError);
+		};
+		let (mut reader, writer) = TcpStream::connect(server(client_port)).await.map_err(|_|Error::NetworkIO)?.into_split();
+		server_connection.tcp_writer = writer;
+		
+		//listen for messages from server
+		tokio::spawn(async move {tokio::select! {
+			_ = async move {
+				loop {
+					ssp_tx.send(Self::read(&mut reader, &mut buffer).await).unwrap();
+				}
+			} => {}
+			_ = read_cancel_token.cancelled() => {}
+		}});
+		
 		Ok(server_connection)
 	}
 	
@@ -172,7 +167,7 @@ impl Drop for ServerConnection {
 
 pub trait WebsiteConnection {
 	fn new_connection() -> Self;
-	fn logged_in(&self) -> impl Future<Output=bool>;
+	fn login(&self, username: String, password: String) -> impl Future<Output=Result<u32, Error>>;
 	fn logout(&self) -> impl Future<Output=bool>;
 }
 
@@ -184,15 +179,31 @@ impl WebsiteConnection for Client {
 			.unwrap()
 	}
 	
-	///Checks if the user is logged in
-	async fn logged_in(&self) -> bool {
-		let Ok(res) = self.get(website!(URL_API_LOGGED_IN)).send().await else { return false };
-		if !res.status().is_success() { return false };
-		res.json::<LoggedIn>().await.unwrap_or(LoggedIn { logged_in: false }).logged_in
+	async fn login(&self, username: String, password: String) -> Result<u32, Error> {
+		self
+			.post(website!(URL_API_LOGIN))
+			.json(&LoginCredentials {username, password})
+			.send()
+			.await
+			.map_err(|_|Error::NetworkIO)?
+			.error_for_status()
+			.map_err(|err| {
+				match err.status() {
+					Some(StatusCode::UNAUTHORIZED) => Error::Authentication,
+					//TODO handle other status codes
+					_ => Error::ServerError
+				}
+			})?
+			.cookies()
+			.find(|cookie| cookie.name() == "account_id")
+			.ok_or(Error::ServerError)?
+			.value()
+			.parse::<u32>()
+			.map_err(|_|Error::ServerError)
 	}
 	
 	///Logs out of your account by clearing session cookies.
-	///Returns whether the write was successful.
+	///Returns whether the request was successfully sent. The response code doesn't matter.
 	async fn logout(&self) -> bool {
 		self.get(website!(URL_API_LOGOUT)).send().await.is_ok()
 	}
@@ -211,7 +222,7 @@ impl ClientConnection {
 	///The TcpListener must accept a connection and then pass the TcpStream to this function.
 	///If the connection is not valid, it returns None and the TcpStream is handled and closed in this function.
 	///If the connection is valid, the returned [Self] contains the TcpStream's writer and a channel for receiving SSP messages.
-	pub async fn new_connection(tcp_stream: TcpStream) -> Option<Self> {
+	pub async fn new_connection(tcp_stream: TcpStream, client_port: u16) -> Option<Self> {
 		let (mut reader, writer) = tcp_stream.into_split();
 		let cancellation_token: CancellationToken = CancellationToken::new();
 		let read_cancel_token: CancellationToken = cancellation_token.clone();
@@ -222,9 +233,9 @@ impl ClientConnection {
 		let (mut reader, mut buffer, client_connection) = tokio::time::timeout(std::time::Duration::from_secs(5), async move {
 			let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
 			let ssp: Ssp = Self::read(&mut reader, &mut buffer).await.ok()?;
-			if matches!(ssp.protocol, Protocol::SyncID) {
+			if matches!(ssp.protocol, Protocol::Connect(_)) {
 				client_connection.account_id = ssp.src_id;
-				if !client_connection.write(Ssp::new(Protocol::SyncID)).await {
+				if !client_connection.write(Ssp::new(Protocol::Connect(client_port))).await {
 					return None;
 				}
 				Some((reader, buffer, client_connection))
@@ -235,7 +246,11 @@ impl ClientConnection {
 		
 		//Spawn task to read messages from TcpStream and send them to the channel
 		tokio::spawn(async move {tokio::select! {
-			_ = async move {loop {ssp_tx.send(Self::read(&mut reader, &mut buffer).await).unwrap();}} => {}
+			_ = async move {
+				loop {
+					ssp_tx.send(Self::read(&mut reader, &mut buffer).await).unwrap();
+				}
+			} => {}
 			_ = read_cancel_token.cancelled() => {}
 		}});
 		

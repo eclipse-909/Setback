@@ -4,7 +4,7 @@ use {
 };
 
 #[derive(Default, Clone, Debug, Eq, Hash, PartialEq, States)]
-pub enum Scene {
+pub enum UiScene {
 	#[default]
 	MainMenu,
 	Multiplayer,
@@ -13,8 +13,8 @@ pub enum Scene {
 	Game
 }
 
-pub trait UiScene: Plugin {
-	const SCENE: Scene;
+pub trait UiScenePlugin: Plugin {
+	const SCENE: UiScene;
 
 	fn on_exit(mut commands: Commands, root_node_entities: Query<Entity, With<RootNode>>) {
 		commands.entity(root_node_entities.single().unwrap()).despawn()

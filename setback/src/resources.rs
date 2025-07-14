@@ -1,5 +1,10 @@
 use {
-	bevy::prelude::*,
+	bevy::{
+		prelude::*,
+		tasks::Task,
+		ecs::world::CommandQueue
+	},
+	futures::stream::FuturesUnordered,
 	libsetback::*,
 	std::{
 		collections::HashMap,
@@ -12,7 +17,7 @@ use {
 pub struct ServerConn(pub Arc<RwLock<ServerConnection>>);
 
 #[derive(Resource)]
-pub struct WebsiteConn(pub Arc<Client>);
+pub struct WebsiteConn(pub Client);
 
 #[derive(Resource, Default)]
 pub struct CursorAtlas {
@@ -24,3 +29,6 @@ pub struct CursorAtlas {
     pub current_animation: &'static str,
     pub current_frame: usize
 }
+
+#[derive(Resource, Default)]
+pub struct TaskSchedule(pub FuturesUnordered<Task<CommandQueue>>);

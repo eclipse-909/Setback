@@ -14,14 +14,16 @@ pub const MIN_PLAYERS: u8 = 4;
 pub const PAGE_SIZE: usize = 4096;
 pub const ACCEPT_PORT: u16 = 42069;
 
-pub const SERVER_SOCKET: SocketAddrV4 = SocketAddrV4::new(
-	if cfg!(debug_assertions) {
-		Ipv4Addr::new(127, 0, 0, 1)
-	} else {
-		Ipv4Addr::new(127, 0, 0, 1)//TODO change this to actual socket once server is deployed
-	},
-	ACCEPT_PORT
-);
+pub const fn server(port: u16) -> SocketAddrV4 {
+	SocketAddrV4::new(
+		if cfg!(debug_assertions) {
+			Ipv4Addr::new(127, 0, 0, 1)
+		} else {
+			Ipv4Addr::new(127, 0, 0, 1)//TODO change this to actual socket once server is deployed
+		},
+		port
+	)
+}
 
 pub const WEBSITE_URL: &str = if cfg!(debug_assertions) {
 	"http://127.0.0.1/"
@@ -32,7 +34,6 @@ pub const WEBSITE_URL: &str = if cfg!(debug_assertions) {
 pub static URL_API_LOGIN: &str = "/api/login";
 pub static URL_API_SIGNUP: &str = "/api/signup";
 pub static URL_API_LOGOUT: &str = "/api/logout";
-pub static URL_API_LOGGED_IN: &str = "/api/logged_in";
 pub static URL_API_CHANGE_USERNAME: &str = "/api/change_username";
 pub static URL_API_CHANGE_PASSWORD: &str = "/api/change_password";
 pub static URL_API_DELETE_ACCOUNT: &str = "/api/delete_account";

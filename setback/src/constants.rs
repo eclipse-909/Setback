@@ -14,6 +14,7 @@ pub static CARDS_ICON: &[u8] = include_bytes!("../assets/images/cardsIcon.png");
 pub static CURSOR_ATLAS: &str = "setback/assets/cursors/cursor_atlas.json";//TODO these may need to be changed for prod
 pub static USR_CRD: &str = "setback/usr/usr.crd";
 pub static CURSOR_ERROR: &str = "There should be exactly one cursor at all times";
+pub static BTN_CONTAINER_ERR: &str = "There should be exactly one ButtonContainer";
 pub static KEYRING_PASSWORD: &str = "service-keyring-setback-user-password";
 pub static URL_INDEX: &str = "/";
 pub static URL_404: &str = "/file_not_found";

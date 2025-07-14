@@ -3,7 +3,8 @@ use {
 		io::ErrorKind,
 		fs::{self, File},
 		path::Path,
-		sync::Arc
+		task::{Context, Poll},
+		sync::{Arc, RwLock}
 	},
 	crate::{
 		components::*,
@@ -12,23 +13,32 @@ use {
 		states::*,
 	},
 	bevy::{
-		prelude::*, tasks::prelude::*, winit::cursor::CursorIcon
+		prelude::*,
+		tasks::{
+			prelude::*,
+			Task
+		},
+		winit::cursor::CursorIcon,
+		ecs::world::CommandQueue
 	},
+	bevy_ui_text_input::{TextInputMode, TextInputNode, TextInputPlugin, TextInputPrompt, TextSubmitEvent, TextInputFilter},
+	futures::FutureExt,
 	libsetback::*,
-	keyring::{default, credential, Entry},
+	keyring::Entry,
 	reqwest::Client
 };
 
 pub struct MainMenuPlugin;
 
-impl UiScene for MainMenuPlugin {
-	const SCENE: Scene = Scene::MainMenu;
+impl UiScenePlugin for MainMenuPlugin {
+	const SCENE: UiScene = UiScene::MainMenu;
 }
 
 impl Plugin for MainMenuPlugin {
 	fn build(&self, app: &mut App) {
 		app
-			.add_systems(OnEnter(Self::SCENE), (on_enter, set_main_buttons).chain())
+			.add_plugins(TextInputPlugin)
+			.add_systems(OnEnter(Self::SCENE), (on_enter, display_main_buttons).chain())
 			.add_systems(Update, update_menu_button.run_if(in_state(Self::SCENE)))
 			.add_systems(OnExit(Self::SCENE), Self::on_exit);
 	}
@@ -327,8 +337,67 @@ fn new_group_button(label: &str, font: Handle<Font>) -> impl Bundle {(
 	// transition: all 0.3s ease;
 )}
 
+fn new_input(prompt: &str, font: Handle<Font>) -> impl Bundle {(
+	Node {
+		width: Val::Percent(100.),
+		height: Val::Percent(100.),
+		justify_content: JustifyContent::Center,
+		align_items: AlignItems::Center,
+		flex_direction: FlexDirection::Column,
+		row_gap: Val::Px(10.),
+		column_gap: Val::Px(20.),
+		..default()
+	},
+	Outline::new(Val::Px(2.), Val::Px(0.), PALLET.accent_gold),
+	BorderRadius::all(PALLET.border_radius),
+	BoxShadow(vec![
+		ShadowStyle {
+			x_offset: Val::Px(0.),
+			y_offset: Val::Px(4.),
+			blur_radius: Val::Px(15.),
+			color: Color::BLACK.with_alpha(0.2),
+			..default()
+		}
+	]),
+	children![(
+		Node {
+            width: Val::Px(250.),//TODO mess with layout and style
+            height: Val::Px(25.),
+            ..default()
+        },
+		TextInputNode {
+			clear_on_submit: false,
+            mode: TextInputMode::SingleLine,
+			filter: Some(TextInputFilter::Hex),
+            max_chars: Some(6),
+            ..default()
+        },
+		TextColor(PALLET.dark_brown),
+		TextFont::from_font(font).with_font_size(18.),
+		TextInputPrompt::new(prompt),
+        BackgroundColor(PALLET.cream)
+	)]
+)}
+
+fn new_text(label: &str, font: Handle<Font>, visible: bool) -> impl Bundle {(
+	Node {
+		padding: UiRect::axes(Val::Px(16.), Val::Px(20.)),
+		position_type: PositionType::Relative,
+		overflow: Overflow::hidden(),
+		justify_content: JustifyContent::Center,
+		display: if visible {Display::default()} else {Display::None},
+		..default()
+	},
+	children![(
+		Text::new(label),
+		TextColor(PALLET.dark_brown),
+		TextFont::from_font(font).with_font_size(18.),
+		TextLayout::new_with_justify(JustifyText::Center)
+	)]
+)}
+
 /// Creates singleplayer, multiplayer, settings, exit game buttons
-fn set_main_buttons(
+fn display_main_buttons(
 	mut commands: Commands,
 	button_container: Query<Entity, With<ButtonContainer>>,
 	asset_server: Res<AssetServer>
@@ -347,7 +416,7 @@ fn set_main_buttons(
 		//multiplayer
 		commands
 			.spawn(new_primary_button("MULTIPLAYER", font_bold.clone()))
-			.observe(set_multiplayer_buttons)
+			.observe(display_multiplayer_observer)
 			.id(),
 		//button group
 		commands.spawn(
@@ -381,6 +450,116 @@ fn set_main_buttons(
 	container.add_children(children);
 }
 
+fn display_multiplayer_options(mut commands: Commands, button_container: Entity, font_bold: Handle<Font>) {
+	let children = &[
+		commands
+			.spawn(new_primary_button("CREATE GAME", font_bold.clone()))
+			.observe(|trigger: Trigger<Pointer<Click>>| {
+				if !matches!(trigger.button, PointerButton::Primary) {return}
+				//TODO
+				// Go to setup scene
+			})
+			.id(),
+		commands
+			.spawn(new_primary_button("JOIN PRIVATE GAME", font_bold.clone()))
+			.observe(|trigger: Trigger<Pointer<Click>>, commands: Commands, button_container: Query<Entity, With<ButtonContainer>>, asset_server: Res<AssetServer>| {
+				if !matches!(trigger.button, PointerButton::Primary) {return}
+				display_join_options(
+					commands,
+					button_container.single().expect(BTN_CONTAINER_ERR),
+					asset_server.load("fonts/georgia.ttf"),
+					asset_server.load("fonts/georgiab.ttf"),
+					false
+				);
+			})
+			.id(),
+		commands
+			.spawn(new_primary_button("BROWSE PUBLIC GAMES", font_bold.clone()))
+			.observe(|trigger: Trigger<Pointer<Click>>| {
+				if !matches!(trigger.button, PointerButton::Primary) {return}
+				//TODO
+				// Go to multiplayer scene
+			})
+			.id(),
+		commands
+			.spawn(new_group_button("BACK", font_bold.clone()))
+			.observe(display_multiplayer_observer)
+			.id()
+	];
+	let mut button_container = commands.entity(button_container);
+	button_container.despawn_related::<Children>();
+	button_container.add_children(children);
+}
+
+fn display_join_options(mut commands: Commands, button_container: Entity, font: Handle<Font>, font_bold: Handle<Font>, failed: bool) {
+	let children = &[
+		commands
+			.spawn(new_text("Could not find game with matching code.", font.clone(), failed))
+			.id(),
+		commands
+			.spawn(new_input("Enter game code...", font))
+			.id(),
+		commands
+			.spawn(new_primary_button("JOIN", font_bold.clone()))
+			.observe(|trigger: Trigger<Pointer<Click>>| {
+				if !matches!(trigger.button, PointerButton::Primary) {return}
+				//TODO
+				// Attempt to join game
+			})
+			.id(),
+		commands
+			.spawn(new_group_button("BACK", font_bold.clone()))
+			.observe(display_multiplayer_options_observer)
+			.id()
+	];
+	let mut button_container = commands.entity(button_container);
+	button_container.despawn_related::<Children>();
+	button_container.add_children(children);
+}
+
+fn display_login_prompt(mut commands: Commands, button_container: Entity, font: Handle<Font>, font_bold: Handle<Font>, failed: bool) {
+	let children = &[
+		commands
+			.spawn(new_text("Username or password was incorrect.", font.clone(), failed))
+			.id(),
+		commands
+			.spawn(new_input("Username...", font.clone()))
+			.id(),
+		commands
+			.spawn(new_input("Password...", font.clone()))
+			.id(),
+		commands
+			.spawn(new_primary_button("LOGIN", font_bold.clone()))
+			.observe(|trigger: Trigger<Pointer<Click>>, api: Res<WebsiteConn>| {
+				if !matches!(trigger.button, PointerButton::Primary) {return}
+				//TODO
+				// Attempt to login
+			})
+			.id(),
+		commands
+			.spawn(new_text("Don't have an account? Create one!", font, true))
+			.id(),
+		//TODO clickable link to website
+		commands
+			.spawn(new_group_button("BACK", font_bold))
+			.observe(display_main_buttons_observer)
+			.id()
+	];
+	let mut button_container = commands.entity(button_container);
+	button_container.despawn_related::<Children>();
+	button_container.add_children(children);
+}
+
+fn display_main_buttons_observer(
+	trigger: Trigger<Pointer<Click>>,
+	commands: Commands,
+	button_container: Query<Entity, With<ButtonContainer>>,
+	asset_server: Res<AssetServer>
+) {
+	if !matches!(trigger.button, PointerButton::Primary) {return}
+	display_main_buttons(commands, button_container, asset_server)
+}
+
 /// This is an observer-function only
 ///
 /// If logged in,
@@ -388,99 +567,121 @@ fn set_main_buttons(
 ///
 /// Else,
 /// attempts to login to create buttons or prompt for credentials.
-fn set_multiplayer_buttons(
+fn display_multiplayer_observer(
 	trigger: Trigger<Pointer<Click>>,
 	mut commands: Commands,
 	button_container: Query<Entity, With<ButtonContainer>>,
-	mut server_connection: Option<ResMut<ServerConn>>,
-	website_connection: Option<Res<WebsiteConn>>
+	server_connection: Option<ResMut<ServerConn>>,
+	website_connection: Option<Res<WebsiteConn>>,
+	task_schedule: ResMut<TaskSchedule>,
+	asset_server: Res<AssetServer>
 ) {
 	if !matches!(trigger.button, PointerButton::Primary) {return}
+	let font_bold: Handle<Font> = asset_server.load("fonts/georgiab.ttf");
+	let font: Handle<Font> = asset_server.load("fonts/georgia.ttf");
 	let thread_pool = AsyncComputeTaskPool::get();
 	let website_conn = match website_connection {
 		Some(conn) => conn.0.clone(),
 		None => {
-			let api = Arc::new(Client::new_connection());
+			let api = Client::new_connection();
 			commands.insert_resource(WebsiteConn(api.clone()));
 			api
 		}
 	};
+	let container_entity = button_container.single().expect(BTN_CONTAINER_ERR);
+	let mut container = commands.entity(container_entity);
 	match server_connection {
-		Some(conn) => {
-			let server_conn = conn.0.clone();
-			let task = thread_pool.spawn(async move {
-			
-			});
+		Some(_) => {
+			display_multiplayer_options(commands, container_entity, font_bold);
 		}
 		None => {
-			let Some(cred) = get_stored_credentials() else {
-				todo!("prompt for credentials");
+			let Some(cred) = get_credentials() else {
+				display_login_prompt(commands, container_entity, font, font_bold, false);
+				return;
 			};
-			let task = thread_pool.spawn(async move {
-				match ServerConnection::new_connection(cred.username, cred.password, website_conn).await {
-					Ok(server_conn) => {}
-					Err(Error::Authentication) => {}
-					Err(Error::NetworkIO) => {}
-					Err(Error::ServerError) => {}
-					Err(_) => unreachable!("All errors should have been covered")
-				}
+			let children = &[
+				//TODO display loading animation
+			];
+			container.despawn_related::<Children>();
+			container.add_children(children);
+			let mut task: Task<CommandQueue> = thread_pool.spawn(async move {
+				let res = ServerConnection::new_connection(cred.username.clone(), cred.password.clone(), website_conn).await;
+				let mut command_queue = CommandQueue::default();
+				
+				command_queue.push(move |world: &mut World| {
+					//remove loading animation
+					let btn_container_entity = world
+						.query_filtered::<Entity, With<ButtonContainer>>()
+						.single(world)
+						.expect(BTN_CONTAINER_ERR);
+					let mut commands = world.commands();
+					
+					match res {
+						Ok(server_conn) => {
+							display_multiplayer_options(commands, btn_container_entity, font_bold);
+							world.insert_resource(ServerConn(Arc::new(RwLock::new(server_conn))));
+							save_credentials(cred.username.as_str(), cred.password.as_str());
+						}
+						Err(Error::Authentication) => {
+							display_login_prompt(commands, btn_container_entity, font, font_bold, true);
+						}
+						Err(Error::NetworkIO) => {
+							let children = &[
+								commands
+									.spawn(new_text("Network Error - make sure you are connected to the internet, or try again later.", font, true))
+									.id(),
+								commands
+									.spawn(new_group_button("BACK", font_bold))
+									.observe(display_main_buttons_observer)
+									.id()
+							];
+							let mut btn_container = commands.entity(btn_container_entity);
+							btn_container.despawn_related::<Children>();
+							btn_container.add_children(children);
+						}
+						Err(Error::ServerError) => {
+							let children = &[
+								commands
+									.spawn(new_text("Server Error - an unexpected error has occurred on the server. Please try again later.", font, true))
+									.id(),
+								commands
+									.spawn(new_group_button("BACK", font_bold))
+									.observe(display_main_buttons_observer)
+									.id()
+							];
+							let mut btn_container = commands.entity(btn_container_entity);
+							btn_container.despawn_related::<Children>();
+							btn_container.add_children(children);
+						}
+						Err(_) => unreachable!("All errors should have been covered")
+					}
+				});
+				
+				command_queue
 			});
+			//task must be polled once to start execution.
+			if let Poll::Ready(mut command_queue) = task.poll_unpin(&mut Context::from_waker(&futures::task::noop_waker())) {
+				//check if it's ready just in case (it probably won't be)
+				commands.append(&mut command_queue);
+			} else {
+				task_schedule.0.push(task);
+			}
 		}
 	};
-
-	//TODO
-	//Check if the user is connected to the server and logged in.
-	//If they are, display buttons for create game, join game, and back.
-	//If they aren't, do the following:
-	//Establish a connection to the server.
-	//Check if the user's credentials are securely stored on the local machine.
-	//If the user has stored credentials and has chosen to automatically login, use them to login.
-	//If the user doesn't have credentials or isn't automatically logging in, prompt for the credentials.
-	//Once the credentials are obtained, send a login request to the server.
-	//If the login fails, prompt for credentials.
-	//Eventually I should handle too many failed attempts, but I'll do that later.
-	//If the login succeeds, go to the multiplayer scene.
-
-	let children = &[
-		//TODO
-	];
-	let mut container = commands.entity(button_container.single().expect("There should be exactly one ButtonContainer"));
-	container.despawn_related::<Children>();
-	container.add_children(children);
 }
 
 /// Creates game code input, join button, and back button
-fn set_join_game(
+fn display_multiplayer_options_observer(
 	trigger: Trigger<Pointer<Click>>,
-	mut commands: Commands,
-	button_container: Query<Entity, With<ButtonContainer>>
+	commands: Commands,
+	button_container: Query<Entity, With<ButtonContainer>>,
+	asset_server: Res<AssetServer>
 ) {
 	if !matches!(trigger.button, PointerButton::Primary) {return}
-	//TODO
-	let children = &[
-		//TODO
-	];
-	let mut container = commands.entity(button_container.single().expect("There should be exactly one ButtonContainer"));
-	container.despawn_related::<Children>();
-	container.add_children(children);
+	display_multiplayer_options(commands, button_container.single().expect(BTN_CONTAINER_ERR), asset_server.load("fonts/georgiab.ttf"));
 }
 
-fn set_login_prompt(
-	trigger: Trigger<Pointer<Click>>,
-	mut commands: Commands,
-	button_container: Query<Entity, With<ButtonContainer>>
-) {
-	if !matches!(trigger.button, PointerButton::Primary) {return}
-	//TODO
-	let children = &[
-		//TODO
-	];
-	let mut container = commands.entity(button_container.single().expect("There should be exactly one ButtonContainer"));
-	container.despawn_related::<Children>();
-	container.add_children(children);
-}
-
-fn get_stored_credentials() -> Option<LoginCredentials> {
+fn get_credentials() -> Option<LoginCredentials> {
 	let path = Path::new(USR_CRD);
 	let username: String = match fs::read_to_string(path) {
 		Ok(username) => username,
@@ -498,7 +699,7 @@ fn get_stored_credentials() -> Option<LoginCredentials> {
 			return None;
 		}
 	};
-	match Entry::new(KEYRING_PASSWORD, whoami::username().as_str()).and_then(|entry| Ok(entry.get_password()?)) {
+	match Entry::new(KEYRING_PASSWORD, whoami::username().as_str()).and_then(|entry| entry.get_password()) {
 		Ok(password) => {
 			Some(LoginCredentials {username, password})
 		}
@@ -509,7 +710,7 @@ fn get_stored_credentials() -> Option<LoginCredentials> {
 	}
 }
 
-fn set_stored_credentials(username: &str, password: &str) {
+fn save_credentials(username: &str, password: &str) {
 	let path = Path::new(USR_CRD);
 	let res = fs::create_dir_all(path.parent().unwrap());
 	if let Err(err) = res {
@@ -520,7 +721,7 @@ fn set_stored_credentials(username: &str, password: &str) {
 		error!("Error creating usr.crd file: {}", err);
 	}
 	let res = Entry::new(KEYRING_PASSWORD, whoami::username().as_str())
-		.and_then(|entry| Ok(entry.set_password(password)?));
+		.and_then(|entry| entry.set_password(password));
 	if let Err(err) = res {
 		error!("Error setting password in keyring: {}", err);
 	}

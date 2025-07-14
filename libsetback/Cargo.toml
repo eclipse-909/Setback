@@ -10,3 +10,10 @@ reqwest.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+
+[features]
+mock = ["mock_web", "mock_server"]
+# HTTP requests to the server will be mocked, meaning responses will be hard-coded
+mock_web = []
+# Messages to the server will be mocked, meaning received messages will be hard-coded
+mock_server = []
