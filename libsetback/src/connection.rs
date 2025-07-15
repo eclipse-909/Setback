@@ -23,7 +23,7 @@ use {
 pub trait SetbackConnection {
 	fn writer(&mut self) -> &mut OwnedWriteHalf;
 	///Returns whether the write was successful.
-	fn write(&mut self, ssp: Ssp) -> impl Future<Output = bool> {async move {
+	fn write(&mut self, ssp: &Ssp) -> impl Future<Output = bool> {async move {
 		let bytes: Vec<u8> = bincode::encode_to_vec(ssp, standard()).unwrap();
 		//prefix with 2-byte length
 		self.writer().write_u16_le(bytes.len() as u16).await.is_ok() && self.writer().write_all(bytes.as_slice()).await.is_ok()
@@ -76,16 +76,23 @@ impl ServerConnection {
 		};
 		
 		//authenticate, get client port, connect to client port
-		if !server_connection.write(Ssp::new_with_src(Protocol::Connect(0), account_id)).await {
+		let connect_ssp = Ssp::new_with_src(Protocol::Connect(0), account_id);
+		if !server_connection.write(&connect_ssp).await {
 			return Err(Error::NetworkIO);
 		}
 		let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
-		let ssp = Self::read(&mut reader, &mut buffer).await?;
-		let Protocol::Connect(client_port) = ssp.protocol else {
+		let Protocol::Connect(client_port) = Self::read(&mut reader, &mut buffer).await?.protocol else {
 			return Err(Error::ServerError);
 		};
 		let (mut reader, writer) = TcpStream::connect(server(client_port)).await.map_err(|_|Error::NetworkIO)?.into_split();
 		server_connection.tcp_writer = writer;
+		//reauthenticate
+		if !server_connection.write(&connect_ssp).await {
+			return Err(Error::NetworkIO);
+		}
+		let Protocol::Connect(_) = Self::read(&mut reader, &mut buffer).await?.protocol else {
+			return Err(Error::ServerError);
+		};
 		
 		//listen for messages from server
 		tokio::spawn(async move {tokio::select! {
@@ -102,55 +109,55 @@ impl ServerConnection {
 	
 	///Returns whether the write was successful.
 	pub async fn send_create_game(&mut self, public: bool) -> bool {
-		self.write(Ssp::new_with_src(Protocol::CreateGame{public}, self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::CreateGame{public}, self.account_id)).await
 	}
 	
 	///Returns whether the write was successful.
 	pub async fn send_join_game(&mut self, code: u32) -> bool {
-		self.write(Ssp::new_with_src(Protocol::JoinGame{code}, self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::JoinGame{code}, self.account_id)).await
 	}
 	
 	///Returns whether the write was successful.
 	pub async fn send_search_games(&mut self, filter: GameFilter) -> bool {
-		self.write(Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id)).await
 	}
 	
 	///Host-only
 	///Returns whether the write was successful.
 	pub async fn send_game_meta(&mut self, setup_data: SetupData) -> bool {
-		self.write(Ssp::new_with_src(Protocol::SetupData(setup_data), self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::SetupData(setup_data), self.account_id)).await
 	}
 	
 	///Returns whether the write was successful.
 	pub async fn send_update_team(&mut self, index: u8, team: u8) -> bool {
-		self.write(Ssp::new_with_src(Protocol::UpdatePlayerTeam{index, team}, self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::UpdatePlayerTeam{index, team}, self.account_id)).await
 	}
 	
 	///Returns whether the write was successful.
 	pub async fn send_update_player_type(&mut self, index: u8, human: bool) -> bool {
-		self.write(Ssp::new_with_src(Protocol::UpdatePlayerType{index, human}, self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::UpdatePlayerType{index, human}, self.account_id)).await
 	}
 	
 	///Returns whether the write was successful.
 	pub async fn send_ready(&mut self, is_ready: bool, index: u8) -> bool {
-		self.write(Ssp::new_with_src(Protocol::Ready{is_ready, index}, self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::Ready{is_ready, index}, self.account_id)).await
 	}
 	
 	///Returns whether the write was successful.
 	pub async fn send_game_event(&mut self, event: GameEvent) -> bool {
-		self.write(Ssp::new_with_src(Protocol::GameEvent(event), self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::GameEvent(event), self.account_id)).await
 	}
 	
 	///Host-only
 	///Returns whether the write was successful.
 	pub async fn send_add_player(&mut self) -> bool {
-		self.write(Ssp::new_with_src(Protocol::AddPlayer, self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::AddPlayer, self.account_id)).await
 	}
 	
 	///Host-only
 	///Returns whether the write was successful.
 	pub async fn send_remove_player(&mut self, index: u8) -> bool {
-		self.write(Ssp::new_with_src(Protocol::RemovePlayer{index}, self.account_id)).await
+		self.write(&Ssp::new_with_src(Protocol::RemovePlayer{index}, self.account_id)).await
 	}
 }
 
@@ -235,7 +242,7 @@ impl ClientConnection {
 			let ssp: Ssp = Self::read(&mut reader, &mut buffer).await.ok()?;
 			if matches!(ssp.protocol, Protocol::Connect(_)) {
 				client_connection.account_id = ssp.src_id;
-				if !client_connection.write(Ssp::new(Protocol::Connect(client_port))).await {
+				if !client_connection.write(&Ssp::new(Protocol::Connect(client_port))).await {
 					return None;
 				}
 				Some((reader, buffer, client_connection))

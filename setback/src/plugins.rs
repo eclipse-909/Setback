@@ -2,7 +2,8 @@ use {
 	crate::{
 		constants::*,
 		models::*,
-		resources::*
+		resources::*,
+		components::*,
 	},
 	bevy::{
 		prelude::*,
@@ -12,6 +13,7 @@ use {
 		bevy_egui::EguiPlugin,
 		quick::WorldInspectorPlugin
 	},
+	bevy_ui_text_input::{TextInputPlugin, TextSubmitEvent},
 	std::{
 		collections::HashMap,
 		task::{Context, Poll}
@@ -177,6 +179,24 @@ fn execute_tasks(mut commands: Commands, mut tasks: ResMut<TaskSchedule>) {
 			Poll::Ready(Some(mut command_queue)) => commands.append(&mut command_queue),
 			Poll::Ready(None) => return,
 			Poll::Pending => {}
+		}
+	}
+}
+
+pub struct TextInputWrapperPlugin;
+
+impl Plugin for TextInputWrapperPlugin {
+	fn build(&self, app: &mut App) {
+		app
+			.add_plugins(TextInputPlugin)
+			.add_systems(Update, update_text_input);
+	}
+}
+
+fn update_text_input(mut events: EventReader<TextSubmitEvent>, actions: Query<&TextInputOnSubmitAction>, mut commands: Commands) {
+	for event in events.read() {
+		if let Ok(action) = actions.get(event.entity) && let Some(command) = action.0 {
+			commands.queue(command);
 		}
 	}
 }

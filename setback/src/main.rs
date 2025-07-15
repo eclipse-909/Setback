@@ -21,15 +21,27 @@ use {
 		prelude::*,
 		window::{EnabledButtons, PresentMode, WindowMode, WindowTheme},
 		winit::{WinitSettings, WinitWindows},
-		log::{LogPlugin, BoxedLayer, tracing_subscriber::Layer}
+		log::{LogPlugin, BoxedLayer, tracing_subscriber::{self, Layer}}
 	},
 	winit::window::Icon,
 	keyring::{set_default_credential_builder, mock::default_credential_builder},
-	std::sync::OnceLock,
-	tracing_appender::{rolling, non_blocking::WorkerGuard}
+	std::{
+		sync::OnceLock,
+		fs::{self, File},
+		path::Path,
+		io::Write
+	},
+	tracing_appender::non_blocking::WorkerGuard
 };
 
 fn main() {
+	std::panic::set_hook(Box::new(|panic_info| {
+		let mut file: File = File::create(CRASH_LOG).expect("Could not open crash log file");
+		writeln!(file, "{panic_info}").expect("Could not write to crash log");
+		let backtrace = std::backtrace::Backtrace::capture();
+		writeln!(file, "stack backtrace:\n{backtrace}").expect("Could not write backtrace");
+		writeln!(file, "Process finished with exit code 101").expect("Could not write exit code");
+	}));
 	if cfg!(debug_assertions) {
 		set_default_credential_builder(default_credential_builder());
 	}
@@ -62,6 +74,7 @@ fn main() {
 				..default()
 			})
 		)
+		.add_plugins(TextInputWrapperPlugin)
 		.add_plugins(CursorIconPlugin)
 		.add_plugins(AsyncTaskPlugin)
 		// .add_plugins(DebugPlugin)
@@ -98,12 +111,14 @@ fn startup(
 static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
 fn log_layer(_app: &mut App) -> Option<BoxedLayer> {
-	let file_appender = rolling::daily("logs", "app.log");
-	let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+	let path = Path::new(LATEST_LOG);
+	fs::create_dir_all(path.parent().unwrap()).unwrap();
+	let (non_blocking, guard) = tracing_appender::non_blocking(File::create(path).unwrap());
 	let _ = LOG_GUARD.set(guard);
-	Some(bevy::log::tracing_subscriber::fmt::layer()
+	Some(tracing_subscriber::fmt::layer()
 		.with_writer(non_blocking)
 		.with_file(true)
 		.with_line_number(true)
+		.with_timer(tracing_subscriber::fmt::time::SystemTime)
 		.boxed())
 }

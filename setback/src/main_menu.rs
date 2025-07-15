@@ -21,7 +21,7 @@ use {
 		winit::cursor::CursorIcon,
 		ecs::world::CommandQueue
 	},
-	bevy_ui_text_input::{TextInputMode, TextInputNode, TextInputPlugin, TextInputPrompt, TextSubmitEvent, TextInputFilter},
+	bevy_ui_text_input::{TextInputMode, TextInputNode, TextInputPrompt, TextInputFilter},
 	futures::FutureExt,
 	libsetback::*,
 	keyring::Entry,
@@ -37,7 +37,6 @@ impl UiScenePlugin for MainMenuPlugin {
 impl Plugin for MainMenuPlugin {
 	fn build(&self, app: &mut App) {
 		app
-			.add_plugins(TextInputPlugin)
 			.add_systems(OnEnter(Self::SCENE), (on_enter, display_main_buttons).chain())
 			.add_systems(Update, update_menu_button.run_if(in_state(Self::SCENE)))
 			.add_systems(OnExit(Self::SCENE), Self::on_exit);
@@ -46,9 +45,10 @@ impl Plugin for MainMenuPlugin {
 
 //TODO figure out how to do color gradients, letter-spacing, and CSS ::before
 fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>) {
-	let font: Handle<Font> = asset_server.load("fonts/georgia.ttf");
-	let font_bold: Handle<Font> = asset_server.load("fonts/georgiab.ttf");
-	let times: Handle<Font> = asset_server.load("fonts/times.ttf");
+	info!("Building Main Menu UI");
+	let font: Handle<Font> = asset_server.load(GEORGIA);
+	let font_bold: Handle<Font> = asset_server.load(GEORGIA_BOLD);
+	let times: Handle<Font> = asset_server.load(TIMES_NEW_ROMAN);
 	// Create the main background with a green felt texture
 	commands.spawn((
 		Node {
@@ -223,7 +223,7 @@ fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>) {
 					},
 					children![(
 						Text::new("Classic Card Game"),
-						TextFont::from_font(asset_server.load("fonts/georgiai.ttf")).with_font_size(16.),
+						TextFont::from_font(asset_server.load(GEORGIA_ITALIC)).with_font_size(16.),
 						TextColor(PALLET.light_gold),
 						TextLayout::new_with_justify(JustifyText::Center),
 						TextShadow {
@@ -272,6 +272,20 @@ enum MenuButton {
 	ButtonGroup
 }
 
+macro_rules! box_shadow_styles {
+    () => {
+	    vec![
+			ShadowStyle {
+				x_offset: Val::Px(0.),
+				y_offset: Val::Px(4.),
+				blur_radius: Val::Px(15.),
+				color: Color::BLACK.with_alpha(0.2),
+				..default()
+			}
+		]
+    };
+}
+
 fn new_primary_button(label: &str, font: Handle<Font>) -> impl Bundle {(
 	Button,
 	MenuButton::Primary,
@@ -285,15 +299,7 @@ fn new_primary_button(label: &str, font: Handle<Font>) -> impl Bundle {(
 		justify_content: JustifyContent::Center,
 		..default()
 	},
-	BoxShadow(vec![
-		ShadowStyle {
-			x_offset: Val::Px(0.),
-			y_offset: Val::Px(4.),
-			blur_radius: Val::Px(15.),
-			color: Color::BLACK.with_alpha(0.2),
-			..default()
-		}
-	]),
+	BoxShadow(box_shadow_styles!()),
 	children![(
 		Text::new(label),
 		TextColor(PALLET.dark_brown),
@@ -318,15 +324,7 @@ fn new_group_button(label: &str, font: Handle<Font>) -> impl Bundle {(
 		justify_content: JustifyContent::Center,
 		..default()
 	},
-	BoxShadow(vec![
-		ShadowStyle {
-			x_offset: Val::Px(0.),
-			y_offset: Val::Px(4.),
-			blur_radius: Val::Px(15.),
-			color: Color::BLACK.with_alpha(0.2),
-			..default()
-		}
-	]),
+	BoxShadow(box_shadow_styles!()),
 	children![(
 		Text::new(label),
 		TextColor(PALLET.cream),
@@ -337,7 +335,7 @@ fn new_group_button(label: &str, font: Handle<Font>) -> impl Bundle {(
 	// transition: all 0.3s ease;
 )}
 
-fn new_input(prompt: &str, font: Handle<Font>) -> impl Bundle {(
+fn new_input(prompt: &str, font: Handle<Font>, action: Option<fn(&mut World)>) -> impl Bundle {(
 	Node {
 		width: Val::Percent(100.),
 		height: Val::Percent(100.),
@@ -350,15 +348,7 @@ fn new_input(prompt: &str, font: Handle<Font>) -> impl Bundle {(
 	},
 	Outline::new(Val::Px(2.), Val::Px(0.), PALLET.accent_gold),
 	BorderRadius::all(PALLET.border_radius),
-	BoxShadow(vec![
-		ShadowStyle {
-			x_offset: Val::Px(0.),
-			y_offset: Val::Px(4.),
-			blur_radius: Val::Px(15.),
-			color: Color::BLACK.with_alpha(0.2),
-			..default()
-		}
-	]),
+	BoxShadow(box_shadow_styles!()),
 	children![(
 		Node {
             width: Val::Px(250.),//TODO mess with layout and style
@@ -375,7 +365,8 @@ fn new_input(prompt: &str, font: Handle<Font>) -> impl Bundle {(
 		TextColor(PALLET.dark_brown),
 		TextFont::from_font(font).with_font_size(18.),
 		TextInputPrompt::new(prompt),
-        BackgroundColor(PALLET.cream)
+        BackgroundColor(PALLET.cream),
+		TextInputOnSubmitAction(action)
 	)]
 )}
 
@@ -402,15 +393,15 @@ fn display_main_buttons(
 	button_container: Query<Entity, With<ButtonContainer>>,
 	asset_server: Res<AssetServer>
 ) {
-	let font_bold: Handle<Font> = asset_server.load("fonts/georgiab.ttf");
+	let font_bold: Handle<Font> = asset_server.load(GEORGIA_BOLD);
 	let children = &[
 		//singleplayer
 		commands
 			.spawn(new_primary_button("SINGLEPLAYER", font_bold.clone()))
-			.observe(|trigger: Trigger<Pointer<Click>>| {
+			.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
-				//TODO
-				// Go to setup scene
+				info!("Set scene to Setup");
+				next_scene.set(UiScene::Setup);
 			})
 			.id(),
 		//multiplayer
@@ -431,10 +422,10 @@ fn display_main_buttons(
 			//settings
 			commands
 				.spawn(new_group_button("SETTINGS", font_bold.clone()))
-				.observe(|trigger: Trigger<Pointer<Click>>| {
+				.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 					if !matches!(trigger.button, PointerButton::Primary) {return}
-					//TODO
-					// Go to settings scene
+					info!("Set scene to Settings");
+					next_scene.set(UiScene::Settings);
 				});
 			//exit
 			commands
@@ -445,7 +436,7 @@ fn display_main_buttons(
 				});
 		}).id()
 	];
-	let mut container = commands.entity(button_container.single().expect("There should be exactly one ButtonContainer"));
+	let mut container = commands.entity(button_container.single().expect(BTN_CONTAINER_ERR));
 	container.despawn_related::<Children>();
 	container.add_children(children);
 }
@@ -454,10 +445,11 @@ fn display_multiplayer_options(mut commands: Commands, button_container: Entity,
 	let children = &[
 		commands
 			.spawn(new_primary_button("CREATE GAME", font_bold.clone()))
-			.observe(|trigger: Trigger<Pointer<Click>>| {
+			.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
-				//TODO
-				// Go to setup scene
+				info!("Creating game");
+				info!("Set scene to Setup");
+				next_scene.set(UiScene::Setup);
 			})
 			.id(),
 		commands
@@ -467,18 +459,18 @@ fn display_multiplayer_options(mut commands: Commands, button_container: Entity,
 				display_join_options(
 					commands,
 					button_container.single().expect(BTN_CONTAINER_ERR),
-					asset_server.load("fonts/georgia.ttf"),
-					asset_server.load("fonts/georgiab.ttf"),
+					asset_server.load(GEORGIA),
+					asset_server.load(GEORGIA_BOLD),
 					false
 				);
 			})
 			.id(),
 		commands
 			.spawn(new_primary_button("BROWSE PUBLIC GAMES", font_bold.clone()))
-			.observe(|trigger: Trigger<Pointer<Click>>| {
+			.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
-				//TODO
-				// Go to multiplayer scene
+				info!("Set scene to Multiplayer");
+				next_scene.set(UiScene::Multiplayer);
 			})
 			.id(),
 		commands
@@ -492,19 +484,22 @@ fn display_multiplayer_options(mut commands: Commands, button_container: Entity,
 }
 
 fn display_join_options(mut commands: Commands, button_container: Entity, font: Handle<Font>, font_bold: Handle<Font>, failed: bool) {
+	static FAILED_MSG: &str = "Could not find game with matching code";
+	if failed {info!(FAILED_MSG);}
 	let children = &[
 		commands
-			.spawn(new_text("Could not find game with matching code.", font.clone(), failed))
+			.spawn(new_text(FAILED_MSG, font.clone(), failed))
 			.id(),
 		commands
-			.spawn(new_input("Enter game code...", font))
+			.spawn(new_input("Enter game code...", font, Some(|world: &mut World| {
+				join_game();
+			})))
 			.id(),
 		commands
 			.spawn(new_primary_button("JOIN", font_bold.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
-				//TODO
-				// Attempt to join game
+				join_game();
 			})
 			.id(),
 		commands
@@ -518,22 +513,26 @@ fn display_join_options(mut commands: Commands, button_container: Entity, font: 
 }
 
 fn display_login_prompt(mut commands: Commands, button_container: Entity, font: Handle<Font>, font_bold: Handle<Font>, failed: bool) {
+	static FAILED_MSG: &str = "Username or password was incorrect";
+	if failed {info!(FAILED_MSG);}
 	let children = &[
 		commands
-			.spawn(new_text("Username or password was incorrect.", font.clone(), failed))
+			.spawn(new_text(FAILED_MSG, font.clone(), failed))
 			.id(),
 		commands
-			.spawn(new_input("Username...", font.clone()))
+			.spawn(new_input("Username...", font.clone(), None))
 			.id(),
 		commands
-			.spawn(new_input("Password...", font.clone()))
+			.spawn(new_input("Password...", font.clone(), Some(|world: &mut World| {
+				let api = world.resource::<WebsiteConn>();
+				login(api);
+			})))
 			.id(),
 		commands
 			.spawn(new_primary_button("LOGIN", font_bold.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>, api: Res<WebsiteConn>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
-				//TODO
-				// Attempt to login
+				login(api.as_ref());
 			})
 			.id(),
 		commands
@@ -577,8 +576,8 @@ fn display_multiplayer_observer(
 	asset_server: Res<AssetServer>
 ) {
 	if !matches!(trigger.button, PointerButton::Primary) {return}
-	let font_bold: Handle<Font> = asset_server.load("fonts/georgiab.ttf");
-	let font: Handle<Font> = asset_server.load("fonts/georgia.ttf");
+	let font_bold: Handle<Font> = asset_server.load(GEORGIA_BOLD);
+	let font: Handle<Font> = asset_server.load(GEORGIA);
 	let thread_pool = AsyncComputeTaskPool::get();
 	let website_conn = match website_connection {
 		Some(conn) => conn.0.clone(),
@@ -592,10 +591,13 @@ fn display_multiplayer_observer(
 	let mut container = commands.entity(container_entity);
 	match server_connection {
 		Some(_) => {
+			info!("Already connected to server");
 			display_multiplayer_options(commands, container_entity, font_bold);
 		}
 		None => {
+			info!("Not connected to server; attempting to connect to server");
 			let Some(cred) = get_credentials() else {
+				info!("Prompting for credentials");
 				display_login_prompt(commands, container_entity, font, font_bold, false);
 				return;
 			};
@@ -605,6 +607,7 @@ fn display_multiplayer_observer(
 			container.despawn_related::<Children>();
 			container.add_children(children);
 			let mut task: Task<CommandQueue> = thread_pool.spawn(async move {
+				info!("Attempting to connect to server");
 				let res = ServerConnection::new_connection(cred.username.clone(), cred.password.clone(), website_conn).await;
 				let mut command_queue = CommandQueue::default();
 				
@@ -618,6 +621,7 @@ fn display_multiplayer_observer(
 					
 					match res {
 						Ok(server_conn) => {
+							info!("Successfully connected to server");
 							display_multiplayer_options(commands, btn_container_entity, font_bold);
 							world.insert_resource(ServerConn(Arc::new(RwLock::new(server_conn))));
 							save_credentials(cred.username.as_str(), cred.password.as_str());
@@ -678,7 +682,7 @@ fn display_multiplayer_options_observer(
 	asset_server: Res<AssetServer>
 ) {
 	if !matches!(trigger.button, PointerButton::Primary) {return}
-	display_multiplayer_options(commands, button_container.single().expect(BTN_CONTAINER_ERR), asset_server.load("fonts/georgiab.ttf"));
+	display_multiplayer_options(commands, button_container.single().expect(BTN_CONTAINER_ERR), asset_server.load(GEORGIA_BOLD));
 }
 
 fn get_credentials() -> Option<LoginCredentials> {
@@ -687,12 +691,11 @@ fn get_credentials() -> Option<LoginCredentials> {
 		Ok(username) => username,
 		Err(err) => {
 			if matches!(err.kind(), ErrorKind::NotFound) {
-				let res = fs::create_dir_all(path.parent().unwrap());
-				if let Err(err) = res {
+				if let Err(err) = fs::create_dir_all(path.parent().unwrap()) {
 					error!("Error creating usr directory: {}", err);
+					return None;
 				}
-				let res = File::create(USR_CRD);
-				if let Err(err) = res {
+				if let Err(err) = File::create(USR_CRD) {
 					error!("Error creating usr.crd file: {}", err);
 				}
 			}
@@ -701,6 +704,7 @@ fn get_credentials() -> Option<LoginCredentials> {
 	};
 	match Entry::new(KEYRING_PASSWORD, whoami::username().as_str()).and_then(|entry| entry.get_password()) {
 		Ok(password) => {
+			info!("Retrieved credentials");
 			Some(LoginCredentials {username, password})
 		}
 		Err(err) => {
@@ -712,21 +716,33 @@ fn get_credentials() -> Option<LoginCredentials> {
 
 fn save_credentials(username: &str, password: &str) {
 	let path = Path::new(USR_CRD);
-	let res = fs::create_dir_all(path.parent().unwrap());
-	if let Err(err) = res {
+	if let Err(err) = fs::create_dir_all(path.parent().unwrap()) {
 		error!("Error creating usr directory: {}", err);
+		return;
 	}
-	let res = fs::write(path, username);
-	if let Err(err) = res {
+	if let Err(err) = fs::write(path, username) {
 		error!("Error creating usr.crd file: {}", err);
+		return;
 	}
-	let res = Entry::new(KEYRING_PASSWORD, whoami::username().as_str())
-		.and_then(|entry| entry.set_password(password));
-	if let Err(err) = res {
+	if let Err(err) = Entry::new(KEYRING_PASSWORD, whoami::username().as_str()).and_then(|entry| entry.set_password(password)) {
 		error!("Error setting password in keyring: {}", err);
+		return;
 	}
+	info!("Saved credentials successfully");
 }
 
+fn join_game() {
+	//TODO
+	// Attempt to join game
+	info!("Attempting to join game");
+}
+fn login(api: &WebsiteConn) {
+	//TODO
+	// Attempt to login
+	info!("Attempting to login");
+}
+
+#[allow(clippy::type_complexity)]
 fn update_menu_button(
 	mut menu_buttons: Query<(
 		&Interaction,
@@ -769,15 +785,7 @@ fn update_menu_button(
 					MenuButton::ButtonGroup => PALLET.cream,
 				};
 				node.top = Val::Px(0.);
-				box_shadow.0 = vec![
-					ShadowStyle {
-						x_offset: Val::Px(0.),
-						y_offset: Val::Px(4.),
-						blur_radius: Val::Px(15.),
-						color: Color::BLACK.with_alpha(0.2),
-						..default()
-					}
-				];
+				box_shadow.0 = box_shadow_styles!();
 				if matches!(*menu_button, MenuButton::Primary) {
 					outline.color = PALLET.light_gold;
 				}

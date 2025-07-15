@@ -13,6 +13,8 @@ use {
 pub static CARDS_ICON: &[u8] = include_bytes!("../assets/images/cardsIcon.png");
 pub static CURSOR_ATLAS: &str = "setback/assets/cursors/cursor_atlas.json";//TODO these may need to be changed for prod
 pub static USR_CRD: &str = "setback/usr/usr.crd";
+pub static LATEST_LOG: &str = "setback/logs/latest.log";
+pub static CRASH_LOG: &str = "setback/logs/crash.log";
 pub static CURSOR_ERROR: &str = "There should be exactly one cursor at all times";
 pub static BTN_CONTAINER_ERR: &str = "There should be exactly one ButtonContainer";
 pub static KEYRING_PASSWORD: &str = "service-keyring-setback-user-password";
@@ -21,6 +23,10 @@ pub static URL_404: &str = "/file_not_found";
 pub static URL_DOWNLOAD: &str = "/download";
 pub static URL_LOGIN: &str = "/login";
 pub static URL_ACCOUNT: &str = "/account";
+pub static GEORGIA: &str = "fonts/georgia.ttf";
+pub static GEORGIA_BOLD: &str = "fonts/georgiab.ttf";
+pub static GEORGIA_ITALIC: &str = "fonts/georgiai.ttf";
+pub static TIMES_NEW_ROMAN: &str = "fonts/times.ttf";
 
 /// Singleton for [Pallet] struct
 pub static PALLET: Pallet = Pallet {
