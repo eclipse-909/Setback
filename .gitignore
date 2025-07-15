@@ -3,5 +3,5 @@
 /.zed
 setback.db
 rustc-ice-*
-/setback/logs/*
-#/setback/usr/usr.crd
+#/setback/logs/*
+#/setback/usr/*
