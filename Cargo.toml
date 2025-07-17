@@ -23,13 +23,12 @@ lto = true
 codegen-units = 1
 debug = true
 
-[profile.dev.package."libsetback"]
+[profile.release.package."libsetback"]
 inherits = "release"
 
 [profile.release.package."*"]
 inherits = "release"
-debug = false
-strip "debuginfo"
+debug = true
 
 [workspace.dependencies]
 actix-files = "0.6.6"
