@@ -9,6 +9,7 @@ mod plugins;
 mod resources;
 mod states;
 mod models;
+mod unit_tests;
 
 use {
 	crate::{

@@ -6,6 +6,7 @@ mod models;
 mod connection;
 mod game;
 mod setup_data;
+mod unit_tests;
 
 pub use {
 	constants::*,

@@ -657,6 +657,9 @@ fn display_multiplayer_observer(
 							btn_container.despawn_related::<Children>();
 							btn_container.add_children(children);
 						}
+						Err(Error::IncompatibleVersion) => {
+							todo!("display message to update game")
+						}
 						Err(_) => unreachable!("All errors should have been covered")
 					}
 				});

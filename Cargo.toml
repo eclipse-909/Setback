@@ -4,37 +4,37 @@ members = [
 	"libsetback",
 	"setback",
 	"setback_server",
-	"setback_website",
-	"terminal_game"
+	"setback_website"
 ]
-resolver = "2"
+resolver = "3"
 
-[profile.game-debug]
-inherits = "dev"
+[profile.dev]
 lto = "off"
-debug = true
-debug-assertions = true
-overflow-checks = true
-opt-level = 0
-incremental = true
 
-[profile.game-debug.package."libsetback"]
-inherits = "game-debug"
+[profile.dev.package."libsetback"]
+inherits = "dev"
 
-[profile.game-debug.package."*"]
+[profile.dev.package."*"]
+inherits = "dev"
 opt-level = 3
 
 [profile.release]
 lto = true
-opt-level = 3
 codegen-units = 1
-incremental = false
+debug = true
+
+[profile.dev.package."libsetback"]
+inherits = "release"
+
+[profile.release.package."*"]
+inherits = "release"
 debug = false
+strip "debuginfo"
 
 [workspace.dependencies]
 actix-files = "0.6.6"
 actix-session = { version = "0.10.1", features = ["cookie-session"] }
-actix-web = { version = "4.11.0", features = ["rustls-0_23"] }
+actix-web = { version = "4.11.0" }
 bevy = { version = "0.16.1", default-features = false, features = [
 	"async_executor",
 	"bevy_asset",
@@ -77,17 +77,16 @@ image = "0.25.6"
 jsonwebtoken = "9.3.1"
 keyring = { version = "3.6.2", features = ["linux-native-async-persistent", "windows-native", "crypto-rust", "vendored", "tokio"] }
 lazy_static = "1.5.0"
-libsetback = { path = "./libsetback" }
+libsetback = { path = "./libsetback", default-features = false }
 log = { version = "0.4.27", features = ["max_level_debug", "release_max_level_warn"] }
 rand = "0.9.1"
 reqwest = { version = "0.12.22", features = ["cookies", "json"] }
 rpassword = "7.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
-sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-native-tls", "mysql", "sqlite", "chrono"] }#Sqlite can be a dev-dep
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-native-tls", "postgres", "sqlite", "chrono"] }
 tokio = { version = "1.46.1", features = ["full"] }
 tokio-util = "0.7.15"
 tracing-appender = "0.2.3"
-tracing-subscriber = { version = "0.3.19", features = ["time"] }
 whoami = "1.6.0"
 winit = "0.30.11"

@@ -1,3 +1,5 @@
+mod unit_tests;
+
 use {
 	std::{
 		io::stdin,
@@ -6,7 +8,7 @@ use {
 		pin::Pin
 	},
 	libsetback::{
-		ClientConnection, SetbackConnection, ssp, Protocol, Error, AdminMessage
+		ClientConnection, Connection, ssp, Protocol, Error, AdminMessage
 	},
 	tokio::sync::mpsc::{Sender, Receiver, channel},
 	tokio_util::sync::CancellationToken

@@ -1,6 +1,4 @@
-[![Rust](https://github.com/eclipse-909/Setback-Source/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/eclipse-909/Setback-Source/actions/workflows/rust.yml)
-[![SLSA generic generator](https://github.com/eclipse-909/Setback-Source/actions/workflows/generator-generic-ossf-slsa3-publish.yml/badge.svg?branch=main)](https://github.com/eclipse-909/Setback-Source/actions/workflows/generator-generic-ossf-slsa3-publish.yml)
-
+[![CI](https://github.com/eclipse-909/Setback-Source/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eclipse-909/Setback-Source/actions/workflows/ci.yml)
 - [admin_controller README](admin_controller/README.md)
 - [libsetback README](libsetback/README.md)
 - [setback README](setback/README.md)

@@ -20,7 +20,7 @@ use {
 };
 
 ///This standardizes the method of communication between the server and clients by putting the logic in one place.
-pub trait SetbackConnection {
+pub trait Connection {
 	fn writer(&mut self) -> &mut OwnedWriteHalf;
 	///Returns whether the write was successful.
 	fn write(&mut self, ssp: &Ssp) -> impl Future<Output = bool> {async move {
@@ -39,6 +39,49 @@ pub trait SetbackConnection {
 	}}
 }
 
+pub trait SetbackConnection: Connection + Sized {
+	///- Logs in via http request to api.
+	///- Connects to Setback dedicated server on accept port.
+	///- Reconnects to server on client port.
+	///- Listens for messages from server in background task and sends them via mpsc channel.
+	///
+	///Possible errors are:
+	///- [Error::NetworkIO]
+	///- [Error::Authentication]
+	///- [Error::ServerError]
+	///- [Error::IncompatibleVersion]
+	fn new_connection(username: String, password: String, api: impl WebsiteConnection) -> impl Future<Output=Result<Self, Error>>;
+	///Returns whether the write was successful.
+	fn send_create_game(&mut self, public: bool) -> impl Future<Output=bool>;
+	///Returns whether the write was successful.
+	fn send_join_game(&mut self, code: u32) -> impl Future<Output=bool>;
+	///Returns whether the write was successful.
+	fn send_search_games(&mut self, filter: GameFilter) -> impl Future<Output=bool>;
+	///Host-only
+	///Returns whether the write was successful.
+	fn send_game_meta(&mut self, setup_data: SetupData) -> impl Future<Output=bool>;
+	///Returns whether the write was successful.
+	fn send_update_team(&mut self, index: u8, team: u8) -> impl Future<Output=bool>;
+	///Returns whether the write was successful.
+	fn send_update_player_type(&mut self, index: u8, human: bool) -> impl Future<Output=bool>;
+	///Returns whether the write was successful.
+	fn send_ready(&mut self, is_ready: bool, index: u8) -> impl Future<Output=bool>;
+	///Returns whether the write was successful.
+	fn send_game_event(&mut self, event: GameEvent) -> impl Future<Output=bool>;
+	///Host-only
+	///Returns whether the write was successful.
+	fn send_add_player(&mut self) -> impl Future<Output=bool>;
+	///Host-only
+	///Returns whether the write was successful.
+	fn send_remove_player(&mut self, index: u8) -> impl Future<Output=bool>;
+}
+
+pub trait WebsiteConnection {
+	fn new_connection() -> Self;
+	fn login(&self, username: String, password: String) -> impl Future<Output=Result<u32, Error>>;
+	fn logout(&self) -> impl Future<Output=bool>;
+}
+
 ///Connection to the server, owned by the client.
 pub struct ServerConnection {
 	tcp_writer: OwnedWriteHalf,
@@ -49,15 +92,6 @@ pub struct ServerConnection {
 }
 
 impl ServerConnection {
-	///- Logs in via http request to api.
-	///- Connects to Setback dedicated server on accept port.
-	///- Reconnects to server on client port.
-	///- Listens for messages from server in background task and sends them via mpsc channel.
-	///
-	///Possible errors are:
-	///- [Error::NetworkIO]
-	///- [Error::Authentication]
-	///- [Error::ServerError]
 	pub async fn new_connection(username: String, password: String, api: Client) -> Result<Self, Error> {
 		//login and get account_id
 		let account_id: u32 = api.login(username, password).await?;
@@ -107,61 +141,48 @@ impl ServerConnection {
 		Ok(server_connection)
 	}
 	
-	///Returns whether the write was successful.
 	pub async fn send_create_game(&mut self, public: bool) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::CreateGame{public}, self.account_id)).await
 	}
 	
-	///Returns whether the write was successful.
 	pub async fn send_join_game(&mut self, code: u32) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::JoinGame{code}, self.account_id)).await
 	}
 	
-	///Returns whether the write was successful.
 	pub async fn send_search_games(&mut self, filter: GameFilter) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id)).await
 	}
 	
-	///Host-only
-	///Returns whether the write was successful.
 	pub async fn send_game_meta(&mut self, setup_data: SetupData) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::SetupData(setup_data), self.account_id)).await
 	}
 	
-	///Returns whether the write was successful.
 	pub async fn send_update_team(&mut self, index: u8, team: u8) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::UpdatePlayerTeam{index, team}, self.account_id)).await
 	}
 	
-	///Returns whether the write was successful.
 	pub async fn send_update_player_type(&mut self, index: u8, human: bool) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::UpdatePlayerType{index, human}, self.account_id)).await
 	}
 	
-	///Returns whether the write was successful.
 	pub async fn send_ready(&mut self, is_ready: bool, index: u8) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::Ready{is_ready, index}, self.account_id)).await
 	}
 	
-	///Returns whether the write was successful.
 	pub async fn send_game_event(&mut self, event: GameEvent) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::GameEvent(event), self.account_id)).await
 	}
 	
-	///Host-only
-	///Returns whether the write was successful.
 	pub async fn send_add_player(&mut self) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::AddPlayer, self.account_id)).await
 	}
 	
-	///Host-only
-	///Returns whether the write was successful.
 	pub async fn send_remove_player(&mut self, index: u8) -> bool {
 		self.write(&Ssp::new_with_src(Protocol::RemovePlayer{index}, self.account_id)).await
 	}
 }
 
-impl SetbackConnection for ServerConnection {
+impl Connection for ServerConnection {
 	#[inline(always)]
 	fn writer(&mut self) -> &mut OwnedWriteHalf {&mut self.tcp_writer}
 }
@@ -172,47 +193,71 @@ impl Drop for ServerConnection {
 	}
 }
 
-pub trait WebsiteConnection {
-	fn new_connection() -> Self;
-	fn login(&self, username: String, password: String) -> impl Future<Output=Result<u32, Error>>;
-	fn logout(&self) -> impl Future<Output=bool>;
+#[cfg(test)]
+pub struct MockConnection {
+	tcp_writer: OwnedWriteHalf,
+	pub ssp_rx: UnboundedReceiver<Result<Ssp, Error>>,
+	pub account_id: u32,
+	pub ready: bool
 }
 
-impl WebsiteConnection for Client {
-	fn new_connection() -> Self {
-		Client::builder()
-			.cookie_store(true)
-			.build()
-			.unwrap()
+#[cfg(test)]
+impl SetbackConnection for MockConnection {
+	async fn new_connection(username: String, password: String, api: impl WebsiteConnection) -> Result<Self, Error> {
+		todo!()
 	}
 	
-	async fn login(&self, username: String, password: String) -> Result<u32, Error> {
-		self
-			.post(website!(URL_API_LOGIN))
-			.json(&LoginCredentials {username, password})
-			.send()
-			.await
-			.map_err(|_|Error::NetworkIO)?
-			.error_for_status()
-			.map_err(|err| {
-				match err.status() {
-					Some(StatusCode::UNAUTHORIZED) => Error::Authentication,
-					//TODO handle other status codes
-					_ => Error::ServerError
-				}
-			})?
-			.cookies()
-			.find(|cookie| cookie.name() == "account_id")
-			.ok_or(Error::ServerError)?
-			.value()
-			.parse::<u32>()
-			.map_err(|_|Error::ServerError)
+	async fn send_create_game(&mut self, public: bool) -> bool {
+		todo!()
 	}
 	
-	///Logs out of your account by clearing session cookies.
-	///Returns whether the request was successfully sent. The response code doesn't matter.
-	async fn logout(&self) -> bool {
-		self.get(website!(URL_API_LOGOUT)).send().await.is_ok()
+	async fn send_join_game(&mut self, code: u32) -> bool {
+		todo!()
+	}
+	
+	async fn send_search_games(&mut self, filter: GameFilter) -> bool {
+		todo!()
+	}
+	
+	async fn send_game_meta(&mut self, setup_data: SetupData) -> bool {
+		todo!()
+	}
+	
+	async fn send_update_team(&mut self, index: u8, team: u8) -> bool {
+		todo!()
+	}
+	
+	async fn send_update_player_type(&mut self, index: u8, human: bool) -> bool {
+		todo!()
+	}
+	
+	async fn send_ready(&mut self, is_ready: bool, index: u8) -> bool {
+		todo!()
+	}
+	
+	async fn send_game_event(&mut self, event: GameEvent) -> bool {
+		todo!()
+	}
+	
+	async fn send_add_player(&mut self) -> bool {
+		todo!()
+	}
+	
+	async fn send_remove_player(&mut self, index: u8) -> bool {
+		todo!()
+	}
+}
+
+#[cfg(test)]
+impl Connection for MockConnection {
+	fn writer(&mut self) -> &mut OwnedWriteHalf {&mut self.tcp_writer}
+	
+	async fn write(&mut self, ssp: &Ssp) -> bool {
+		todo!()
+	}
+	
+	async fn read(reader: &mut OwnedReadHalf, buffer: &mut Vec<u8>) -> Result<Ssp, Error> {
+		todo!()
 	}
 }
 
@@ -268,7 +313,7 @@ impl ClientConnection {
 	//TODO make a function for each protocol for convenience
 }
 
-impl SetbackConnection for ClientConnection {
+impl Connection for ClientConnection {
 	#[inline(always)]
 	fn writer(&mut self) -> &mut OwnedWriteHalf {&mut self.tcp_writer}
 }
@@ -277,4 +322,52 @@ impl Drop for ClientConnection {
 	fn drop(&mut self) {
 		self.cancellation_token.cancel();
 	}
+}
+
+impl WebsiteConnection for Client {
+	fn new_connection() -> Self {
+		Client::builder()
+			.cookie_store(true)
+			.build()
+			.unwrap()
+	}
+	
+	async fn login(&self, username: String, password: String) -> Result<u32, Error> {
+		self
+			.post(website!(URL_API_LOGIN))
+			.json(&LoginCredentials {username, password})
+			.send()
+			.await
+			.map_err(|_|Error::NetworkIO)?
+			.error_for_status()
+			.map_err(|err| {
+				match err.status() {
+					Some(StatusCode::UNAUTHORIZED) => Error::Authentication,
+					//TODO handle other status codes
+					_ => Error::ServerError
+				}
+			})?
+			.cookies()
+			.find(|cookie| cookie.name() == "account_id")
+			.ok_or(Error::ServerError)?
+			.value()
+			.parse::<u32>()
+			.map_err(|_|Error::ServerError)
+	}
+	
+	///Logs out of your account by clearing session cookies.
+	///Returns whether the request was successfully sent. The response code doesn't matter.
+	async fn logout(&self) -> bool {
+		self.get(website!(URL_API_LOGOUT)).send().await.is_ok()
+	}
+}
+
+#[cfg(test)]
+pub struct MockClient;
+
+#[cfg(test)]
+impl WebsiteConnection for MockClient {
+	fn new_connection() -> Self {Self}
+	async fn login(&self, username: String, password: String) -> Result<u32, Error> {Ok(1)}
+	async fn logout(&self) -> bool {true}
 }
