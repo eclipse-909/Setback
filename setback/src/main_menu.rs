@@ -11,6 +11,7 @@ use {
 		constants::*,
 		resources::*,
 		states::*,
+		plugins::*
 	},
 	bevy::{
 		prelude::*,
@@ -18,14 +19,12 @@ use {
 			prelude::*,
 			Task
 		},
-		winit::cursor::CursorIcon,
 		ecs::world::CommandQueue
 	},
 	bevy_ui_text_input::{TextInputMode, TextInputNode, TextInputPrompt, TextInputFilter},
 	futures::FutureExt,
 	libsetback::*,
-	keyring::Entry,
-	reqwest::Client
+	keyring::Entry
 };
 
 pub struct MainMenuPlugin;
@@ -37,10 +36,17 @@ impl UiScenePlugin for MainMenuPlugin {
 impl Plugin for MainMenuPlugin {
 	fn build(&self, app: &mut App) {
 		app
+			.add_systems(Startup, check_for_update)
 			.add_systems(OnEnter(Self::SCENE), (on_enter, display_main_buttons).chain())
 			.add_systems(Update, update_menu_button.run_if(in_state(Self::SCENE)))
 			.add_systems(OnExit(Self::SCENE), Self::on_exit);
 	}
+}
+
+fn check_for_update() {
+	//TODO
+	// Use WebsiteConnection to check the latest version and see if there is an update to the game.
+	// Display a popup if the game can be updated.
 }
 
 //TODO figure out how to do color gradients, letter-spacing, and CSS ::before
@@ -286,9 +292,13 @@ macro_rules! box_shadow_styles {
     };
 }
 
-fn new_primary_button(label: &str, font: Handle<Font>) -> impl Bundle {(
+fn new_primary_button(label: &str, font_bold: Handle<Font>, cursor: Handle<Image>) -> impl Bundle {(
 	Button,
 	MenuButton::Primary,
+	CursorComponent {
+		default: CursorStyle::Icon(cursor),
+		pointer: CursorStyle::Animation(BJ_HELP_SELECT_PAGE)
+	},
 	BackgroundColor(PALLET.accent_gold),
 	Outline::new(Val::Px(2.), Val::Px(0.), PALLET.light_gold),
 	BorderRadius::all(PALLET.border_radius),
@@ -303,16 +313,20 @@ fn new_primary_button(label: &str, font: Handle<Font>) -> impl Bundle {(
 	children![(
 		Text::new(label),
 		TextColor(PALLET.dark_brown),
-		TextFont::from_font(font).with_font_size(18.),
+		TextFont::from_font(font_bold).with_font_size(18.),
 		TextLayout::new_with_justify(JustifyText::Center)
 	)]
 	//TODO
 	// transition: all 0.3s ease;
 )}
 
-fn new_group_button(label: &str, font: Handle<Font>) -> impl Bundle {(
+fn new_group_button(label: &str, font_bold: Handle<Font>, cursor: Handle<Image>) -> impl Bundle {(
 	Button,
 	MenuButton::ButtonGroup,
+	CursorComponent {
+		default: CursorStyle::Icon(cursor),
+		pointer: CursorStyle::Animation(BJ_HELP_SELECT_PAGE)
+	},
 	BackgroundColor(PALLET.primary_green),
 	Outline::new(Val::Px(2.), Val::Px(0.), PALLET.accent_gold),
 	BorderRadius::all(PALLET.border_radius),
@@ -328,7 +342,7 @@ fn new_group_button(label: &str, font: Handle<Font>) -> impl Bundle {(
 	children![(
 		Text::new(label),
 		TextColor(PALLET.cream),
-		TextFont::from_font(font).with_font_size(16.),
+		TextFont::from_font(font_bold).with_font_size(16.),
 		TextLayout::new_with_justify(JustifyText::Center)
 	)]
 	//TODO
@@ -394,10 +408,11 @@ fn display_main_buttons(
 	asset_server: Res<AssetServer>
 ) {
 	let font_bold: Handle<Font> = asset_server.load(GEORGIA_BOLD);
+	let cursor: Handle<Image> = asset_server.load(BJ_NORMAL_SELECT);
 	let children = &[
 		//singleplayer
 		commands
-			.spawn(new_primary_button("SINGLEPLAYER", font_bold.clone()))
+			.spawn(new_primary_button("SINGLEPLAYER", font_bold.clone(), cursor.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
 				info!("Set scene to Setup");
@@ -406,7 +421,7 @@ fn display_main_buttons(
 			.id(),
 		//multiplayer
 		commands
-			.spawn(new_primary_button("MULTIPLAYER", font_bold.clone()))
+			.spawn(new_primary_button("MULTIPLAYER", font_bold.clone(), cursor.clone()))
 			.observe(display_multiplayer_observer)
 			.id(),
 		//button group
@@ -421,7 +436,7 @@ fn display_main_buttons(
 		).with_children(|commands| {
 			//settings
 			commands
-				.spawn(new_group_button("SETTINGS", font_bold.clone()))
+				.spawn(new_group_button("SETTINGS", font_bold.clone(), cursor.clone()))
 				.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 					if !matches!(trigger.button, PointerButton::Primary) {return}
 					info!("Set scene to Settings");
@@ -429,7 +444,7 @@ fn display_main_buttons(
 				});
 			//exit
 			commands
-				.spawn(new_group_button("EXIT GAME", font_bold.clone()))
+				.spawn(new_group_button("EXIT GAME", font_bold, cursor))
 				.observe(|trigger: Trigger<Pointer<Click>>| {
 					if !matches!(trigger.button, PointerButton::Primary) {return}
 					std::process::exit(0);
@@ -441,10 +456,10 @@ fn display_main_buttons(
 	container.add_children(children);
 }
 
-fn display_multiplayer_options(mut commands: Commands, button_container: Entity, font_bold: Handle<Font>) {
+fn display_multiplayer_options(mut commands: Commands, button_container: Entity, font_bold: Handle<Font>, cursor: Handle<Image>) {
 	let children = &[
 		commands
-			.spawn(new_primary_button("CREATE GAME", font_bold.clone()))
+			.spawn(new_primary_button("CREATE GAME", font_bold.clone(), cursor.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
 				info!("Creating game");
@@ -453,20 +468,19 @@ fn display_multiplayer_options(mut commands: Commands, button_container: Entity,
 			})
 			.id(),
 		commands
-			.spawn(new_primary_button("JOIN PRIVATE GAME", font_bold.clone()))
+			.spawn(new_primary_button("JOIN PRIVATE GAME", font_bold.clone(), cursor.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>, commands: Commands, button_container: Query<Entity, With<ButtonContainer>>, asset_server: Res<AssetServer>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
 				display_join_options(
 					commands,
 					button_container.single().expect(BTN_CONTAINER_ERR),
-					asset_server.load(GEORGIA),
-					asset_server.load(GEORGIA_BOLD),
+					asset_server,
 					false
 				);
 			})
 			.id(),
 		commands
-			.spawn(new_primary_button("BROWSE PUBLIC GAMES", font_bold.clone()))
+			.spawn(new_primary_button("BROWSE PUBLIC GAMES", font_bold.clone(), cursor.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
 				info!("Set scene to Multiplayer");
@@ -474,7 +488,7 @@ fn display_multiplayer_options(mut commands: Commands, button_container: Entity,
 			})
 			.id(),
 		commands
-			.spawn(new_group_button("BACK", font_bold.clone()))
+			.spawn(new_group_button("BACK", font_bold.clone(), cursor))
 			.observe(display_multiplayer_observer)
 			.id()
 	];
@@ -483,9 +497,12 @@ fn display_multiplayer_options(mut commands: Commands, button_container: Entity,
 	button_container.add_children(children);
 }
 
-fn display_join_options(mut commands: Commands, button_container: Entity, font: Handle<Font>, font_bold: Handle<Font>, failed: bool) {
+fn display_join_options(mut commands: Commands, button_container: Entity, asset_server: Res<AssetServer>, failed: bool) {
 	static FAILED_MSG: &str = "Could not find game with matching code";
 	if failed {info!(FAILED_MSG);}
+	let font = asset_server.load(GEORGIA);
+	let font_bold = asset_server.load(GEORGIA_BOLD);
+	let cursor = asset_server.load(BJ_NORMAL_SELECT);
 	let children = &[
 		commands
 			.spawn(new_text(FAILED_MSG, font.clone(), failed))
@@ -496,14 +513,14 @@ fn display_join_options(mut commands: Commands, button_container: Entity, font: 
 			})))
 			.id(),
 		commands
-			.spawn(new_primary_button("JOIN", font_bold.clone()))
+			.spawn(new_primary_button("JOIN", font_bold.clone(), cursor.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
 				join_game();
 			})
 			.id(),
 		commands
-			.spawn(new_group_button("BACK", font_bold.clone()))
+			.spawn(new_group_button("BACK", font_bold.clone(), cursor))
 			.observe(display_multiplayer_options_observer)
 			.id()
 	];
@@ -512,7 +529,7 @@ fn display_join_options(mut commands: Commands, button_container: Entity, font: 
 	button_container.add_children(children);
 }
 
-fn display_login_prompt(mut commands: Commands, button_container: Entity, font: Handle<Font>, font_bold: Handle<Font>, failed: bool) {
+fn display_login_prompt(mut commands: Commands, button_container: Entity, font: Handle<Font>, font_bold: Handle<Font>, cursor: Handle<Image>, failed: bool) {
 	static FAILED_MSG: &str = "Username or password was incorrect";
 	if failed {info!(FAILED_MSG);}
 	let children = &[
@@ -529,18 +546,45 @@ fn display_login_prompt(mut commands: Commands, button_container: Entity, font: 
 			})))
 			.id(),
 		commands
-			.spawn(new_primary_button("LOGIN", font_bold.clone()))
+			.spawn(new_primary_button("LOGIN", font_bold.clone(), cursor.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>, api: Res<WebsiteConn>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
 				login(api.as_ref());
 			})
 			.id(),
 		commands
-			.spawn(new_text("Don't have an account? Create one!", font, true))
+			.spawn(new_text("Don't have an account? Create one!", font.clone(), true))
 			.id(),
-		//TODO clickable link to website
 		commands
-			.spawn(new_group_button("BACK", font_bold))
+			.spawn((
+				Button,
+				Url(website!(URL_ACCOUNT)),
+				Node {
+					padding: UiRect::axes(Val::Px(16.), Val::Px(20.)),//TODO mess with layout
+					position_type: PositionType::Relative,
+					overflow: Overflow::hidden(),
+					justify_content: JustifyContent::Center,
+					..default()
+				},
+				children![(
+					Text::new(website!(URL_ACCOUNT)),
+					TextColor(PALLET.url),
+					TextFont::from_font(font).with_font_size(18.),
+					TextLayout::new_with_justify(JustifyText::Center)
+				)]
+			))
+			.observe(|trigger: Trigger<Pointer<Click>>, url: Query<&Url>| {
+				if !matches!(trigger.button, PointerButton::Primary) {return}
+				let Ok(url) = url.get(trigger.target) else {return};
+				if open::that_detached(url.0.as_str()).is_ok() {
+					info!("Opened /account in browser");
+				} else {
+					error!("Failed to open /account in browser");
+				}
+			})
+			.id(),
+		commands
+			.spawn(new_group_button("BACK", font_bold, cursor))
 			.observe(display_main_buttons_observer)
 			.id()
 	];
@@ -571,34 +615,28 @@ fn display_multiplayer_observer(
 	mut commands: Commands,
 	button_container: Query<Entity, With<ButtonContainer>>,
 	server_connection: Option<ResMut<ServerConn>>,
-	website_connection: Option<Res<WebsiteConn>>,
+	website_connection: Res<WebsiteConn>,
 	task_schedule: ResMut<TaskSchedule>,
 	asset_server: Res<AssetServer>
 ) {
 	if !matches!(trigger.button, PointerButton::Primary) {return}
 	let font_bold: Handle<Font> = asset_server.load(GEORGIA_BOLD);
 	let font: Handle<Font> = asset_server.load(GEORGIA);
+	let cursor: Handle<Image> = asset_server.load(BJ_NORMAL_SELECT);
 	let thread_pool = AsyncComputeTaskPool::get();
-	let website_conn = match website_connection {
-		Some(conn) => conn.0.clone(),
-		None => {
-			let api = Client::new_connection();
-			commands.insert_resource(WebsiteConn(api.clone()));
-			api
-		}
-	};
+	let website_conn = website_connection.0.clone();
 	let container_entity = button_container.single().expect(BTN_CONTAINER_ERR);
 	let mut container = commands.entity(container_entity);
 	match server_connection {
 		Some(_) => {
 			info!("Already connected to server");
-			display_multiplayer_options(commands, container_entity, font_bold);
+			display_multiplayer_options(commands, container_entity, font_bold, cursor);
 		}
 		None => {
 			info!("Not connected to server; attempting to connect to server");
 			let Some(cred) = get_credentials() else {
 				info!("Prompting for credentials");
-				display_login_prompt(commands, container_entity, font, font_bold, false);
+				display_login_prompt(commands, container_entity, font, font_bold, cursor, false);
 				return;
 			};
 			let children = &[
@@ -622,12 +660,12 @@ fn display_multiplayer_observer(
 					match res {
 						Ok(server_conn) => {
 							info!("Successfully connected to server");
-							display_multiplayer_options(commands, btn_container_entity, font_bold);
+							display_multiplayer_options(commands, btn_container_entity, font_bold, cursor);
 							world.insert_resource(ServerConn(Arc::new(RwLock::new(server_conn))));
 							save_credentials(cred.username.as_str(), cred.password.as_str());
 						}
 						Err(Error::Authentication) => {
-							display_login_prompt(commands, btn_container_entity, font, font_bold, true);
+							display_login_prompt(commands, btn_container_entity, font, font_bold, cursor,  true);
 						}
 						Err(Error::NetworkIO) => {
 							let children = &[
@@ -635,7 +673,7 @@ fn display_multiplayer_observer(
 									.spawn(new_text("Network Error - make sure you are connected to the internet, or try again later.", font, true))
 									.id(),
 								commands
-									.spawn(new_group_button("BACK", font_bold))
+									.spawn(new_group_button("BACK", font_bold, cursor))
 									.observe(display_main_buttons_observer)
 									.id()
 							];
@@ -649,7 +687,7 @@ fn display_multiplayer_observer(
 									.spawn(new_text("Server Error - an unexpected error has occurred on the server. Please try again later.", font, true))
 									.id(),
 								commands
-									.spawn(new_group_button("BACK", font_bold))
+									.spawn(new_group_button("BACK", font_bold, cursor))
 									.observe(display_main_buttons_observer)
 									.id()
 							];
@@ -685,7 +723,7 @@ fn display_multiplayer_options_observer(
 	asset_server: Res<AssetServer>
 ) {
 	if !matches!(trigger.button, PointerButton::Primary) {return}
-	display_multiplayer_options(commands, button_container.single().expect(BTN_CONTAINER_ERR), asset_server.load(GEORGIA_BOLD));
+	display_multiplayer_options(commands, button_container.single().expect(BTN_CONTAINER_ERR), asset_server.load(GEORGIA_BOLD), asset_server.load(BJ_NORMAL_SELECT));
 }
 
 fn get_credentials() -> Option<LoginCredentials> {
@@ -756,16 +794,8 @@ fn update_menu_button(
 		&mut Outline,
 		&Children
 	), Changed<Interaction>>,
-	mut text_colors: Query<&mut TextColor>,
-	mut cursor_icon: Query<&mut CursorIcon>,
-	mut cursor_atlas: ResMut<CursorAtlas>,
-	mut default_cursor: Local<Option<Handle<Image>>>,
-	asset_server: Res<AssetServer>
+	mut text_colors: Query<&mut TextColor>
 ) {
-	let Ok(mut cursor_icon) = cursor_icon.single_mut() else {return};
-	if default_cursor.is_none() {
-		*default_cursor = Some(asset_server.load(BJ_NORMAL_SELECT));
-	}
 	for (
 		interaction,
 		menu_button,
@@ -792,7 +822,6 @@ fn update_menu_button(
 				if matches!(*menu_button, MenuButton::Primary) {
 					outline.color = PALLET.light_gold;
 				}
-				*cursor_icon = custom_cursor_icon(cursor_atlas.as_mut(), default_cursor.as_ref().unwrap().clone());
 			}
 			Interaction::Hovered => {
 				bg_color.0 = match *menu_button {
@@ -813,7 +842,6 @@ fn update_menu_button(
 				if matches!(*menu_button, MenuButton::Primary) {
 					outline.color = PALLET.cream;
 				}
-				*cursor_icon = custom_cursor_anim(cursor_atlas.as_mut(), BJ_HELP_SELECT_PAGE);
 			}
 			Interaction::Pressed => {
 				node.top = Val::Px(0.);

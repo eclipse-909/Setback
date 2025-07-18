@@ -42,12 +42,12 @@ jobs:
       - name: Check all workspaces
         run: cargo check --workspace --all-targets --all-features --locked -vv
       - name: Build timing report
-        if: github.event_name == push&& github.ref == refs/heads/main'
+        if: github.event_name == push && github.ref == 'refs/heads/main'
         run: |
           cargo install cargo-timing
           cargo timing --html timing-report.html
       - name: Upload timing report
-        if: github.event_name == push&& github.ref == refs/heads/main'
+        if: github.event_name == push && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: build-timing-report
@@ -76,26 +76,20 @@ jobs:
           # Linux-only packages (server components)
           - os: ubuntu-latest
             package: admin_controller
-            rust: nightly
           - os: ubuntu-latest
             package: setback_server
-            rust: nightly
           - os: ubuntu-latest
             package: setback_website
-            rust: nightly
           - os: ubuntu-latest
             package: libsetback
-            rust: nightly
           # Cross-platform package (client)
           - os: ubuntu-latest
             package: setback
-            rust: nightly
           - os: windows-latest
             package: setback
-            rust: nightly
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@${{ matrix.rust }}
+      - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -133,7 +127,6 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: eclipse-909/Setback-Source
-          file: cobertura.xml
           fail_ci_if_error: true
 
   audit:
