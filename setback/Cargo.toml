@@ -13,6 +13,7 @@ image.workspace = true
 keyring.workspace = true
 libsetback.workspace = true
 log.workspace = true
+open.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

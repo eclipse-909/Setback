@@ -194,7 +194,7 @@ impl Drop for ServerConnection {
 }
 
 #[cfg(test)]
-pub struct MockConnection {
+pub struct MockServer {
 	tcp_writer: OwnedWriteHalf,
 	pub ssp_rx: UnboundedReceiver<Result<Ssp, Error>>,
 	pub account_id: u32,
@@ -202,7 +202,7 @@ pub struct MockConnection {
 }
 
 #[cfg(test)]
-impl SetbackConnection for MockConnection {
+impl SetbackConnection for MockServer {
 	async fn new_connection(username: String, password: String, api: impl WebsiteConnection) -> Result<Self, Error> {
 		todo!()
 	}
@@ -249,7 +249,7 @@ impl SetbackConnection for MockConnection {
 }
 
 #[cfg(test)]
-impl Connection for MockConnection {
+impl Connection for MockServer {
 	fn writer(&mut self) -> &mut OwnedWriteHalf {&mut self.tcp_writer}
 	
 	async fn write(&mut self, ssp: &Ssp) -> bool {

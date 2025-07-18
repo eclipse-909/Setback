@@ -28,7 +28,8 @@ inherits = "release"
 
 [profile.release.package."*"]
 inherits = "release"
-debug = true
+debug = false
+strip = "debuginfo"
 
 [workspace.dependencies]
 actix-files = "0.6.6"
@@ -78,6 +79,7 @@ keyring = { version = "3.6.2", features = ["linux-native-async-persistent", "win
 lazy_static = "1.5.0"
 libsetback = { path = "./libsetback", default-features = false }
 log = { version = "0.4.27", features = ["max_level_debug", "release_max_level_warn"] }
+open = "5.3.2"
 rand = "0.9.1"
 reqwest = { version = "0.12.22", features = ["cookies", "json"] }
 rpassword = "7.4.0"

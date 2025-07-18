@@ -16,6 +16,7 @@ pub struct Pallet {
 	pub light_brown: Color,
 	pub card_shadow: Color,
 	pub text_shadow: Color,
+	pub url: Color,
 	pub border_radius: Val
 }
 

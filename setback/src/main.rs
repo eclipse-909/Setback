@@ -10,14 +10,17 @@ mod resources;
 mod states;
 mod models;
 mod unit_tests;
+mod systems;
 
 use {
 	crate::{
 		constants::*,
 		plugins::*,
 		states::*,
-		main_menu::MainMenuPlugin
+		main_menu::*,
+		resources::*
 	},
+	libsetback::WebsiteConnection,
 	bevy::{
 		prelude::*,
 		window::{EnabledButtons, PresentMode, WindowMode, WindowTheme},
@@ -32,7 +35,8 @@ use {
 		path::Path,
 		io::Write
 	},
-	tracing_appender::non_blocking::WorkerGuard
+	tracing_appender::non_blocking::WorkerGuard,
+	reqwest::Client
 };
 
 fn main() {
@@ -80,6 +84,7 @@ fn main() {
 		.add_plugins(AsyncTaskPlugin)
 		// .add_plugins(DebugPlugin)
 		.insert_resource(WinitSettings::game())
+		.insert_resource(WebsiteConn(Client::new_connection()))
 		.add_systems(Startup, startup)
 		.add_plugins(bevy_framepace::FramepacePlugin)
 		.add_plugins(MainMenuPlugin)

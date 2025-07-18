@@ -1,28 +1,21 @@
 use {
-	crate::{
-		models::*,
-		resources::*
-	},
-	bevy::{
-		prelude::*,
-		winit::cursor::{CursorIcon, CustomCursor, CustomCursorImage}
-	},
-	std::time::Duration
+	crate::models::*,
+	bevy::prelude::*
 };
 
 pub static CARDS_ICON: &[u8] = include_bytes!("../assets/images/cardsIcon.png");
-pub static CURSOR_ATLAS: &str = "setback/assets/cursors/cursor_atlas.json";//TODO these may need to be changed for prod
+pub static CURSOR_ATLAS: &str = "setback/assets/cursors/cursor_atlas.json";//TODO these paths may need to be changed for release
 pub static USR_CRD: &str = "setback/usr/usr.crd";
 pub static LATEST_LOG: &str = "setback/logs/latest.log";
 pub static CRASH_LOG: &str = "setback/logs/crash.log";
 pub static CURSOR_ERROR: &str = "There should be exactly one cursor at all times";
 pub static BTN_CONTAINER_ERR: &str = "There should be exactly one ButtonContainer";
 pub static KEYRING_PASSWORD: &str = "service-keyring-setback-user-password";
-pub static URL_INDEX: &str = "/";
-pub static URL_404: &str = "/file_not_found";
-pub static URL_DOWNLOAD: &str = "/download";
-pub static URL_LOGIN: &str = "/login";
-pub static URL_ACCOUNT: &str = "/account";
+pub static URL_INDEX: &str = "";
+pub static URL_404: &str = "file_not_found";
+pub static URL_DOWNLOAD: &str = "download";
+pub static URL_LOGIN: &str = "login";
+pub static URL_ACCOUNT: &str = "account";
 pub static GEORGIA: &str = "fonts/georgia.ttf";
 pub static GEORGIA_BOLD: &str = "fonts/georgiab.ttf";
 pub static GEORGIA_ITALIC: &str = "fonts/georgiai.ttf";
@@ -41,14 +34,11 @@ pub static PALLET: Pallet = Pallet {
 	light_brown: Color::srgb_u8(0x8b, 0x6f, 0x47),
 	card_shadow: Color::srgba(0., 0., 0., 0.3),
 	text_shadow: Color::srgba(0., 0., 0., 0.5),
+	url: Color::srgb_u8(173, 194, 252),
 	border_radius: Val::Px(12.)
 };
 
-const CURSOR_FPS: f32 = 15.;
-
-pub fn new_timer() -> Timer {
-	Timer::new(Duration::from_secs_f32(1.0 / CURSOR_FPS), TimerMode::Once)
-}
+pub const CURSOR_FPS: f32 = 15.;
 
 /// Spade
 pub static BJ_NORMAL_SELECT: &str = "cursors/Blackjack Normal Select.png";
@@ -62,19 +52,6 @@ pub static BJ_DIAMOND_SELECT: &str = "cursors/Blackjack Diamond Select.png";
 pub static BJ_CARD_FRONT: &str = "cursors/Blackjack Card Front.png";
 /// Card back
 pub static BJ_CARD_BACK: &str = "cursors/Blackjack Card Back.png";
-
-pub fn custom_cursor_icon(
-	cursor_atlas: &mut CursorAtlas,
-	image: Handle<Image>
-) -> CursorIcon {
-	cursor_atlas.current_animation = "";
-	cursor_atlas.current_frame = 0;
-	cursor_atlas.frame_timer = new_timer();
-	CursorIcon::Custom(CustomCursor::Image(CustomCursorImage {
-		handle: image,
-		..default()
-	}))
-}
 
 /// Card flips over
 pub static BJ_CARD_ALT_PAGE: &str = "Blackjack Card Alternate_page";
@@ -96,20 +73,3 @@ pub static BJ_WORKING_IN_BG_PAGE: &str = "Blackjack Working In Background_page";
 pub static BJ_PREC_SELECT_PAGE: &str = "Blackjack Precision Select_page";
 /// Spade morphs into standard text-select cursor
 pub static BJ_TEXT_SELECT_PAGE: &str = "Blackjack Text Select_page";
-
-pub fn custom_cursor_anim(
-	cursor_atlas: &mut CursorAtlas,
-	animation: &'static str
-) -> CursorIcon {
-	cursor_atlas.current_animation = animation;
-	cursor_atlas.current_frame = 0;
-	cursor_atlas.frame_timer = new_timer();
-	CursorIcon::Custom(CustomCursor::Image(CustomCursorImage {
-		handle: cursor_atlas.texture.clone(),
-		texture_atlas: Some(TextureAtlas {
-			layout: cursor_atlas.layout.clone(),
-			index: cursor_atlas.animations.get(animation).expect("Invalid animation name")[0]
-		}),
-		..default()
-	}))
-}

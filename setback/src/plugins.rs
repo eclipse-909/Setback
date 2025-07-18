@@ -4,6 +4,7 @@ use {
 		models::*,
 		resources::*,
 		components::*,
+		systems::*
 	},
 	bevy::{
 		prelude::*,
@@ -37,11 +38,17 @@ impl Plugin for DebugPlugin {
 /// Adds custom cursors
 pub struct CursorIconPlugin;
 
+pub enum CursorStyle {
+	Icon(Handle<Image>),
+	Animation(&'static str)
+}
+
 impl Plugin for CursorIconPlugin {
 	fn build(&self, app: &mut App) {
 		app
 			.init_resource::<CursorAtlas>()
 			.add_systems(Startup, init_cursor_icon)
+			.add_systems(Update, update_cursor)
 			.add_systems(Update, animate_cursor);
 	}
 }
@@ -129,6 +136,24 @@ fn init_cursor_icon(
 
     // Create cursor atlas resource
     commands.insert_resource(cursor_atlas);
+}
+
+fn update_cursor(
+	cursor: Query<(&Interaction, &CursorComponent), Changed<Interaction>>,
+	mut cursor_icon: Query<&mut CursorIcon>,
+	mut cursor_atlas: ResMut<CursorAtlas>
+) {
+	let Ok(mut cursor_icon) = cursor_icon.single_mut() else {return};
+	let Ok((interaction, cursor)) = cursor.single() else {return};
+	let cursor_style = match *interaction {
+		Interaction::None => &cursor.default,
+		Interaction::Hovered => &cursor.pointer,
+		_ => {return}
+	};
+	*cursor_icon = match cursor_style {
+		CursorStyle::Icon(icon) => custom_cursor_icon(cursor_atlas.as_mut(), icon.clone()),
+		CursorStyle::Animation(animation) => custom_cursor_anim(cursor_atlas.as_mut(), animation)
+	}
 }
 
 fn animate_cursor(
