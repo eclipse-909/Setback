@@ -3,7 +3,6 @@ use {
 		io::ErrorKind,
 		fs::{self, File},
 		path::Path,
-		task::{Context, Poll},
 		sync::{Arc, RwLock}
 	},
 	crate::{
@@ -11,18 +10,17 @@ use {
 		constants::*,
 		resources::*,
 		states::*,
-		plugins::*
+		plugins::*,
+		systems::*
 	},
 	bevy::{
 		prelude::*,
-		tasks::{
-			prelude::*,
-			Task
-		},
-		ecs::world::CommandQueue
+		ecs::{
+			world::CommandQueue,
+			query::QuerySingleError
+		}
 	},
 	bevy_ui_text_input::{TextInputMode, TextInputNode, TextInputPrompt, TextInputFilter},
-	futures::FutureExt,
 	libsetback::*,
 	keyring::Entry
 };
@@ -43,10 +41,29 @@ impl Plugin for MainMenuPlugin {
 	}
 }
 
-fn check_for_update() {
-	//TODO
-	// Use WebsiteConnection to check the latest version and see if there is an update to the game.
-	// Display a popup if the game can be updated.
+fn check_for_update(runtime: Res<TokioRuntime>, api: Res<WebsiteConn>) {
+	let api = api.0.clone();
+	let tx = runtime.tx.clone();
+	runtime.rt.spawn(async move {
+		let mut command_queue = CommandQueue::default();
+		let Ok(latest_version) = api.update().await else {return};
+		command_queue.push(move |world: &mut World| {
+			let root_node = match world.query_filtered::<Entity, With<RootNode>>().single(world) {
+				Ok(node) => node,
+				Err(QuerySingleError::NoEntities(_)) => return,//TODO figure out what to do if there isn't a root node
+				Err(QuerySingleError::MultipleEntities(_)) => panic!("{}", ROOT_NODE_ERROR),
+			};
+			let root_node = world
+				.commands()
+				.entity(root_node);
+			match compare_version(SETBACK_VERSION, latest_version) {
+				ClientUpdate::UpToDate => {}//no action required
+				ClientUpdate::UpdateAvailable => {todo!("display update popup")}
+				ClientUpdate::UpdateRequired => {todo!("display update popup")}
+			}
+		});
+		tx.send(command_queue).expect(TASK_ERROR);
+	});
 }
 
 //TODO figure out how to do color gradients, letter-spacing, and CSS ::before
@@ -259,7 +276,7 @@ fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>) {
 					..default()
 				},
 				children![(
-					Text::new(Version::LATEST.to_string()),
+					Text::new(SETBACK_VERSION.to_string()),
 					TextFont::from_font(font).with_font_size(12.),
 					TextColor(PALLET.light_brown.with_alpha(0.7)),
 					TextLayout::new_with_justify(JustifyText::Center)
@@ -616,14 +633,13 @@ fn display_multiplayer_observer(
 	button_container: Query<Entity, With<ButtonContainer>>,
 	server_connection: Option<ResMut<ServerConn>>,
 	website_connection: Res<WebsiteConn>,
-	task_schedule: ResMut<TaskSchedule>,
+	runtime: Res<TokioRuntime>,
 	asset_server: Res<AssetServer>
 ) {
 	if !matches!(trigger.button, PointerButton::Primary) {return}
 	let font_bold: Handle<Font> = asset_server.load(GEORGIA_BOLD);
 	let font: Handle<Font> = asset_server.load(GEORGIA);
 	let cursor: Handle<Image> = asset_server.load(BJ_NORMAL_SELECT);
-	let thread_pool = AsyncComputeTaskPool::get();
 	let website_conn = website_connection.0.clone();
 	let container_entity = button_container.single().expect(BTN_CONTAINER_ERR);
 	let mut container = commands.entity(container_entity);
@@ -644,9 +660,10 @@ fn display_multiplayer_observer(
 			];
 			container.despawn_related::<Children>();
 			container.add_children(children);
-			let mut task: Task<CommandQueue> = thread_pool.spawn(async move {
+			let tx = runtime.tx.clone();
+			runtime.rt.spawn(async move {
 				info!("Attempting to connect to server");
-				let res = ServerConnection::new_connection(cred.username.clone(), cred.password.clone(), website_conn).await;
+				let res = ServerConnection::new(cred.username.clone(), cred.password.clone(), &website_conn).await;
 				let mut command_queue = CommandQueue::default();
 				
 				command_queue.push(move |world: &mut World| {
@@ -664,10 +681,10 @@ fn display_multiplayer_observer(
 							world.insert_resource(ServerConn(Arc::new(RwLock::new(server_conn))));
 							save_credentials(cred.username.as_str(), cred.password.as_str());
 						}
-						Err(Error::Authentication) => {
+						Err(Error::Unauthorized) | Err(Error::Forbidden) => {
 							display_login_prompt(commands, btn_container_entity, font, font_bold, cursor,  true);
 						}
-						Err(Error::NetworkIO) => {
+						Err(Error::TimedOut) | Err(Error::IoError) => {
 							let children = &[
 								commands
 									.spawn(new_text("Network Error - make sure you are connected to the internet, or try again later.", font, true))
@@ -695,22 +712,14 @@ fn display_multiplayer_observer(
 							btn_container.despawn_related::<Children>();
 							btn_container.add_children(children);
 						}
-						Err(Error::IncompatibleVersion) => {
+						Err(Error::BadVersion(latest_version)) => {
 							todo!("display message to update game")
 						}
 						Err(_) => unreachable!("All errors should have been covered")
 					}
 				});
-				
-				command_queue
+				tx.send(command_queue).expect(TASK_ERROR);
 			});
-			//task must be polled once to start execution.
-			if let Poll::Ready(mut command_queue) = task.poll_unpin(&mut Context::from_waker(&futures::task::noop_waker())) {
-				//check if it's ready just in case (it probably won't be)
-				commands.append(&mut command_queue);
-			} else {
-				task_schedule.0.push(task);
-			}
 		}
 	};
 }
@@ -726,7 +735,7 @@ fn display_multiplayer_options_observer(
 	display_multiplayer_options(commands, button_container.single().expect(BTN_CONTAINER_ERR), asset_server.load(GEORGIA_BOLD), asset_server.load(BJ_NORMAL_SELECT));
 }
 
-fn get_credentials() -> Option<LoginCredentials> {
+fn get_credentials() -> Option<LoginRequest> {
 	let path = Path::new(USR_CRD);
 	let username: String = match fs::read_to_string(path) {
 		Ok(username) => username,
@@ -746,7 +755,7 @@ fn get_credentials() -> Option<LoginCredentials> {
 	match Entry::new(KEYRING_PASSWORD, whoami::username().as_str()).and_then(|entry| entry.get_password()) {
 		Ok(password) => {
 			info!("Retrieved credentials");
-			Some(LoginCredentials {username, password})
+			Some(LoginRequest {username, password})
 		}
 		Err(err) => {
 			error!("Error getting password from keyring: {}", err);

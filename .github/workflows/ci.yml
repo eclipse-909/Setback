@@ -79,6 +79,8 @@ jobs:
             package: setback_website
           - os: ubuntu-latest
             package: libsetback
+          - os: ubuntu-latest
+            package: setbackd
           # Cross-platform package (client)
           - os: ubuntu-latest
             package: setback
@@ -224,6 +226,13 @@ jobs:
             exit 1
           fi
           echo "Assets folder found at setback/assets"
+      - name: Verify client folder exists
+        run: |
+          if [ ! -d "setback_website/client" ]; then
+            echo "Error: setback_website/client folder is missing!
+            exit 1
+          fi
+          echo "Client folder found at setback_website/client"
       - name: Prepare client package
         run: |
           mkdir -p ${{ matrix.folder_name }}/Setback
@@ -242,7 +251,10 @@ jobs:
           cp target/release/admin_controller SetbackServer/
           cp target/release/setback_server SetbackServer/
           cp target/release/setback_website SetbackServer/
+          cp target/release/setbackd SetbackServer/
           chmod +x SetbackServer/*
+          cp -r setback_website/client SetbackServer/
+          cp setback_website/.env.release SetbackServer/
           tar -czf SetbackServer.tar.gz SetbackServer/
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

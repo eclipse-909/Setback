@@ -10,8 +10,10 @@ use {
 		player::*,
 		items::*,
 		game::*,
-		setup_data::*
-	}
+		setup_data::*,
+		constants::*
+	},
+	serde::{Deserialize, Serialize}
 };
 
 ///Setback Server Protocol
@@ -25,8 +27,8 @@ pub struct Ssp {
 }
 
 impl Ssp {
-	pub fn new(protocol: Protocol) -> Self {Self {version: Version::LATEST, src_id: 0, protocol}}
-	pub fn new_with_src(protocol: Protocol, src_id: u32) -> Self {Self {version: Version::LATEST, src_id, protocol}}
+	pub fn new(protocol: Protocol) -> Self {Self {version: SETBACK_VERSION, src_id: 0, protocol}}
+	pub fn new_with_src(protocol: Protocol, src_id: u32) -> Self {Self {version: SETBACK_VERSION, src_id, protocol}}
 	
 	//Server/Game -> Client protocols are implemented where needed and don't require separate functions.
 	//You can find functions for each Client -> Server/Game protocol in the game code
@@ -45,11 +47,9 @@ impl Ssp {
 	}
 }
 
-#[derive(Encode, Decode, PartialEq)]
-pub struct Version(u8, u8, u8);
-impl Version {
-	pub const LATEST: Version = Version(0, 1, 0);
-}
+///(major, minor, patch)
+#[derive(Encode, Decode, PartialEq, Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct Version(pub u8, pub u8, pub u8);
 
 impl Display for Version {
 	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
@@ -57,23 +57,28 @@ impl Display for Version {
 	}
 }
 
-///Request - client sends message to server/game.
-///Response - server/game sends message to client.
-///Spontaneous - server/game sends message to client without request.
-///Internal - server/game sends message to itself.
-///When a request is sent, the caller will not wait for a response.
-///You must handle the response the same way you would handle a spontaneous message.
+//Request - client sends message to server/game.
+//Response - server/game sends message to client in response to a request.
+//Spontaneous - server/game sends message to client without request.
+//Internal - server/game sends message to itself.
+///When the client sends a request, they won't wait for a response.
+///The client must handle the response the same way it would handle a spontaneous message.
 #[repr(u8)]
 #[derive(Encode, Decode)]
 pub enum Protocol {
-	///Client ---Connect--> Server<br>
+	///Client ---Authenticate--> Server<br>
 	///Client <--Connect--- Server<br>
-	///Request and response<br><br>
-	///Client sends its account_id to the server when client connects to server.
-	///There is a small window between the client connecting and the client sending a Connect message.
-	///The client must send this to authenticate before attempting to send any other messages.
-	///The server will disconnect the client if it doesn't send this message immediately after connecting.
-	///The server will send a Connect message to the client in response once the client is authenticated.
+	///Request only<br><br>
+	///Client must send this immediately after attempting to connect to the server.
+	///Client sends its account id as src_id and sends the auth token it got from logging into the website.
+	///Server responds with Connect which carries the port number the client should reconnect to.
+	Authenticate(String),
+	///Client ---Authenticate--> Server<br>
+	///Client <--Connect--- Server<br>
+	///Response only<br><br>
+	///Client must send Authenticate immediately after attempting to connect to the server.
+	///Client sends its account id as src_id and sends the auth token it got from logging into the website.
+	///Server responds with this which carries the port number the client should reconnect to.
 	Connect(u16),
 	///Server ---Disconnect--> Self/Game<br>
 	///Internal<br><br>

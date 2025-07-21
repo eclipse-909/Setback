@@ -15,11 +15,11 @@ use {
 		quick::WorldInspectorPlugin
 	},
 	bevy_ui_text_input::{TextInputPlugin, TextSubmitEvent},
-	std::{
-		collections::HashMap,
-		task::{Context, Poll}
-	},
-	futures::StreamExt
+	std::collections::HashMap,
+	tokio::{
+		runtime::Builder,
+		sync::mpsc::{self, error::TryRecvError}
+	}
 };
 
 /// Adds egui inspector. This will mess up the cursor because egui overwrites the cursor image on every frame..
@@ -186,24 +186,27 @@ fn animate_cursor(
 }
 
 /// Adds custom cursors
-pub struct AsyncTaskPlugin;
+pub struct TokioPlugin;
 
-impl Plugin for AsyncTaskPlugin {
+impl Plugin for TokioPlugin {
 	fn build(&self, app: &mut App) {
+		let (tx, rx) = mpsc::unbounded_channel();
 		app
-			.init_resource::<TaskSchedule>()
-			.add_systems(Update, execute_tasks);
+			.insert_resource(TokioRuntime {
+				rt: Builder::new_multi_thread().enable_all().build().unwrap(),
+				tx
+			})
+			.insert_resource(TaskReceiver(rx))
+			.add_systems(Update, execute_command_queue);
 	}
 }
 
-fn execute_tasks(mut commands: Commands, mut tasks: ResMut<TaskSchedule>) {
-	let waker = futures::task::noop_waker();
-	let mut context = Context::from_waker(&waker);
+fn execute_command_queue(mut commands: Commands, mut rx: ResMut<TaskReceiver>) {
 	loop {
-		match tasks.0.poll_next_unpin(&mut context) {
-			Poll::Ready(Some(mut command_queue)) => commands.append(&mut command_queue),
-			Poll::Ready(None) => return,
-			Poll::Pending => {}
+		match rx.0.try_recv() {
+			Ok(mut command_queue) => commands.append(&mut command_queue),
+			Err(TryRecvError::Empty) => return,
+			Err(TryRecvError::Disconnected) => panic!("Tokio task channel closed")
 		}
 	}
 }

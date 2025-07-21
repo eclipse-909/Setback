@@ -1,15 +1,15 @@
 use {
 	std::sync::{Arc, RwLock, RwLockWriteGuard},
 	bincode::{Decode, Encode},
-	tokio::sync::mpsc::{channel, unbounded_channel, Receiver, Sender},
-	tokio_util::sync::CancellationToken,
 	crate::{
-		connection::*,
 		constants::*,
-		items::*,
 		player::*,
+		connection::*,
+		items::*,
 		game::*
-	}
+	},
+	tokio::sync::mpsc::{channel, unbounded_channel, Receiver, Sender},
+	tokio_util::sync::CancellationToken
 };
 
 /// Setup Data is written to during the setup of the game.

@@ -17,6 +17,7 @@ open.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 tracing-appender.workspace = true
 whoami.workspace = true
 winit.workspace = true

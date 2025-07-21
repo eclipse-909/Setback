@@ -1,16 +1,18 @@
 use {
 	bevy::{
-		prelude::*,
-		tasks::Task,
-		ecs::world::CommandQueue
+		ecs::world::CommandQueue,
+		prelude::*
 	},
-	futures::stream::FuturesUnordered,
 	libsetback::*,
+	reqwest::Client,
 	std::{
 		collections::HashMap,
 		sync::{Arc, RwLock}
 	},
-	reqwest::Client
+	tokio::{
+		runtime::Runtime,
+		sync::mpsc::{UnboundedReceiver, UnboundedSender}
+	}
 };
 
 #[derive(Resource)]
@@ -30,5 +32,18 @@ pub struct CursorAtlas {
     pub current_frame: usize
 }
 
-#[derive(Resource, Default)]
-pub struct TaskSchedule(pub FuturesUnordered<Task<CommandQueue>>);
+#[derive(Resource)]
+pub struct TokioRuntime {
+	pub rt: Runtime,
+	pub tx: UnboundedSender<CommandQueue>
+}
+
+#[derive(Resource)]
+pub struct TaskReceiver(pub UnboundedReceiver<CommandQueue>);
+
+#[derive(Resource)]
+pub enum ClientUpdate {
+	UpToDate,
+	UpdateAvailable,
+	UpdateRequired
+}
