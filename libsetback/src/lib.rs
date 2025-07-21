@@ -18,3 +18,6 @@ pub use {
 	game::*,
 	setup_data::*
 };
+
+#[cfg(test)]
+pub use unit_tests::testing::*;

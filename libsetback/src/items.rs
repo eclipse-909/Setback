@@ -8,8 +8,15 @@ use {
 	crate::{
 		constants::*,
 		setup_data::*,
-		game::*
+		game::*,
+		ssp::*
 	},
+	rand::{
+		prelude::ThreadRng,
+		rng,
+		Rng
+	},
+	reqwest::StatusCode,
 	tokio::{
 		sync::{
 			watch,
@@ -17,12 +24,7 @@ use {
 		},
 		task::JoinHandle
 	},
-	tokio_util::sync::CancellationToken,
-	rand::{
-		prelude::ThreadRng,
-		rng,
-		Rng
-	}
+	tokio_util::sync::CancellationToken
 };
 
 #[derive(Encode, Decode, Clone, Copy, PartialEq, Debug)]
@@ -157,16 +159,23 @@ pub struct PublicGame {
 	pub setup_data: SetupData
 }
 
+//TODO
+// clean up unused errors
+// rename poorly-named errors
+// add http status errors that can be returned from the api
 #[repr(u8)]
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, Clone, Copy)]
 pub enum Error {
-	Indeterminate,
-	Authentication,
-	Authorization,
-	NetworkIO,
+	BadRequest,
+	Unauthorized,
+	Forbidden,
+	NotFound,
+	TimedOut,
 	ServerError,
-	IncompatibleVersion,
-	InvalidProtocol,
+	IoError,
+	Indeterminate,
+	BadVersion(Version),
+	UnexpectedProtocol,
 	GamesAtCapacity,
 	GameAtCapacity,
 	GameNotFound,
@@ -176,34 +185,56 @@ pub enum Error {
 	OutOfTurn
 }
 
+impl std::error::Error for Error {}
 impl Display for Error {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {write!(f, "{}", match self {
-		Error::Indeterminate => "Unexpected error - cause unknown",
-		Error::Authentication => "Invalid username or password",
-		Error::Authorization => "You do not have permission to perform this action",
-		Error::NetworkIO => "Network error - try again later",
-		Error::ServerError => "Server error - try again later",
-		Error::IncompatibleVersion => "Incompatible version - please update the game",
-		Error::InvalidProtocol => "Invalid protocol",
-		Error::GamesAtCapacity => "Server is at capacity - please try to create a game later",
-		Error::GameAtCapacity => "Game has maximum number of players - cannot join",
-		Error::GameNotFound => "Game not found - the game code may be incorrect or the game may have ended",
-		Error::ClientNotFound => "Client not found",
-		Error::InvalidBid => "Invalid bid",
-		Error::InvalidCard => "Invalid card - play a legal card",
-		Error::OutOfTurn => "It is not your turn"
-	})}
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let str;
+		write!(f, "{}", match self {
+			Error::BadRequest => "Bad request",
+			Error::Unauthorized => "Invalid username or password",
+			Error::Forbidden => "You do not have permission to perform this action",
+			Error::NotFound => "Could not find resource",
+			Error::TimedOut => "Request timed out",
+			Error::ServerError => "Internal server error",
+			Error::IoError => "I/O error",
+			Error::Indeterminate => "Unexpected error - cause unknown",
+			Error::BadVersion(version) => {
+				str = format!("Incompatible version - latest version: {version} - please update the game");
+				str.as_str()
+			},
+			Error::UnexpectedProtocol => "Unexpected protocol",
+			Error::GamesAtCapacity => "Cannot create game - server is at capacity - try again later",
+			Error::GameAtCapacity => "Cannot join - game has maximum number of players",
+			Error::GameNotFound => "Game not found - code is incorrect or game is not accepting players",
+			Error::ClientNotFound => "Client not found",
+			Error::InvalidBid => "Illegal bid",
+			Error::InvalidCard => "Illegal card",
+			Error::OutOfTurn => "It is not your turn"
+		})
+	}
 }
 
-impl std::error::Error for Error {}
+impl From<StatusCode> for Error {
+	fn from(value: StatusCode) -> Self {
+		match value.as_u16() {
+			400 => Error::BadRequest,
+			401 => Error::Unauthorized,
+			403 => Error::Forbidden,
+			404 => Error::NotFound,
+			408 => Error::TimedOut,
+			500 => Error::ServerError,
+			_ => Error::Indeterminate
+		}
+	}
+}
 
 ///Spawns an async tasks that terminates if the terminator receives a message
-pub fn spawn_async<F>(terminator: watch::Receiver<()>, future: F) -> JoinHandle<()> where F: Future + Send + 'static, F::Output: Send + 'static {
-	tokio::spawn(async move {spawn_sync(terminator, future).await;})
+pub async fn fire_and_forget<F>(terminator: watch::Receiver<()>, future: F) -> JoinHandle<()> where F: Future + Send + 'static, F::Output: Send + 'static {
+	tokio::spawn(spawn_async(terminator, future))
 }
 
-///If awaited, runs a synchronous task that terminates if the terminator receives a message
-pub async fn spawn_sync<F>(mut terminator: watch::Receiver<()>, future: F) where F: Future + Send + 'static, F::Output: Send + 'static {
+///Spawns an async tasks that terminates if the terminator receives a message
+pub async fn spawn_async<F>(mut terminator: watch::Receiver<()>, future: F) where F: Future + Send + 'static, F::Output: Send + 'static {
 	tokio::select! {
         _ = future => {},
         _ = terminator.changed() => {}

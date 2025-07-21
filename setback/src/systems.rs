@@ -3,6 +3,7 @@ use {
 		resources::*,
 		constants::*
 	},
+	libsetback::Version,
 	std::time::Duration,
 	bevy::{
 		prelude::*,
@@ -44,3 +45,12 @@ pub fn custom_cursor_anim(
 	}))
 }
 
+pub fn compare_version(current: Version, latest: Version) -> ClientUpdate {
+	if current == latest {
+		ClientUpdate::UpToDate
+	} else if current.0 == latest.0 && current.1 == latest.1 {
+		ClientUpdate::UpdateAvailable
+	} else {
+		ClientUpdate::UpdateRequired
+	}
+}

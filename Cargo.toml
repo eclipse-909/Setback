@@ -4,7 +4,8 @@ members = [
 	"libsetback",
 	"setback",
 	"setback_server",
-	"setback_website"
+	"setback_website",
+	"setbackd"
 ]
 resolver = "3"
 
@@ -77,14 +78,14 @@ image = "0.25.6"
 jsonwebtoken = "9.3.1"
 keyring = { version = "3.6.2", features = ["linux-native-async-persistent", "windows-native", "crypto-rust", "vendored", "tokio"] }
 lazy_static = "1.5.0"
-libsetback = { path = "./libsetback", default-features = false }
+libsetback = { path = "./libsetback" }
 log = { version = "0.4.27", features = ["max_level_debug", "release_max_level_warn"] }
 open = "5.3.2"
-rand = "0.9.1"
+rand = "0.9.2"
 reqwest = { version = "0.12.22", features = ["cookies", "json"] }
 rpassword = "7.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.140"
+serde_json = "1.0.141"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-native-tls", "postgres", "sqlite", "chrono"] }
 tokio = { version = "1.46.1", features = ["full"] }
 tokio-util = "0.7.15"
