@@ -7,16 +7,19 @@ use {
 	reqwest::Client,
 	std::{
 		collections::HashMap,
-		sync::{Arc, RwLock}
+		sync::Arc
 	},
 	tokio::{
 		runtime::Runtime,
-		sync::mpsc::{UnboundedReceiver, UnboundedSender}
+		sync::{
+			mpsc::{UnboundedReceiver, UnboundedSender},
+			Mutex
+		}
 	}
 };
 
 #[derive(Resource)]
-pub struct ServerConn(pub Arc<RwLock<ServerConnection>>);
+pub struct ServerConn(pub Arc<Mutex<ServerConnection>>);
 
 #[derive(Resource)]
 pub struct WebsiteConn(pub Client);

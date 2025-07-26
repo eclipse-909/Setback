@@ -163,7 +163,7 @@ fn animate_cursor(
 ) {
 	let mut cursor_icon = cursor_icon
 	    .single_mut()
-	    .expect(CURSOR_ERROR);
+	    .expect(SINGLE_COMPONENT_QUERY_ERROR);
 	let CursorIcon::Custom(CustomCursor::Image(ref mut image)) = *cursor_icon else {
 		if cfg!(debug_assertions) {
 			// egui inspector sets the cursor to a system cursor

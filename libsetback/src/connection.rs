@@ -49,8 +49,8 @@ pub trait SetbackConnection: Connection + Sized {
 	///- Reconnects to server on client port.
 	///- Listens for messages from server in background task and sends them via mpsc channel.
 	fn new(username: String, password: String, api: &impl WebsiteConnection) -> impl Future<Output=Result<Self, Error>>;
-	fn send_create_game(&mut self, public: bool) -> impl Future<Output=Result<(), Error>>;
-	fn send_join_game(&mut self, code: u32) -> impl Future<Output=Result<(), Error>>;
+	fn send_create_game(&mut self, password: Option<String>) -> impl Future<Output=Result<(), Error>>;
+	fn send_join_game(&mut self, code: u32, password: Option<String>) -> impl Future<Output=Result<(), Error>>;
 	fn send_search_games(&mut self, filter: GameFilter) -> impl Future<Output=Result<(), Error>>;
 	///Host-only
 	fn send_game_meta(&mut self, setup_data: SetupData) -> impl Future<Output=Result<(), Error>>;
@@ -135,12 +135,12 @@ impl SetbackConnection for ServerConnection {
 		Ok(server_connection)
 	}
 	
-	async fn send_create_game(&mut self, public: bool) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::CreateGame{public}, self.account_id)).await
+	async fn send_create_game(&mut self, password: Option<String>) -> Result<(), Error> {
+		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::CreateGame{password}, self.account_id)).await
 	}
 	
-	async fn send_join_game(&mut self, code: u32) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::JoinGame{code}, self.account_id)).await
+	async fn send_join_game(&mut self, code: u32, password: Option<String>) -> Result<(), Error> {
+		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::JoinGame{code, password}, self.account_id)).await
 	}
 	
 	async fn send_search_games(&mut self, filter: GameFilter) -> Result<(), Error> {

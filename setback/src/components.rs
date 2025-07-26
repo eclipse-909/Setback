@@ -19,3 +19,15 @@ pub struct CursorComponent {
 
 #[derive(Component)]
 pub struct Url(pub String);
+
+#[derive(Component)]
+pub struct UsernameInput;
+
+#[derive(Component)]
+pub struct PasswordInput;
+
+#[derive(Component)]
+pub struct GameCodeInput;
+
+#[derive(Component)]
+pub struct GamePasswordInput;

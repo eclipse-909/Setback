@@ -33,11 +33,11 @@ pub mod testing {
 			todo!()
 		}
 		
-		async fn send_create_game(&mut self, public: bool) -> Result<(), Error> {
+		async fn send_create_game(&mut self, password: Option<String>) -> Result<(), Error> {
 			todo!()
 		}
 		
-		async fn send_join_game(&mut self, code: u32) -> Result<(), Error> {
+		async fn send_join_game(&mut self, code: u32, password: Option<String>) -> Result<(), Error> {
 			todo!()
 		}
 		

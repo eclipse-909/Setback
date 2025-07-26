@@ -255,6 +255,7 @@ jobs:
           chmod +x SetbackServer/*
           cp -r setback_website/client SetbackServer/
           cp setback_website/.env.release SetbackServer/
+          cp setbackd/setback.service SetbackServer/
           tar -czf SetbackServer.tar.gz SetbackServer/
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
