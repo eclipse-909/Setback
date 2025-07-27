@@ -20,6 +20,7 @@ pub static GEORGIA: &str = "fonts/georgia.ttf";
 pub static GEORGIA_BOLD: &str = "fonts/georgiab.ttf";
 pub static GEORGIA_ITALIC: &str = "fonts/georgiai.ttf";
 pub static TIMES_NEW_ROMAN: &str = "fonts/times.ttf";
+pub static LOADING: &str = "images/loading.gif";
 
 /// Singleton for [Pallet] struct
 pub static PALLET: Pallet = Pallet {

@@ -1,6 +1,6 @@
 use {
 	crate::plugins::*,
-	bevy::prelude::{Component, World, Image, Handle}
+	bevy::prelude::{Component, World}
 };
 
 /// The UI for each scene is built on an entity with a RootNode component.

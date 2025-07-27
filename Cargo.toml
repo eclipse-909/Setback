@@ -64,6 +64,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
 	"bevy_debug_stepping",
 	"bevy_image",
 	"bevy_ui_debug",
+	"gif",
 	"wayland"
 ] }
 bevy_framepace = "0.19.1"

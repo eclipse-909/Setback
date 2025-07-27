@@ -22,6 +22,9 @@ use {
 pub struct ServerConn(pub Arc<Mutex<ServerConnection>>);
 
 #[derive(Resource)]
+pub struct ServerMessage(pub UnboundedReceiver<Result<Ssp, Error>>);
+
+#[derive(Resource)]
 pub struct WebsiteConn(pub Client);
 
 #[derive(Resource, Default)]

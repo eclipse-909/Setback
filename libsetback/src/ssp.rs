@@ -103,7 +103,7 @@ pub enum Protocol {
 	///Client <--Game--- Server<br>
 	///Request only<br><br>
 	///Client requests to join game. A password indicates a private game.
-	JoinGame{code: u32, password: Option<String>},
+	JoinGame{code: String, password: Option<String>},
 	///Client ---CreateGame--> Server<br>
 	///Client <--Game--- Server<br>
 	///Response only<br><br>

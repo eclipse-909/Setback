@@ -197,7 +197,8 @@ impl Plugin for TokioPlugin {
 				tx
 			})
 			.insert_resource(TaskReceiver(rx))
-			.add_systems(Update, execute_command_queue);
+			.add_systems(Update, execute_command_queue)
+			.add_systems(Update, read_server_messages);
 	}
 }
 
@@ -207,6 +208,25 @@ fn execute_command_queue(mut commands: Commands, mut rx: ResMut<TaskReceiver>) {
 			Ok(mut command_queue) => commands.append(&mut command_queue),
 			Err(TryRecvError::Empty) => return,
 			Err(TryRecvError::Disconnected) => panic!("Tokio task channel closed")
+		}
+	}
+}
+
+fn read_server_messages(
+	mut commands: Commands,
+	ssp_rx: Option<ResMut<ServerMessage>>
+) {
+	let Some(mut ssp_rx) = ssp_rx else {return};
+	loop {
+		match ssp_rx.0.try_recv() {
+			Ok(Ok(ssp)) => {
+				todo!("handle server message")
+			}
+			Ok(Err(err)) => {
+				todo!("handle error")
+			}
+			Err(TryRecvError::Empty) => return,
+			Err(TryRecvError::Disconnected) => commands.remove_resource::<ServerMessage>()
 		}
 	}
 }
