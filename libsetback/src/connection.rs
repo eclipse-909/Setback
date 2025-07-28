@@ -25,15 +25,15 @@ pub trait Connection {
 		writer
 			.write_u32_le(bytes.len() as u32)
 			.await
-			.map_err(|_| Error::IoError)?;
+			.map_err(|_| Error::NetworkError)?;
 		writer
 			.write_all(bytes.as_slice())
 			.await
-			.map_err(|_| Error::IoError)?;
+			.map_err(|_| Error::NetworkError)?;
 		writer
 			.flush()
 			.await
-			.map_err(|_| Error::IoError)
+			.map_err(|_| Error::NetworkError)
 	}}
 	
 	fn read(reader: &mut BufReader<impl AsyncReadExt + Unpin>, buffer: &mut Vec<u8>) -> impl Future<Output=Result<Ssp, Error>> {async move {
@@ -188,7 +188,7 @@ impl SetbackConnection for ServerConnection {
 			.json(&RefreshRequest {refresh_token: self.refresh_token.clone()})
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?
 			.json::<RefreshResponse>()
@@ -311,7 +311,7 @@ impl WebsiteConnection for Client {
 			.json(credentials)
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?
 			.json::<LoginResponse>()
@@ -325,7 +325,7 @@ impl WebsiteConnection for Client {
 			.bearer_auth(auth_token)
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?;
 		Ok(())
@@ -337,7 +337,7 @@ impl WebsiteConnection for Client {
 			.bearer_auth(auth_token)
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?
 			.json::<IdResponse>()
@@ -352,7 +352,7 @@ impl WebsiteConnection for Client {
 			.get(website!(URL_API_UPDATE))
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?
 			.json::<Version>()

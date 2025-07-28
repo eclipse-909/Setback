@@ -20,14 +20,15 @@ use {
 			query::QuerySingleError
 		}
 	},
-	bevy_ui_text_input::{TextInputMode, TextInputNode, TextInputPrompt, TextInputFilter},
+	bevy_ui_text_input::{TextInputMode, TextInputNode, TextInputPrompt, TextInputFilter, TextInputBuffer},
 	libsetback::*,
 	keyring::Entry,
 	reqwest::Client,
 	tokio::sync::{
 		mpsc::UnboundedSender,
 		Mutex
-	}
+	},
+	regex::Regex
 };
 
 pub struct MainMenuPlugin;
@@ -58,7 +59,10 @@ fn check_for_update(runtime: Res<TokioRuntime>, api: Res<WebsiteConn>) {
 				// If there isn't a root node, it means the api call returned before the scene loaded.
 				// This should be incredibly unlikely, so I'm gonna handle this by not displaying the popup.
 				// The popup will instead be displayed if the user clicks multiplayer.
-				Err(QuerySingleError::NoEntities(_)) => return,
+				Err(QuerySingleError::NoEntities(_)) => {
+					warn!("Button container does not exist yet");
+					return;
+				}
 				Err(QuerySingleError::MultipleEntities(_)) => panic!("{}", SINGLE_COMPONENT_QUERY_ERROR),
 			};
 			let asset_server = world.resource::<AssetServer>();
@@ -74,7 +78,7 @@ fn check_for_update(runtime: Res<TokioRuntime>, api: Res<WebsiteConn>) {
 
 //TODO figure out how to do color gradients, letter-spacing, and CSS ::before
 fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>) {
-	info!("Building Main Menu UI");
+	info!("Entering Main Menu");
 	let font: Handle<Font> = asset_server.load(GEORGIA);
 	let font_bold: Handle<Font> = asset_server.load(GEORGIA_BOLD);
 	let times: Handle<Font> = asset_server.load(TIMES_NEW_ROMAN);
@@ -208,7 +212,6 @@ fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>) {
 						justify_content: JustifyContent::Center,
 						margin: UiRect::bottom(Val::Px(20.)),
 						position_type: PositionType::Relative,
-						overflow: Overflow::visible(),
 						..default()
 					},
 					BackgroundColor(PALLET.light_gold),
@@ -328,7 +331,6 @@ fn new_primary_button(label: &str, font_bold: Handle<Font>, cursor: Handle<Image
 	Node {
 		padding: UiRect::axes(Val::Px(16.), Val::Px(20.)),
 		position_type: PositionType::Relative,
-		overflow: Overflow::hidden(),
 		justify_content: JustifyContent::Center,
 		..default()
 	},
@@ -356,7 +358,6 @@ fn new_group_button(label: &str, font_bold: Handle<Font>, cursor: Handle<Image>)
 	Node {
 		padding: UiRect::axes(Val::Px(14.), Val::Px(12.)),
 		position_type: PositionType::Relative,
-		overflow: Overflow::hidden(),
 		flex_grow: 1.,
 		justify_content: JustifyContent::Center,
 		..default()
@@ -372,7 +373,7 @@ fn new_group_button(label: &str, font_bold: Handle<Font>, cursor: Handle<Image>)
 	// transition: all 0.3s ease;
 )}
 
-fn new_input(prompt: &str, font: Handle<Font>, marker: impl Component, action: Option<fn(&mut World)>) -> impl Bundle {(
+fn new_input(prompt: &str, font: Handle<Font>, marker: impl Component, filter: Option<&'static Regex>, action: Option<fn(&mut World)>) -> impl Bundle {(
 	Node {
 		width: Val::Percent(100.),
 		height: Val::Percent(100.),
@@ -395,7 +396,7 @@ fn new_input(prompt: &str, font: Handle<Font>, marker: impl Component, action: O
 		TextInputNode {
 			clear_on_submit: false,
             mode: TextInputMode::SingleLine,
-			filter: Some(TextInputFilter::Hex),
+			filter: filter.map::<Box<dyn TextInputFilter>, _>(|regex|Box::new(|text|regex.is_match(text))),
             max_chars: Some(6),
             ..default()
         },
@@ -408,18 +409,16 @@ fn new_input(prompt: &str, font: Handle<Font>, marker: impl Component, action: O
 	)],
 )}
 
-fn new_text(label: &str, font: Handle<Font>, visible: bool) -> impl Bundle {(
+fn new_text(label: &str, font: Handle<Font>) -> impl Bundle {(
 	Node {
-		padding: UiRect::axes(Val::Px(16.), Val::Px(20.)),
+		padding: UiRect::axes(Val::Px(16.), Val::Px(4.)),
 		position_type: PositionType::Relative,
-		overflow: Overflow::hidden(),
 		justify_content: JustifyContent::Center,
-		display: if visible {Display::default()} else {Display::None},
 		..default()
 	},
 	children![(
 		Text::new(label),
-		TextColor(PALLET.dark_brown),
+		TextColor(PALLET.cream),
 		TextFont::from_font(font).with_font_size(18.),
 		TextLayout::new_with_justify(JustifyText::Center)
 	)]
@@ -441,7 +440,6 @@ fn display_main_buttons(
 			.spawn(new_primary_button("SINGLEPLAYER", font_bold.clone(), cursor.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>, mut next_conn_type: ResMut<NextState<ConnectionType>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
-				info!("Set scene to Setup");
 				next_scene.set(UiScene::Setup);
 				next_conn_type.set(ConnectionType::Singleplayer);
 			});
@@ -464,7 +462,6 @@ fn display_main_buttons(
 				.spawn(new_group_button("SETTINGS", font_bold.clone(), cursor.clone()))
 				.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 					if !matches!(trigger.button, PointerButton::Primary) {return}
-					info!("Set scene to Settings");
 					next_scene.set(UiScene::Settings);
 				});
 			//exit
@@ -491,29 +488,35 @@ fn display_multiplayer_options(mut button_container: EntityCommands, font_bold: 
 				btn_container.despawn_related::<Children>();
 				btn_container.with_children(|commands| {
 					commands
-						.spawn(new_input("Enter game password...", asset_server.load(GEORGIA), GamePasswordInput, Some(|world: &mut World| {
-							let btn_container_entity = world
-								.query_filtered::<Entity, With<ButtonContainer>>()
-								.single(world)
-								.expect(SINGLE_COMPONENT_QUERY_ERROR);
-							let mut password = world.query_filtered::<&Text, With<GamePasswordInput>>();
-							let password = password.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).0.clone();
-							let TokioRuntime {rt, tx} = world.resource::<TokioRuntime>();
-							let rt = rt.handle().clone();
-							let tx = tx.clone();
-							let server = world.resource::<ServerConn>().0.clone();
-							let loading = world.resource::<AssetServer>().load(LOADING);
-							let mut commands = world.commands();
-							let container = commands.entity(btn_container_entity);
-							create_game(container, rt, tx, server, Some(password), loading);
-						})));
+						.spawn(new_input(
+							"Enter game password...",
+							asset_server.load(GEORGIA),
+							GamePasswordInput,
+							Some(&*GAME_CODE_REGEX),
+							Some(|world: &mut World| {
+								let btn_container_entity = world
+									.query_filtered::<Entity, With<ButtonContainer>>()
+									.single(world)
+									.expect(SINGLE_COMPONENT_QUERY_ERROR);
+								let mut password = world.query_filtered::<&TextInputBuffer, With<GamePasswordInput>>();
+								let password = password.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).get_text();
+								let TokioRuntime {rt, tx} = world.resource::<TokioRuntime>();
+								let rt = rt.handle().clone();
+								let tx = tx.clone();
+								let server = world.resource::<ServerConn>().0.clone();
+								let loading = world.resource::<AssetServer>().load(LOADING);
+								let mut commands = world.commands();
+								let container = commands.entity(btn_container_entity);
+								create_game(container, rt, tx, server, Some(password), loading);
+							}
+						)));
 					commands
 						.spawn(new_primary_button("CREATE GAME", font_bold_clone.clone(), cursor_clone.clone()))
 						.observe(|
 							trigger: Trigger<Pointer<Click>>,
 							server: Res<ServerConn>,
 							runtime: Res<TokioRuntime>,
-							password: Query<&Text, With<GamePasswordInput>>,
+							password: Query<&TextInputBuffer, With<GamePasswordInput>>,
 							btn_container_entity: Query<Entity, With<ButtonContainer>>,
 							asset_server: Res<AssetServer>,
 							mut commands: Commands
@@ -524,7 +527,7 @@ fn display_multiplayer_options(mut button_container: EntityCommands, font_bold: 
 								runtime.rt.handle().clone(),
 								runtime.tx.clone(),
 								server.0.clone(),
-								Some(password.single().expect(SINGLE_COMPONENT_QUERY_ERROR).0.clone()),
+								Some(password.single().expect(SINGLE_COMPONENT_QUERY_ERROR).get_text()),
 								asset_server.load(LOADING)
 							);
 						});
@@ -568,7 +571,6 @@ fn display_multiplayer_options(mut button_container: EntityCommands, font_bold: 
 			.spawn(new_primary_button("BROWSE PUBLIC GAMES", font_bold.clone(), cursor.clone()))
 			.observe(|trigger: Trigger<Pointer<Click>>, mut next_scene: ResMut<NextState<UiScene>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
-				info!("Set scene to Multiplayer");
 				next_scene.set(UiScene::Multiplayer);
 			});
 		commands
@@ -579,28 +581,30 @@ fn display_multiplayer_options(mut button_container: EntityCommands, font_bold: 
 
 fn display_join_options(mut commands: Commands, button_container: Entity, asset_server: Res<AssetServer>, failed: bool) {
 	static FAILED_MSG: &str = "Could not find game with matching code";
-	if failed {info!(FAILED_MSG);}
+	if failed {warn!(FAILED_MSG);}
 	let font = asset_server.load(GEORGIA);
 	let font_bold = asset_server.load(GEORGIA_BOLD);
 	let cursor = asset_server.load(BJ_NORMAL_SELECT);
 	let mut button_container = commands.entity(button_container);
 	button_container.despawn_related::<Children>();
 	button_container.with_children(|commands| {
+		if failed {
+			commands
+				.spawn(new_text(FAILED_MSG, font.clone()));
+		}
 		commands
-			.spawn(new_text(FAILED_MSG, font.clone(), failed));
+			.spawn(new_input("Enter game code...", font.clone(), GameCodeInput, Some(&*GAME_CODE_REGEX), None));
 		commands
-			.spawn(new_input("Enter game code...", font.clone(), GameCodeInput, None));
-		commands
-			.spawn(new_input("Enter game password...", font, GamePasswordInput, Some(|world: &mut World| {
-				let mut game_code = world.query_filtered::<&Text, With<GameCodeInput>>();
-				let mut password = world.query_filtered::<&Text, With<GamePasswordInput>>();
+			.spawn(new_input("Enter game password...", font, GamePasswordInput, None, Some(|world: &mut World| {
+				let mut game_code = world.query_filtered::<&TextInputBuffer, With<GameCodeInput>>();
+				let mut password = world.query_filtered::<&TextInputBuffer, With<GamePasswordInput>>();
 				let server = world.resource::<ServerConn>().0.clone();
 				let btn_container_entity = world
 					.query_filtered::<Entity, With<ButtonContainer>>()
 					.single(world)
 					.expect(SINGLE_COMPONENT_QUERY_ERROR);
-				let game_code = game_code.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).0.clone();
-				let password = password.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).0.clone();
+				let game_code = game_code.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).get_text();
+				let password = password.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).get_text();
 				let TokioRuntime {rt, tx} = world.resource::<TokioRuntime>();
 				let handle = rt.handle().clone();
 				let tx = tx.clone();
@@ -646,18 +650,18 @@ fn display_login_prompt(
 	cursor: Handle<Image>,
 	error: Option<Error>
 ) {
-	if let Some(err) = error {
-		error!("{err}");
-	}
 	let mut button_container = commands.entity(button_container);
 	button_container.despawn_related::<Children>();
 	button_container.with_children(|commands| {
+		if let Some(err) = error {
+			error!("{err}");
+			commands
+				.spawn(new_text(format!("{err}").as_str(), font.clone()));
+		}
 		commands
-			.spawn(new_text(format!("{}", error.unwrap_or(Error::Indeterminate)).as_str(), font.clone(), error.is_some()));
+			.spawn(new_input("Username...", font.clone(), UsernameInput, None, None));
 		commands
-			.spawn(new_input("Username...", font.clone(), UsernameInput, None));
-		commands
-			.spawn(new_input("Password...", font.clone(), PasswordInput, Some(|world: &mut World| {
+			.spawn(new_input("Password...", font.clone(), PasswordInput, None, Some(|world: &mut World| {
 				let asset_server = world.resource::<AssetServer>();
 				let font = asset_server.load(GEORGIA);
 				let font_bold = asset_server.load(GEORGIA_BOLD);
@@ -668,10 +672,10 @@ fn display_login_prompt(
 					.single(world)
 					.expect(SINGLE_COMPONENT_QUERY_ERROR);
 				let api = world.resource::<WebsiteConn>().0.clone();
-				let mut username = world.query_filtered::<&Text, With<UsernameInput>>();
-				let username = username.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).0.clone();
-				let mut password = world.query_filtered::<&Text, With<UsernameInput>>();
-				let password = password.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).0.clone();
+				let mut username = world.query_filtered::<&TextInputBuffer, With<UsernameInput>>();
+				let username = username.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).get_text();
+				let mut password = world.query_filtered::<&TextInputBuffer, With<PasswordInput>>();
+				let password = password.single(world).expect(SINGLE_COMPONENT_QUERY_ERROR).get_text();
 				let TokioRuntime {rt, tx} = world.resource::<TokioRuntime>();
 				let rt = &rt.handle().clone();
 				let tx = tx.clone();
@@ -690,50 +694,51 @@ fn display_login_prompt(
 				mut commands: Commands,
 				api: Res<WebsiteConn>,
 				runtime: Res<TokioRuntime>,
-				username: Query<&Text, With<UsernameInput>>,
-				password: Query<&Text, With<PasswordInput>>,
+				username: Query<&TextInputBuffer, With<UsernameInput>>,
+				password: Query<&TextInputBuffer, With<PasswordInput>>,
 				asset_server: Res<AssetServer>
 			| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
-				display_loading_animation(commands.entity(button_container.single().expect(SINGLE_COMPONENT_QUERY_ERROR)), asset_server.load(LOADING));
-				let username = username.single().expect(SINGLE_COMPONENT_QUERY_ERROR).0.clone();
-				let password = password.single().expect(SINGLE_COMPONENT_QUERY_ERROR).0.clone();
+				let username = username.single().expect(SINGLE_COMPONENT_QUERY_ERROR).get_text();
+				let password = password.single().expect(SINGLE_COMPONENT_QUERY_ERROR).get_text();
 				let api = api.0.clone();
 				let tx = runtime.tx.clone();
 				let font = asset_server.load(GEORGIA);
 				let font_bold = asset_server.load(GEORGIA_BOLD);
 				let cursor = asset_server.load(BJ_NORMAL_SELECT);
+				display_loading_animation(commands.entity(button_container.single().expect(SINGLE_COMPONENT_QUERY_ERROR)), asset_server.load(LOADING));
 				runtime.rt.spawn(async move {
 					login_and_connect(LoginRequest {username, password}, &api, tx, font, font_bold, cursor).await;
 				});
 			});
 		commands
-			.spawn(new_text("Don't have an account? Create one!", font.clone(), true));
+			.spawn(new_text("Don't have an account? Create one!", font.clone()));
 		commands
 			.spawn((
 				Button,
-				Url(website!(URL_ACCOUNT)),
+				CursorComponent {
+					default: CursorStyle::Icon(cursor.clone()),
+					pointer: CursorStyle::Animation(BJ_HELP_SELECT_PAGE)
+				},
 				Node {
 					padding: UiRect::axes(Val::Px(16.), Val::Px(20.)),//TODO mess with layout
 					position_type: PositionType::Relative,
-					overflow: Overflow::hidden(),
 					justify_content: JustifyContent::Center,
 					..default()
 				},
 				children![(
-					Text::new(website!(URL_ACCOUNT)),
+					Text::new(website!(URL_SIGNUP)),
+					Url,
 					TextColor(PALLET.url),
 					TextFont::from_font(font).with_font_size(18.),
 					TextLayout::new_with_justify(JustifyText::Center)
 				)]
 			))
-			.observe(|trigger: Trigger<Pointer<Click>>, url: Query<&Url>| {
+			.observe(|trigger: Trigger<Pointer<Click>>, url: Query<&Text, With<Url>>| {
 				if !matches!(trigger.button, PointerButton::Primary) {return}
 				let Ok(url) = url.get(trigger.target) else {return};
-				if open::that_detached(url.0.as_str()).is_ok() {
-					info!("Opened /account in browser");
-				} else {
-					error!("Failed to open /account in browser");
+				if open::that_detached(url.0.as_str()).is_err() {
+					error!("Failed to open {} in browser", URL_SIGNUP);
 				}
 			});
 		commands
@@ -782,12 +787,13 @@ fn display_multiplayer_observer(
 			display_multiplayer_options(container, font_bold, cursor);
 		}
 		None => {
-			info!("Not connected to server; attempting to connect to server");
+			info!("Not connected to server; attempting to connect");
 			let Some(cred) = get_credentials() else {
 				info!("Prompting for credentials");
 				display_login_prompt(commands, container_entity, font, font_bold, cursor, None);
 				return;
 			};
+			info!("Fetched credentials from keyring");
 			display_loading_animation(container, loading);
 			let tx = runtime.tx.clone();
 			runtime.rt.spawn(async move {
@@ -823,17 +829,18 @@ fn create_game(
 ) {
 	display_loading_animation(button_container, loading);
 	rt.spawn(async move {
-		info!("Creating game");
 		let create_game_res = server.lock().await.send_create_game(password).await;
 		let mut command_queue = CommandQueue::default();
 		command_queue.push(move |world: &mut World| {
 			match create_game_res {
 				Ok(()) => {
+					info!("Creating game");
 					world.resource_mut::<NextState<ConnectionType>>().set(ConnectionType::Host);
 					world.resource_mut::<NextState<UiScene>>().set(UiScene::Setup);
 					//The server will send data about the game, which will be used to render the settings and players and stuff
 				}
 				Err(err) => {
+					error!("Error creating game: {}", err);
 					let asset_server = world.resource::<AssetServer>();
 					let font = asset_server.load(GEORGIA);
 					let font_bold = asset_server.load(GEORGIA_BOLD);
@@ -864,14 +871,18 @@ fn display_update_game(
 	cursor: Handle<Image>
 ) {
 	let message = match compare_version(SETBACK_VERSION, latest_version) {
-		ClientUpdate::UpToDate => return,
+		ClientUpdate::UpToDate => {
+			info!("Game is up to date");
+			return
+		}
 		ClientUpdate::UpdateAvailable => "Update Available",
 		ClientUpdate::UpdateRequired => "Update Required For Multiplayer"
 	};
+	info!(message);
 	btn_container.despawn_related::<Children>();
 	btn_container.with_children(move |commands| {
 		commands
-			.spawn(new_text(message, font, true));
+			.spawn(new_text(message, font));
 		//button group
 		commands.spawn(
 			Node {
@@ -891,6 +902,7 @@ fn display_update_game(
 				.spawn(new_group_button("UPDATE", font_bold, cursor))
 				.observe(|trigger: Trigger<Pointer<Click>>| {
 					if !matches!(trigger.button, PointerButton::Primary) {return}
+					info!("Updating game");
 					todo!("update and restart game")
 				});
 		});
@@ -907,7 +919,6 @@ fn display_loading_animation(
 			Node {
 				padding: UiRect::axes(Val::Px(16.), Val::Px(20.)),
 				position_type: PositionType::Relative,
-				overflow: Overflow::hidden(),
 				justify_content: JustifyContent::Center,
 				..default()
 			},
@@ -941,7 +952,7 @@ fn get_credentials() -> Option<LoginRequest> {
 			Some(LoginRequest {username, password})
 		}
 		Err(err) => {
-			error!("Error getting password from keyring: {}", err);
+			warn!("Error getting password from keyring: {}", err);
 			None
 		}
 	}
@@ -975,18 +986,19 @@ fn join_game(
 ) {
 	display_loading_animation(container, loading);
 	rt.spawn(async move {
-		info!("Attempting to join game");
 		let join_res = server.lock().await.send_join_game(game_code, password).await;
 		let mut command_queue = CommandQueue::default();
 		
 		command_queue.push(move |world: &mut World| {
 			match join_res {
 				Ok(()) => {
+					info!("Joining game");
 					world.resource_mut::<NextState<ConnectionType>>().set(ConnectionType::Client);
 					world.resource_mut::<NextState<UiScene>>().set(UiScene::Setup);
 					//The server will send data about the game, which will be used to render the settings and players and stuff
 				}
 				Err(err) => {
+					error!("Error joining game: {}", err);
 					let asset_server = world.resource::<AssetServer>();
 					let font = asset_server.load(GEORGIA);
 					let font_bold = asset_server.load(GEORGIA_BOLD);
@@ -1011,7 +1023,6 @@ async fn login_and_connect(
 	font_bold: Handle<Font>,
 	cursor: Handle<Image>
 ) {
-	info!("Attempting to connect to server");
 	let res = ServerConnection::new(cred.username.clone(), cred.password.clone(), website_conn).await;
 	let mut command_queue = CommandQueue::default();
 	
@@ -1022,19 +1033,18 @@ async fn login_and_connect(
 			.single(world)
 			.expect(SINGLE_COMPONENT_QUERY_ERROR);
 		let btn_container = world.query_filtered::<Entity, With<ButtonContainer>>().single(world).expect(SINGLE_COMPONENT_QUERY_ERROR);
-		let mut commands = world.commands();
 		
 		match res {
 			Ok((server_conn, ssp_rx)) => {
 				info!("Successfully connected to server");
-				display_multiplayer_options(commands.entity(btn_container_entity), font_bold, cursor);
 				world.insert_resource(ServerConn(Arc::new(Mutex::new(server_conn))));
 				world.insert_resource(ServerMessage(ssp_rx));
+				display_multiplayer_options(world.commands().entity(btn_container_entity), font_bold, cursor);
 				save_credentials(cred.username.as_str(), cred.password.as_str());
 			}
-			Err(err @ (Error::Unauthorized | Error::Forbidden)) => display_login_prompt(commands, btn_container_entity, font, font_bold, cursor, Some(err)),
-			Err(err @ (Error::ServerError | Error::TimedOut | Error::IoError)) => display_err(commands.entity(btn_container_entity), font, font_bold, cursor, err),
-			Err(Error::BadVersion(latest_version)) => display_update_game(commands.entity(btn_container), latest_version, font, font_bold, cursor),
+			Err(err @ (Error::Unauthorized | Error::Forbidden)) => display_login_prompt(world.commands(), btn_container_entity, font, font_bold, cursor, Some(err)),
+			Err(err @ (Error::ServerError | Error::TimedOut | Error::NetworkError)) => display_err(world.commands().entity(btn_container_entity), font, font_bold, cursor, err),
+			Err(Error::BadVersion(latest_version)) => display_update_game(world.commands().entity(btn_container), latest_version, font, font_bold, cursor),
 			Err(_) => unreachable!("All possible errors should have been covered")
 		}
 	});
@@ -1051,7 +1061,7 @@ fn display_err(
 	container.despawn_related::<Children>();
 	container.with_children(move |commands| {
 		commands
-			.spawn(new_text(format!("{err}").as_str(), font, true));
+			.spawn(new_text(format!("{err}").as_str(), font));
 		commands
 			.spawn(new_group_button("BACK", font_bold, cursor))
 			.observe(display_main_buttons_observer);

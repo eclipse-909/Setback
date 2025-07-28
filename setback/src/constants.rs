@@ -1,6 +1,8 @@
 use {
 	crate::models::*,
-	bevy::prelude::*
+	bevy::prelude::*,
+	regex::Regex,
+	once_cell::sync::Lazy
 };
 
 pub static CARDS_ICON: &[u8] = include_bytes!("../assets/images/cardsIcon.png");
@@ -11,16 +13,17 @@ pub static CRASH_LOG: &str = "setback/logs/crash.log";
 pub static SINGLE_COMPONENT_QUERY_ERROR: &str = "There should be exactly one component returned from the query";
 pub static TASK_ERROR: &str = "Failed to send command queue following task completion";
 pub static KEYRING_PASSWORD: &str = "service-keyring-setback-user-password";
-pub static URL_INDEX: &str = "";
-pub static URL_404: &str = "file_not_found";
-pub static URL_DOWNLOAD: &str = "downloads";
-pub static URL_LOGIN: &str = "login";
-pub static URL_ACCOUNT: &str = "account";
+pub static URL_SIGNUP: &str = "signup";
 pub static GEORGIA: &str = "fonts/georgia.ttf";
 pub static GEORGIA_BOLD: &str = "fonts/georgiab.ttf";
 pub static GEORGIA_ITALIC: &str = "fonts/georgiai.ttf";
 pub static TIMES_NEW_ROMAN: &str = "fonts/times.ttf";
 pub static LOADING: &str = "images/loading.gif";
+pub static GAME_CODE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9]*$").unwrap());
+
+pub fn game_code_matches(text: &str) -> bool {
+	GAME_CODE_REGEX.is_match(text)
+}
 
 /// Singleton for [Pallet] struct
 pub static PALLET: Pallet = Pallet {

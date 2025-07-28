@@ -42,12 +42,14 @@ use {
 fn main() {
 	std::panic::set_hook(Box::new(|panic_info| {
 		let mut file: File = File::create(CRASH_LOG).expect("Could not open crash log file");
+		writeln!(file, "Time: {}", chrono::Local::now()).expect("Could not write to crash log");
 		writeln!(file, "{panic_info}").expect("Could not write to crash log");
 		let backtrace = std::backtrace::Backtrace::capture();
 		writeln!(file, "stack backtrace:\n{backtrace}").expect("Could not write backtrace");
 		writeln!(file, "Process finished with exit code 101").expect("Could not write exit code");
 	}));
 	if cfg!(debug_assertions) {
+		//sets mock keyring for debug builds
 		set_default_credential_builder(default_credential_builder());
 	}
 	//TODO get settings here
@@ -82,7 +84,7 @@ fn main() {
 		.add_plugins(TextInputWrapperPlugin)
 		.add_plugins(CursorIconPlugin)
 		.add_plugins(TokioPlugin)
-		// .add_plugins(DebugPlugin)
+		.add_plugins(DebugPlugin)
 		.insert_resource(WinitSettings::game())
 		.insert_resource(WebsiteConn(Client::new_api()))
 		.add_systems(Startup, startup)
@@ -126,5 +128,11 @@ fn log_layer(_app: &mut App) -> Option<BoxedLayer> {
 		.with_file(true)
 		.with_line_number(true)
 		.with_timer(tracing_subscriber::fmt::time::SystemTime)
+		.with_target(true)
+		.with_level(true)
+		.with_thread_ids(true)
+		.with_thread_names(true)
+		.with_ansi(false)
+		.pretty()
 		.boxed())
 }

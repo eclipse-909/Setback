@@ -33,6 +33,12 @@ GET
 
 Login page
 ```
+- "/signup"
+```
+GET
+
+Signup page
+```
 - "/account"
 ```
 GET

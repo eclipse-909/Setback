@@ -172,7 +172,7 @@ pub enum Error {
 	NotFound,
 	TimedOut,
 	ServerError,
-	IoError,
+	NetworkError,
 	Indeterminate,
 	BadVersion(Version),
 	UnexpectedProtocol,
@@ -196,16 +196,16 @@ impl Display for Error {
 			Error::NotFound => "Could not find resource",
 			Error::TimedOut => "Request timed out",
 			Error::ServerError => "Internal server error",
-			Error::IoError => "I/O error",
+			Error::NetworkError => "Could not connect to server",
 			Error::Indeterminate => "Unexpected error - cause unknown",
 			Error::BadVersion(version) => {
 				str = format!("Incompatible version - latest version: {version} - please update the game");
 				str.as_str()
 			},
 			Error::UnexpectedProtocol => "Unexpected protocol",
-			Error::GamesAtCapacity => "Cannot create game - server is at capacity - try again later",
+			Error::GamesAtCapacity => "Cannot create game right now - server is at capacity - try again later",
 			Error::GameAtCapacity => "Cannot join - game has maximum number of players",
-			Error::GameNotFound => "Game not found - code is incorrect or game is not accepting players",
+			Error::GameNotFound => "Game not found - invalid game code",
 			Error::ClientNotFound => "Client not found",
 			Error::InvalidBid => "Illegal bid",
 			Error::InvalidCard => "Illegal card",

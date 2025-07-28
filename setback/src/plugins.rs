@@ -161,12 +161,14 @@ fn animate_cursor(
 	mut cursor_icon: Query<&mut CursorIcon>,
 	mut cursor_atlas: ResMut<CursorAtlas>
 ) {
+	// egui inspector makes it have multiple cursors
+	if cfg!(debug_assertions) {return}
 	let mut cursor_icon = cursor_icon
 	    .single_mut()
 	    .expect(SINGLE_COMPONENT_QUERY_ERROR);
 	let CursorIcon::Custom(CustomCursor::Image(ref mut image)) = *cursor_icon else {
 		if cfg!(debug_assertions) {
-			// egui inspector sets the cursor to a system cursor
+			// egui inspector sets the cursor to a system cursor every frame
 			return
 		} else {
 			unreachable!("CursorIcon should be Custom with CustomCursor that should be Image")
