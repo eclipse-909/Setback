@@ -4,4 +4,5 @@
 setback.db
 rustc-ice-*
 /setback/logs/*
-/setback/usr/*
+/setback/usr.crd
+/setback/settings.cfg

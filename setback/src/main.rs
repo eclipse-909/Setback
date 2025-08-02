@@ -18,6 +18,7 @@ use {
 		plugins::*,
 		states::*,
 		main_menu::*,
+		settings::*,
 		resources::*
 	},
 	libsetback::WebsiteConnection,
@@ -90,6 +91,7 @@ fn main() {
 		.add_systems(Startup, startup)
 		.add_plugins(bevy_framepace::FramepacePlugin)
 		.add_plugins(MainMenuPlugin)
+		.add_plugins(SettingsPlugin)
 		.init_state::<UiScene>()
 		.init_state::<ConnectionType>()
 		.run();
@@ -108,10 +110,8 @@ fn startup(
 	for window in windows.windows.values() {
 		window.set_window_icon(Some(icon.clone()));
 	}
-
 	// Spawn camera
 	commands.spawn(Camera2d);
-
 	// Set max framerate
 	framepace_settings.limiter = bevy_framepace::Limiter::from_framerate(60.0);
 }

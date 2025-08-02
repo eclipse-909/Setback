@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setback - Settings</title>
+    <style>
+        /* Color Palette & Theme Variables */
+        :root {
+            --primary-green: #0d5d2e;
+            --secondary-green: #1a7a3e;
+            --accent-gold: #d4af37;
+            --light-gold: #f4e87c;
+            --dark-gold: #b8941f;
+            --cream: #f5f5dc;
+            --dark-brown: #2c1810;
+            --medium-brown: #4a2c1a;
+            --light-brown: #8b6f47;
+            --card-shadow: rgba(0, 0, 0, 0.3);
+            --text-shadow: rgba(0, 0, 0, 0.5);
+            --border-radius: 12px;
+            --disabled-color: #666;
+            --disabled-bg: #333;
+            --modal-overlay: rgba(0, 0, 0, 0.7);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Georgia', serif;
+            background: linear-gradient(135deg, var(--primary-green) 0%, var(--secondary-green) 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--cream);
+            overflow: hidden;
+        }
+
+        /* Background pattern overlay */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                    radial-gradient(circle at 25% 25%, rgba(212, 175, 55, 0.1) 0%, transparent 50%),
+                    radial-gradient(circle at 75% 75%, rgba(212, 175, 55, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Card suit decorations */
+        .decoration {
+            position: absolute;
+            font-size: 60px;
+            opacity: 0.1;
+            color: var(--accent-gold);
+            pointer-events: none;
+        }
+
+        .decoration.top-left { top: 20px; left: 20px; }
+        .decoration.top-right { top: 20px; right: 20px; }
+        .decoration.bottom-left { bottom: 20px; left: 20px; }
+        .decoration.bottom-right { bottom: 20px; right: 20px; }
+
+        .settings-container {
+            display: flex;
+            flex-direction: column;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            background: rgba(44, 24, 16, 0.9);
+            border-radius: var(--border-radius);
+            box-shadow:
+                    0 20px 60px var(--card-shadow),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            border: 2px solid var(--accent-gold);
+            backdrop-filter: blur(10px);
+        }
+
+        .settings-header {
+            padding: 20px 30px;
+            border-bottom: 2px solid var(--accent-gold);
+            background: rgba(26, 122, 62, 0.3);
+        }
+
+        .settings-title {
+            font-size: 32px;
+            color: var(--accent-gold);
+            text-shadow: 2px 2px 4px var(--text-shadow);
+            text-align: center;
+        }
+
+        .tab-container {
+            display: flex;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .tab {
+            flex: 1;
+            padding: 16px 20px;
+            background: rgba(13, 93, 46, 0.5);
+            border: none;
+            color: var(--cream);
+            font-family: 'Georgia', serif;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border-right: 1px solid var(--accent-gold);
+        }
+
+        .tab:last-child {
+            border-right: none;
+        }
+
+        .tab:hover {
+            background: rgba(26, 122, 62, 0.7);
+        }
+
+        .tab.active {
+            background: var(--accent-gold);
+            color: var(--dark-brown);
+            font-weight: bold;
+        }
+
+        .tab-content {
+            flex: 1;
+            padding: 30px;
+            overflow-y: auto;
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        .setting-group {
+            margin-bottom: 24px;
+        }
+
+        .setting-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+            padding: 12px 0;
+        }
+
+        .setting-label {
+            font-size: 16px;
+            color: var(--cream);
+            min-width: 150px;
+        }
+
+        .setting-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Checkbox styling */
+        .checkbox {
+            width: 20px;
+            height: 20px;
+            accent-color: var(--accent-gold);
+            cursor: pointer;
+        }
+
+        .checkbox:disabled {
+            accent-color: var(--disabled-color);
+            cursor: not-allowed;
+        }
+
+        /* Input styling */
+        .number-input, .dropdown {
+            background: var(--dark-brown);
+            border: 2px solid var(--accent-gold);
+            color: var(--cream);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-family: 'Georgia', serif;
+            font-size: 14px;
+            width: 120px;
+        }
+
+        .number-input:disabled, .dropdown:disabled {
+            background: var(--disabled-bg);
+            border-color: var(--disabled-color);
+            color: var(--disabled-color);
+            cursor: not-allowed;
+        }
+
+        /* Slider styling */
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            width: 250px;
+        }
+
+        .slider {
+            flex: 1;
+            height: 6px;
+            background: var(--dark-brown);
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .slider::-webkit-slider-thumb {
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--accent-gold);
+            cursor: pointer;
+            border: 2px solid var(--dark-gold);
+        }
+
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--accent-gold);
+            cursor: pointer;
+            border: 2px solid var(--dark-gold);
+        }
+
+        .slider-value {
+            min-width: 40px;
+            color: var(--light-gold);
+            font-weight: bold;
+        }
+
+        /* Keybind styling */
+        .keybind-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            padding: 10px 15px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            border: 1px solid rgba(212, 175, 55, 0.3);
+        }
+
+        .keybind-display {
+            background: var(--dark-brown);
+            border: 2px solid var(--accent-gold);
+            padding: 6px 12px;
+            border-radius: 6px;
+            color: var(--light-gold);
+            font-family: monospace;
+            min-width: 80px;
+            text-align: center;
+        }
+
+        .rebind-btn {
+            background: linear-gradient(135deg, var(--secondary-green) 0%, var(--primary-green) 100%);
+            color: var(--cream);
+            border: 2px solid var(--accent-gold);
+            padding: 6px 16px;
+            font-size: 14px;
+            font-family: 'Georgia', serif;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .rebind-btn:hover {
+            background: linear-gradient(135deg, var(--accent-gold) 0%, var(--dark-gold) 100%);
+            color: var(--dark-brown);
+        }
+
+        /* Button styling */
+        .settings-button {
+            background: linear-gradient(135deg, var(--secondary-green) 0%, var(--primary-green) 100%);
+            color: var(--cream);
+            border: 2px solid var(--accent-gold);
+            padding: 12px 24px;
+            font-size: 16px;
+            font-family: 'Georgia', serif;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .settings-button:hover:not(:disabled) {
+            background: linear-gradient(135deg, var(--accent-gold) 0%, var(--dark-gold) 100%);
+            color: var(--dark-brown);
+        }
+
+        .settings-button:disabled {
+            background: var(--disabled-bg);
+            border-color: var(--disabled-color);
+            color: var(--disabled-color);
+            cursor: not-allowed;
+        }
+
+        .logout-message {
+            color: var(--light-gold);
+            font-style: italic;
+            margin-top: 10px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .logout-message.show {
+            opacity: 1;
+        }
+
+        .version-text {
+            text-align: center;
+            padding: 20px;
+            font-size: 12px;
+            color: var(--light-brown);
+            opacity: 0.7;
+            border-top: 1px solid rgba(212, 175, 55, 0.3);
+        }
+
+        /* Modal styling */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--modal-overlay);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .keybind-modal {
+            background: var(--dark-brown);
+            border: 3px solid var(--accent-gold);
+            border-radius: var(--border-radius);
+            padding: 30px;
+            min-width: 400px;
+            text-align: center;
+            box-shadow: 0 20px 60px var(--card-shadow);
+        }
+
+        .modal-title {
+            font-size: 24px;
+            color: var(--accent-gold);
+            margin-bottom: 20px;
+        }
+
+        .modal-instruction {
+            color: var(--cream);
+            margin-bottom: 20px;
+            font-size: 16px;
+        }
+
+        .key-display {
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid var(--accent-gold);
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: monospace;
+            font-size: 18px;
+            color: var(--light-gold);
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .modal-btn {
+            padding: 10px 20px;
+            border: 2px solid var(--accent-gold);
+            border-radius: 8px;
+            font-family: 'Georgia', serif;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .modal-btn.cancel {
+            background: var(--medium-brown);
+            color: var(--cream);
+        }
+
+        .modal-btn.cancel:hover {
+            background: var(--light-brown);
+        }
+
+        .modal-btn.confirm {
+            background: var(--accent-gold);
+            color: var(--dark-brown);
+        }
+
+        .modal-btn.confirm:hover {
+            background: var(--light-gold);
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .settings-container {
+                width: 95%;
+                max-height: 95vh;
+            }
+
+            .tab-container {
+                flex-direction: column;
+            }
+
+            .tab {
+                border-right: none;
+                border-bottom: 1px solid var(--accent-gold);
+            }
+
+            .setting-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+
+            .slider-container {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+<!-- Background decorations -->
+<div class="decoration top-left">♠</div>
+<div class="decoration top-right">♦</div>
+<div class="decoration bottom-left">♣</div>
+<div class="decoration bottom-right">♥</div>
+
+<div class="settings-container">
+    <div class="settings-header">
+        <h1 class="settings-title">Settings</h1>
+    </div>
+
+    <div class="tab-container">
+        <button class="tab active" data-tab="video">Video</button>
+        <button class="tab" data-tab="audio">Audio</button>
+        <button class="tab" data-tab="keybinds">Keybinds</button>
+        <button class="tab" data-tab="account">Account</button>
+    </div>
+
+    <div class="tab-content">
+        <!-- Video Tab -->
+        <div class="tab-panel active" id="video">
+            <div class="setting-group">
+                <div class="setting-item">
+                    <label class="setting-label">VSync</label>
+                    <div class="setting-control">
+                        <input type="checkbox" class="checkbox" id="vsync" checked>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Max Frame Rate</label>
+                    <div class="setting-control">
+                        <input type="number" class="number-input" id="framerate" value="60" min="0" disabled>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Fullscreen</label>
+                    <div class="setting-control">
+                        <input type="checkbox" class="checkbox" id="fullscreen">
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Default Monitor</label>
+                    <div class="setting-control">
+                        <select class="dropdown" id="monitor-type">
+                            <option value="current">Current</option>
+                            <option value="primary">Primary</option>
+                            <option value="index">Index</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Monitor Index</label>
+                    <div class="setting-control">
+                        <input type="number" class="number-input" id="monitor-index" value="0" min="0" disabled>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Tab -->
+        <div class="tab-panel" id="audio">
+            <div class="setting-group">
+                <div class="setting-item">
+                    <label class="setting-label">Master Volume</label>
+                    <div class="setting-control">
+                        <div class="slider-container">
+                            <input type="range" class="slider" id="master-volume" min="0" max="100" value="80">
+                            <span class="slider-value">80%</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Music Volume</label>
+                    <div class="setting-control">
+                        <div class="slider-container">
+                            <input type="range" class="slider" id="music-volume" min="0" max="100" value="60">
+                            <span class="slider-value">60%</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Effects Volume</label>
+                    <div class="setting-control">
+                        <div class="slider-container">
+                            <input type="range" class="slider" id="effects-volume" min="0" max="100" value="75">
+                            <span class="slider-value">75%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Keybinds Tab -->
+        <div class="tab-panel" id="keybinds">
+            <div class="setting-group">
+                <div class="keybind-item">
+                    <label class="setting-label">Pass</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">P</div>
+                        <button class="rebind-btn" data-action="pass">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Bid 2</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">2</div>
+                        <button class="rebind-btn" data-action="bid2">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Bid 3</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">3</div>
+                        <button class="rebind-btn" data-action="bid3">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Bid 4</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">4</div>
+                        <button class="rebind-btn" data-action="bid4">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Play Card 1</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">1</div>
+                        <button class="rebind-btn" data-action="card1">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Play Card 2</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">Q</div>
+                        <button class="rebind-btn" data-action="card2">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Play Card 3</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">W</div>
+                        <button class="rebind-btn" data-action="card3">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Play Card 4</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">E</div>
+                        <button class="rebind-btn" data-action="card4">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Play Card 5</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">R</div>
+                        <button class="rebind-btn" data-action="card5">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Play Card 6</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">T</div>
+                        <button class="rebind-btn" data-action="card6">Rebind</button>
+                    </div>
+                </div>
+                <div class="keybind-item">
+                    <label class="setting-label">Toggle Settings</label>
+                    <div class="setting-control">
+                        <div class="keybind-display">ESC</div>
+                        <button class="rebind-btn" data-action="settings">Rebind</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Account Tab -->
+        <div class="tab-panel" id="account">
+            <div class="setting-group">
+                <div class="setting-item">
+                    <label class="setting-label">Save Credentials</label>
+                    <div class="setting-control">
+                        <input type="checkbox" class="checkbox" id="save-credentials" checked>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label class="setting-label">Account Actions</label>
+                    <div class="setting-control">
+                        <button class="settings-button" id="logout-btn">Logout</button>
+                    </div>
+                </div>
+                <div class="logout-message" id="logout-message">You have been logged out successfully.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="version-text">Version 1.0.0</div>
+</div>
+
+<!-- Keybind Modal -->
+<div class="modal-overlay" id="keybind-modal">
+    <div class="keybind-modal">
+        <h2 class="modal-title">Rebind Key</h2>
+        <p class="modal-instruction">Press the key(s) you want to bind for this action:</p>
+        <div class="key-display" id="key-display">Press any key...</div>
+        <div class="modal-buttons">
+            <button class="modal-btn cancel" id="cancel-rebind">Cancel</button>
+            <button class="modal-btn confirm" id="confirm-rebind">Apply Binding</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Remove active class from all tabs and panels
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+            // Add active class to clicked tab and corresponding panel
+            tab.classList.add('active');
+            document.getElementById(tab.dataset.tab).classList.add('active');
+        });
+    });
+
+    // VSync and frame rate interaction
+    const vsyncCheckbox = document.getElementById('vsync');
+    const framerateInput = document.getElementById('framerate');
+
+    vsyncCheckbox.addEventListener('change', () => {
+        framerateInput.disabled = vsyncCheckbox.checked;
+    });
+
+    // Monitor type and index interaction
+    const monitorTypeSelect = document.getElementById('monitor-type');
+    const monitorIndexInput = document.getElementById('monitor-index');
+
+    monitorTypeSelect.addEventListener('change', () => {
+        monitorIndexInput.disabled = monitorTypeSelect.value !== 'index';
+    });
+
+    // Volume sliders
+    document.querySelectorAll('.slider').forEach(slider => {
+        const valueDisplay = slider.parentElement.querySelector('.slider-value');
+
+        slider.addEventListener('input', () => {
+            valueDisplay.textContent = slider.value + '%';
+        });
+    });
+
+    // Logout functionality
+    const logoutBtn = document.getElementById('logout-btn');
+    const logoutMessage = document.getElementById('logout-message');
+
+    logoutBtn.addEventListener('click', () => {
+        logoutBtn.disabled = true;
+        logoutMessage.classList.add('show');
+    });
+
+    // Keybind modal functionality
+    const keybindModal = document.getElementById('keybind-modal');
+    const keyDisplay = document.getElementById('key-display');
+    const cancelBtn = document.getElementById('cancel-rebind');
+    const confirmBtn = document.getElementById('confirm-rebind');
+    let currentKeybindButton = null;
+    let currentKeys = [];
+
+    document.querySelectorAll('.rebind-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            currentKeybindButton = btn;
+            currentKeys = [];
+            keyDisplay.textContent = 'Press any key...';
+            keybindModal.classList.add('show');
+        });
+    });
+
+    cancelBtn.addEventListener('click', () => {
+        keybindModal.classList.remove('show');
+        currentKeybindButton = null;
+        currentKeys = [];
+    });
+
+    confirmBtn.addEventListener('click', () => {
+        if (currentKeybindButton && currentKeys.length > 0) {
+            const keyDisplay = currentKeybindButton.parentElement.querySelector('.keybind-display');
+            keyDisplay.textContent = currentKeys.join(' + ');
+        }
+        keybindModal.classList.remove('show');
+        currentKeybindButton = null;
+        currentKeys = [];
+    });
+
+    // Key capture for rebinding
+    document.addEventListener('keydown', (e) => {
+        if (keybindModal.classList.contains('show')) {
+            e.preventDefault();
+
+            const key = e.key === ' ' ? 'Space' : e.key;
+
+            if (!currentKeys.includes(key)) {
+                currentKeys.push(key);
+                keyDisplay.textContent = currentKeys.join(' + ');
+            }
+        }
+    });
+
+    // Prevent modal from closing when clicking inside
+    document.querySelector('.keybind-modal').addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+
+    // Close modal when clicking overlay
+    keybindModal.addEventListener('click', () => {
+        keybindModal.classList.remove('show');
+        currentKeybindButton = null;
+        currentKeys = [];
+    });
+</script>
+</body>
+</html>

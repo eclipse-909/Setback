@@ -83,84 +83,7 @@ fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>) {
 	let font_bold: Handle<Font> = asset_server.load(GEORGIA_BOLD);
 	let times: Handle<Font> = asset_server.load(TIMES_NEW_ROMAN);
 	// Create the main background with a green felt texture
-	commands.spawn((
-		Node {
-			width: Val::Percent(100.),
-			height: Val::Percent(100.),
-			margin: UiRect::all(Val::Px(0.)),
-			padding: UiRect::all(Val::Px(0.)),
-			box_sizing: BoxSizing::BorderBox,
-			min_height: Val::Vh(100.),
-			display: Display::Flex,
-			justify_content: JustifyContent::Center,
-			align_items: AlignItems::Center,
-			overflow: Overflow::hidden(),
-			..default()
-		},
-		BackgroundColor(PALLET.primary_green),
-		RootNode
-	)).with_children(|commands| {
-		//Suit icons
-		commands.spawn((
-			Node {
-				top: Val::Px(20.),
-            	left: Val::Px(20.),
-            	position_type: PositionType::Absolute,
-            	justify_content: JustifyContent::Center,
-				..default()
-			},
-			children![(
-				Text::new("♠"),
-				TextFont::from_font(times.clone()).with_font_size(60.),
-				TextColor(PALLET.accent_gold.with_alpha(0.1)),
-				TextLayout::new_with_justify(JustifyText::Center)
-			)]
-		));
-		commands.spawn((
-			Node {
-				top: Val::Px(20.),
-            	right: Val::Px(20.),
-             	position_type: PositionType::Absolute,
-              	justify_content: JustifyContent::Center,
-				..default()
-			},
-			children![(
-				Text::new("♦"),
-				TextFont::from_font(times.clone()).with_font_size(60.),
-				TextColor(PALLET.accent_gold.with_alpha(0.1)),
-				TextLayout::new_with_justify(JustifyText::Center)
-			)]
-		));
-		commands.spawn((
-			Node {
-				bottom: Val::Px(20.),
-            	left: Val::Px(20.),
-            	position_type: PositionType::Absolute,
-             	justify_content: JustifyContent::Center,
-				..default()
-			},
-			children![(
-				Text::new("♣"),
-				TextFont::from_font(times.clone()).with_font_size(60.),
-				TextColor(PALLET.accent_gold.with_alpha(0.1)),
-				TextLayout::new_with_justify(JustifyText::Center)
-			)]
-		));
-		commands.spawn((
-			Node {
-				bottom: Val::Px(20.),
-            	right: Val::Px(20.),
-				position_type: PositionType::Absolute,
-				justify_content: JustifyContent::Center,
-				..default()
-			},
-			children![(
-				Text::new("♥"),
-				TextFont::from_font(times).with_font_size(60.),
-				TextColor(PALLET.accent_gold.with_alpha(0.1)),
-				TextLayout::new_with_justify(JustifyText::Center)
-			)]
-		));
+	menu_background(&mut commands, times, |commands| {
 		//menu
 		commands.spawn((
 			Node {
@@ -435,6 +358,10 @@ fn display_main_buttons(
 	let mut container = commands.entity(button_container.single().expect(SINGLE_COMPONENT_QUERY_ERROR));
 	container.despawn_related::<Children>();
 	container.with_children(|commands| {
+		//multiplayer
+		commands
+			.spawn(new_primary_button("MULTIPLAYER", font_bold.clone(), cursor.clone()))
+			.observe(display_multiplayer_observer);
 		//singleplayer
 		commands
 			.spawn(new_primary_button("SINGLEPLAYER", font_bold.clone(), cursor.clone()))
@@ -443,10 +370,6 @@ fn display_main_buttons(
 				next_scene.set(UiScene::Setup);
 				next_conn_type.set(ConnectionType::Singleplayer);
 			});
-		//multiplayer
-		commands
-			.spawn(new_primary_button("MULTIPLAYER", font_bold.clone(), cursor.clone()))
-			.observe(display_multiplayer_observer);
 		//button group
 		commands.spawn(
 			Node {
@@ -935,10 +858,6 @@ fn get_credentials() -> Option<LoginRequest> {
 		Ok(username) => username,
 		Err(err) => {
 			if matches!(err.kind(), ErrorKind::NotFound) {
-				if let Err(err) = fs::create_dir_all(path.parent().unwrap()) {
-					error!("Error creating usr directory: {}", err);
-					return None;
-				}
 				if let Err(err) = File::create(USR_CRD) {
 					error!("Error creating usr.crd file: {}", err);
 				}
@@ -960,10 +879,6 @@ fn get_credentials() -> Option<LoginRequest> {
 
 fn save_credentials(username: &str, password: &str) {
 	let path = Path::new(USR_CRD);
-	if let Err(err) = fs::create_dir_all(path.parent().unwrap()) {
-		error!("Error creating usr directory: {}", err);
-		return;
-	}
 	if let Err(err) = fs::write(path, username) {
 		error!("Error creating usr.crd file: {}", err);
 		return;

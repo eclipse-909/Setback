@@ -1,6 +1,6 @@
 use {
 	bevy::prelude::*,
-	serde::Deserialize
+	serde::{Serialize, Deserialize}
 };
 
 /// This struct is the color pallet for the UI. It is intended to be used as a singleton, so don't create another pallet.
@@ -50,4 +50,37 @@ pub struct AtlasSize {
 pub struct TextureAtlasJson {
     pub frames: Vec<Frame>,
     pub meta: Meta,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Settings {
+	//video
+	pub vsync: bool,
+	pub max_frame_rate: f64,
+	pub fullscreen: bool,
+	pub default_monitor: MonitorSelection,
+	pub monitor_index: usize,
+	
+	//game settings
+	pub fn game_settings: GameSettings,
+	
+	//account
+	pub save_login_credentials: bool
+}
+
+impl Default for Settings {
+	fn default() -> Self {Self {
+		//video
+		vsync: false,
+		max_frame_rate: 60.,
+		fullscreen: true,
+		default_monitor: MonitorSelection::Primary,
+		monitor_index: 0,
+		
+		//game settings
+		game_settings: GameSettings::default(),
+		
+		//account
+		save_login_credentials: true
+	}}
 }

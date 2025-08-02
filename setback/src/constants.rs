@@ -7,9 +7,10 @@ use {
 
 pub static CARDS_ICON: &[u8] = include_bytes!("../assets/images/cardsIcon.png");
 pub static CURSOR_ATLAS: &str = "setback/assets/cursors/cursor_atlas.json";//TODO these paths may need to be changed for release
-pub static USR_CRD: &str = "setback/usr/usr.crd";
+pub static USR_CRD: &str = "setback/usr.crd";
 pub static LATEST_LOG: &str = "setback/logs/latest.log";
 pub static CRASH_LOG: &str = "setback/logs/crash.log";
+pub static SETTINGS_CFG: &str = "setback/settings.cfg";
 pub static SINGLE_COMPONENT_QUERY_ERROR: &str = "There should be exactly one component returned from the query";
 pub static TASK_ERROR: &str = "Failed to send command queue following task completion";
 pub static KEYRING_PASSWORD: &str = "service-keyring-setback-user-password";
@@ -20,10 +21,6 @@ pub static GEORGIA_ITALIC: &str = "fonts/georgiai.ttf";
 pub static TIMES_NEW_ROMAN: &str = "fonts/times.ttf";
 pub static LOADING: &str = "images/loading.gif";
 pub static GAME_CODE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9]*$").unwrap());
-
-pub fn game_code_matches(text: &str) -> bool {
-	GAME_CODE_REGEX.is_match(text)
-}
 
 /// Singleton for [Pallet] struct
 pub static PALLET: Pallet = Pallet {

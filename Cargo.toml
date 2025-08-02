@@ -65,6 +65,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
 	"bevy_image",
 	"bevy_ui_debug",
 	"gif",
+	"serialize",
 	"wayland"
 ] }
 bevy_framepace = "0.19.1"
@@ -89,9 +90,9 @@ regex = "1.11.1"
 reqwest = { version = "0.12.22", features = ["cookies", "json"] }
 rpassword = "7.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.141"
+serde_json = "1.0.142"
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-native-tls", "postgres", "sqlite", "chrono"] }
-tokio = { version = "1.47.0", features = ["full"] }
+tokio = { version = "1.47.1", features = ["full"] }
 tokio-util = "0.7.15"
 tracing-appender = "0.2.3"
 whoami = "1.6.0"
