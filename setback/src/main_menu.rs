@@ -208,7 +208,7 @@ fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>) {
 					..default()
 				},
 				children![(
-					Text::new(SETBACK_VERSION.to_string()),
+					Text::new(format!("Version {SETBACK_VERSION}")),
 					TextFont::from_font(font).with_font_size(12.),
 					TextColor(PALLET.light_brown.with_alpha(0.7)),
 					TextLayout::new_with_justify(JustifyText::Center)

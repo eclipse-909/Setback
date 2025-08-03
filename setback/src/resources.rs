@@ -57,6 +57,13 @@ pub enum ClientUpdate {
 
 #[derive(Resource, Serialize, Deserialize)]
 pub struct GameSettings {
+	//video
+	pub vsync: bool,
+	pub max_frame_rate: f64,
+	pub fullscreen: bool,
+	pub default_monitor: MonitorSelection,
+	pub monitor_index: usize,
+	
 	//audio
 	pub master_volume: f64,
 	pub music_volume: f64,
@@ -73,11 +80,21 @@ pub struct GameSettings {
 	pub play_card_4: Vec<KeyCode>,
 	pub play_card_5: Vec<KeyCode>,
 	pub play_card_6: Vec<KeyCode>,
-	pub toggle_settings: Vec<KeyCode>
+	pub toggle_settings: Vec<KeyCode>,
+	
+	//account
+	pub save_login_credentials: bool
 }
 
 impl Default for GameSettings {
 	fn default() -> Self {Self {
+		//video
+		vsync: false,
+		max_frame_rate: 60.,
+		fullscreen: true,
+		default_monitor: MonitorSelection::Primary,
+		monitor_index: 0,
+		
 		//audio
 		master_volume: 100.,
 		music_volume: 100.,
@@ -94,6 +111,9 @@ impl Default for GameSettings {
 		play_card_4: vec![KeyCode::Digit4],
 		play_card_5: vec![KeyCode::Digit5],
 		play_card_6: vec![KeyCode::Digit6],
-		toggle_settings: vec![KeyCode::Escape]
+		toggle_settings: vec![KeyCode::Escape],
+		
+		//account
+		save_login_credentials: true
 	}}
 }

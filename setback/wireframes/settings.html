@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Setback - Settings</title>
-    <style>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Setback - Settings</title>
+	<style>
         /* Color Palette & Theme Variables */
         :root {
             --primary-green: #0d5d2e;
@@ -89,13 +89,43 @@
             padding: 20px 30px;
             border-bottom: 2px solid var(--accent-gold);
             background: rgba(26, 122, 62, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
         .settings-title {
             font-size: 32px;
             color: var(--accent-gold);
             text-shadow: 2px 2px 4px var(--text-shadow);
+            flex: 1;
             text-align: center;
+        }
+
+        .back-button {
+            background: linear-gradient(135deg, var(--secondary-green) 0%, var(--primary-green) 100%);
+            color: var(--cream);
+            border: 2px solid var(--accent-gold);
+            padding: 10px 20px;
+            font-size: 14px;
+            font-family: 'Georgia', serif;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .back-button:hover {
+            background: linear-gradient(135deg, var(--accent-gold) 0%, var(--dark-gold) 100%);
+            color: var(--dark-brown);
+            transform: translateX(-2px);
+        }
+
+        .back-button::before {
+            content: '◀';
+            font-size: 12px;
         }
 
         .tab-container {
@@ -444,7 +474,7 @@
                 width: 100%;
             }
         }
-    </style>
+	</style>
 </head>
 <body>
 <!-- Background decorations -->
@@ -454,211 +484,220 @@
 <div class="decoration bottom-right">♥</div>
 
 <div class="settings-container">
-    <div class="settings-header">
-        <h1 class="settings-title">Settings</h1>
-    </div>
+	<div class="settings-header">
+		<button class="back-button" id="back-to-menu">Back to Menu</button>
+		<h1 class="settings-title">Settings</h1>
+		<div style="width: 120px;"></div> <!-- Spacer for center alignment -->
+	</div>
 
-    <div class="tab-container">
-        <button class="tab active" data-tab="video">Video</button>
-        <button class="tab" data-tab="audio">Audio</button>
-        <button class="tab" data-tab="keybinds">Keybinds</button>
-        <button class="tab" data-tab="account">Account</button>
-    </div>
+	<div class="tab-container">
+		<button class="tab active" data-tab="video">Video</button>
+		<button class="tab" data-tab="audio">Audio</button>
+		<button class="tab" data-tab="keybinds">Keybinds</button>
+		<button class="tab" data-tab="account">Account</button>
+	</div>
 
-    <div class="tab-content">
-        <!-- Video Tab -->
-        <div class="tab-panel active" id="video">
-            <div class="setting-group">
-                <div class="setting-item">
-                    <label class="setting-label">VSync</label>
-                    <div class="setting-control">
-                        <input type="checkbox" class="checkbox" id="vsync" checked>
-                    </div>
-                </div>
-                <div class="setting-item">
-                    <label class="setting-label">Max Frame Rate</label>
-                    <div class="setting-control">
-                        <input type="number" class="number-input" id="framerate" value="60" min="0" disabled>
-                    </div>
-                </div>
-                <div class="setting-item">
-                    <label class="setting-label">Fullscreen</label>
-                    <div class="setting-control">
-                        <input type="checkbox" class="checkbox" id="fullscreen">
-                    </div>
-                </div>
-                <div class="setting-item">
-                    <label class="setting-label">Default Monitor</label>
-                    <div class="setting-control">
-                        <select class="dropdown" id="monitor-type">
-                            <option value="current">Current</option>
-                            <option value="primary">Primary</option>
-                            <option value="index">Index</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="setting-item">
-                    <label class="setting-label">Monitor Index</label>
-                    <div class="setting-control">
-                        <input type="number" class="number-input" id="monitor-index" value="0" min="0" disabled>
-                    </div>
-                </div>
-            </div>
-        </div>
+	<div class="tab-content">
+		<!-- Video Tab -->
+		<div class="tab-panel active" id="video">
+			<div class="setting-group">
+				<div class="setting-item">
+					<label class="setting-label">VSync</label>
+					<div class="setting-control">
+						<input type="checkbox" class="checkbox" id="vsync" checked>
+					</div>
+				</div>
+				<div class="setting-item">
+					<label class="setting-label">Max Frame Rate</label>
+					<div class="setting-control">
+						<input type="number" class="number-input" id="framerate" value="60" min="0" disabled>
+					</div>
+				</div>
+				<div class="setting-item">
+					<label class="setting-label">Fullscreen</label>
+					<div class="setting-control">
+						<input type="checkbox" class="checkbox" id="fullscreen">
+					</div>
+				</div>
+				<div class="setting-item">
+					<label class="setting-label">Default Monitor</label>
+					<div class="setting-control">
+						<select class="dropdown" id="monitor-type">
+							<option value="current">Current</option>
+							<option value="primary">Primary</option>
+							<option value="index">Index</option>
+						</select>
+					</div>
+				</div>
+				<div class="setting-item">
+					<label class="setting-label">Monitor Index</label>
+					<div class="setting-control">
+						<input type="number" class="number-input" id="monitor-index" value="0" min="0" disabled>
+					</div>
+				</div>
+			</div>
+		</div>
 
-        <!-- Audio Tab -->
-        <div class="tab-panel" id="audio">
-            <div class="setting-group">
-                <div class="setting-item">
-                    <label class="setting-label">Master Volume</label>
-                    <div class="setting-control">
-                        <div class="slider-container">
-                            <input type="range" class="slider" id="master-volume" min="0" max="100" value="80">
-                            <span class="slider-value">80%</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="setting-item">
-                    <label class="setting-label">Music Volume</label>
-                    <div class="setting-control">
-                        <div class="slider-container">
-                            <input type="range" class="slider" id="music-volume" min="0" max="100" value="60">
-                            <span class="slider-value">60%</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="setting-item">
-                    <label class="setting-label">Effects Volume</label>
-                    <div class="setting-control">
-                        <div class="slider-container">
-                            <input type="range" class="slider" id="effects-volume" min="0" max="100" value="75">
-                            <span class="slider-value">75%</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+		<!-- Audio Tab -->
+		<div class="tab-panel" id="audio">
+			<div class="setting-group">
+				<div class="setting-item">
+					<label class="setting-label">Master Volume</label>
+					<div class="setting-control">
+						<div class="slider-container">
+							<input type="range" class="slider" id="master-volume" min="0" max="100" value="80">
+							<span class="slider-value">80%</span>
+						</div>
+					</div>
+				</div>
+				<div class="setting-item">
+					<label class="setting-label">Music Volume</label>
+					<div class="setting-control">
+						<div class="slider-container">
+							<input type="range" class="slider" id="music-volume" min="0" max="100" value="60">
+							<span class="slider-value">60%</span>
+						</div>
+					</div>
+				</div>
+				<div class="setting-item">
+					<label class="setting-label">Effects Volume</label>
+					<div class="setting-control">
+						<div class="slider-container">
+							<input type="range" class="slider" id="effects-volume" min="0" max="100" value="75">
+							<span class="slider-value">75%</span>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
 
-        <!-- Keybinds Tab -->
-        <div class="tab-panel" id="keybinds">
-            <div class="setting-group">
-                <div class="keybind-item">
-                    <label class="setting-label">Pass</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">P</div>
-                        <button class="rebind-btn" data-action="pass">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Bid 2</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">2</div>
-                        <button class="rebind-btn" data-action="bid2">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Bid 3</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">3</div>
-                        <button class="rebind-btn" data-action="bid3">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Bid 4</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">4</div>
-                        <button class="rebind-btn" data-action="bid4">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Play Card 1</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">1</div>
-                        <button class="rebind-btn" data-action="card1">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Play Card 2</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">Q</div>
-                        <button class="rebind-btn" data-action="card2">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Play Card 3</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">W</div>
-                        <button class="rebind-btn" data-action="card3">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Play Card 4</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">E</div>
-                        <button class="rebind-btn" data-action="card4">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Play Card 5</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">R</div>
-                        <button class="rebind-btn" data-action="card5">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Play Card 6</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">T</div>
-                        <button class="rebind-btn" data-action="card6">Rebind</button>
-                    </div>
-                </div>
-                <div class="keybind-item">
-                    <label class="setting-label">Toggle Settings</label>
-                    <div class="setting-control">
-                        <div class="keybind-display">ESC</div>
-                        <button class="rebind-btn" data-action="settings">Rebind</button>
-                    </div>
-                </div>
-            </div>
-        </div>
+		<!-- Keybinds Tab -->
+		<div class="tab-panel" id="keybinds">
+			<div class="setting-group">
+				<div class="keybind-item">
+					<label class="setting-label">Pass</label>
+					<div class="setting-control">
+						<div class="keybind-display">P</div>
+						<button class="rebind-btn" data-action="pass">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Bid 2</label>
+					<div class="setting-control">
+						<div class="keybind-display">2</div>
+						<button class="rebind-btn" data-action="bid2">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Bid 3</label>
+					<div class="setting-control">
+						<div class="keybind-display">3</div>
+						<button class="rebind-btn" data-action="bid3">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Bid 4</label>
+					<div class="setting-control">
+						<div class="keybind-display">4</div>
+						<button class="rebind-btn" data-action="bid4">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Play Card 1</label>
+					<div class="setting-control">
+						<div class="keybind-display">1</div>
+						<button class="rebind-btn" data-action="card1">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Play Card 2</label>
+					<div class="setting-control">
+						<div class="keybind-display">Q</div>
+						<button class="rebind-btn" data-action="card2">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Play Card 3</label>
+					<div class="setting-control">
+						<div class="keybind-display">W</div>
+						<button class="rebind-btn" data-action="card3">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Play Card 4</label>
+					<div class="setting-control">
+						<div class="keybind-display">E</div>
+						<button class="rebind-btn" data-action="card4">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Play Card 5</label>
+					<div class="setting-control">
+						<div class="keybind-display">R</div>
+						<button class="rebind-btn" data-action="card5">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Play Card 6</label>
+					<div class="setting-control">
+						<div class="keybind-display">T</div>
+						<button class="rebind-btn" data-action="card6">Rebind</button>
+					</div>
+				</div>
+				<div class="keybind-item">
+					<label class="setting-label">Toggle Settings</label>
+					<div class="setting-control">
+						<div class="keybind-display">ESC</div>
+						<button class="rebind-btn" data-action="settings">Rebind</button>
+					</div>
+				</div>
+			</div>
+		</div>
 
-        <!-- Account Tab -->
-        <div class="tab-panel" id="account">
-            <div class="setting-group">
-                <div class="setting-item">
-                    <label class="setting-label">Save Credentials</label>
-                    <div class="setting-control">
-                        <input type="checkbox" class="checkbox" id="save-credentials" checked>
-                    </div>
-                </div>
-                <div class="setting-item">
-                    <label class="setting-label">Account Actions</label>
-                    <div class="setting-control">
-                        <button class="settings-button" id="logout-btn">Logout</button>
-                    </div>
-                </div>
-                <div class="logout-message" id="logout-message">You have been logged out successfully.</div>
-            </div>
-        </div>
-    </div>
+		<!-- Account Tab -->
+		<div class="tab-panel" id="account">
+			<div class="setting-group">
+				<div class="setting-item">
+					<label class="setting-label">Save Credentials</label>
+					<div class="setting-control">
+						<input type="checkbox" class="checkbox" id="save-credentials" checked>
+					</div>
+				</div>
+				<div class="setting-item">
+					<label class="setting-label">Account Actions</label>
+					<div class="setting-control">
+						<button class="settings-button" id="logout-btn">Logout</button>
+					</div>
+				</div>
+				<div class="logout-message" id="logout-message">You have been logged out successfully.</div>
+			</div>
+		</div>
+	</div>
 
-    <div class="version-text">Version 1.0.0</div>
+	<div class="version-text">Version 0.1.0</div>
 </div>
 
 <!-- Keybind Modal -->
 <div class="modal-overlay" id="keybind-modal">
-    <div class="keybind-modal">
-        <h2 class="modal-title">Rebind Key</h2>
-        <p class="modal-instruction">Press the key(s) you want to bind for this action:</p>
-        <div class="key-display" id="key-display">Press any key...</div>
-        <div class="modal-buttons">
-            <button class="modal-btn cancel" id="cancel-rebind">Cancel</button>
-            <button class="modal-btn confirm" id="confirm-rebind">Apply Binding</button>
-        </div>
-    </div>
+	<div class="keybind-modal">
+		<h2 class="modal-title">Rebind Key</h2>
+		<p class="modal-instruction">Press the key(s) you want to bind for this action:</p>
+		<div class="key-display" id="key-display">Press any key...</div>
+		<div class="modal-buttons">
+			<button class="modal-btn cancel" id="cancel-rebind">Cancel</button>
+			<button class="modal-btn confirm" id="confirm-rebind">Apply Binding</button>
+		</div>
+	</div>
 </div>
 
 <script>
+    // Back to menu button
+    document.getElementById('back-to-menu').addEventListener('click', () => {
+        // In your actual implementation, this would navigate back to the main menu
+        console.log('Navigating back to main menu...');
+        alert('Would navigate back to main menu');
+    });
+
     // Tab switching
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => {

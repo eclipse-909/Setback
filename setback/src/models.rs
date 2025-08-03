@@ -1,4 +1,5 @@
 use {
+	crate::resources::*,
 	bevy::prelude::*,
 	serde::{Serialize, Deserialize}
 };
@@ -17,7 +18,10 @@ pub struct Pallet {
 	pub card_shadow: Color,
 	pub text_shadow: Color,
 	pub url: Color,
-	pub border_radius: Val
+	pub border_radius: Val,
+	pub disabled_color: Color,
+	pub disabled_bg: Color,
+	pub modal_overlay: Color
 }
 
 #[derive(Deserialize)]
@@ -50,37 +54,4 @@ pub struct AtlasSize {
 pub struct TextureAtlasJson {
     pub frames: Vec<Frame>,
     pub meta: Meta,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Settings {
-	//video
-	pub vsync: bool,
-	pub max_frame_rate: f64,
-	pub fullscreen: bool,
-	pub default_monitor: MonitorSelection,
-	pub monitor_index: usize,
-	
-	//game settings
-	pub fn game_settings: GameSettings,
-	
-	//account
-	pub save_login_credentials: bool
-}
-
-impl Default for Settings {
-	fn default() -> Self {Self {
-		//video
-		vsync: false,
-		max_frame_rate: 60.,
-		fullscreen: true,
-		default_monitor: MonitorSelection::Primary,
-		monitor_index: 0,
-		
-		//game settings
-		game_settings: GameSettings::default(),
-		
-		//account
-		save_login_credentials: true
-	}}
 }

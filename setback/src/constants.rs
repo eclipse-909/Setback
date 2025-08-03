@@ -36,7 +36,10 @@ pub static PALLET: Pallet = Pallet {
 	card_shadow: Color::srgba(0., 0., 0., 0.3),
 	text_shadow: Color::srgba(0., 0., 0., 0.5),
 	url: Color::srgb_u8(173, 194, 252),
-	border_radius: Val::Px(12.)
+	border_radius: Val::Px(12.),
+	disabled_color: Color::srgb_u8(0x66, 0x66, 0x66),
+	disabled_bg: Color::srgb_u8(0x33, 0x33, 0x33),
+	modal_overlay: Color::srgba(0., 0., 0., 0.7)
 };
 
 pub const CURSOR_FPS: f32 = 15.;
