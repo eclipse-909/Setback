@@ -90,5 +90,5 @@ sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-native-tls", "post
 tokio = { version = "1.46.1", features = ["full"] }
 tokio-util = "0.7.15"
 tracing-appender = "0.2.3"
-whoami = "1.6.0"
+whoami = "1.6.1"
 winit = "0.30.11"
