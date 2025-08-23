@@ -1,10 +1,9 @@
 [workspace]
 members = [
-	"admin_controller",
 	"libsetback",
 	"setback",
 	"setback_server",
-	"setback_website",
+	"setback_website", "setbackctl",
 	"setbackd"
 ]
 resolver = "3"
@@ -65,7 +64,7 @@ bevy = { version = "0.16.1", default-features = false, features = [
 	"bevy_image",
 	"bevy_ui_debug",
 	"gif",
-	"serialize",
+#	"serialize",
 	"wayland"
 ] }
 bevy_framepace = "0.19.1"

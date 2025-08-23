@@ -24,6 +24,7 @@ impl Plugin for SettingsPlugin {
 	fn build(&self, app: &mut App) {
 		app
 			.add_systems(OnEnter(Self::SCENE), on_enter)
+			.add_systems(Update, (update_checkbox, update_spinbox, update_dropdown, update_button, update_keybind).run_if(in_state(Self::SCENE)))
 			.add_systems(OnExit(Self::SCENE), Self::on_exit);
 	}
 }
@@ -31,7 +32,7 @@ impl Plugin for SettingsPlugin {
 fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>, game_settings: Res<GameSettings>) {
 	info!("Entering Settings");
 	menu_background(&mut commands, asset_server.load(TIMES_NEW_ROMAN), |commands| {
-		settings_menu(commands, asset_server.load(GEORGIA), asset_server.load(GEORGIA_BOLD), game_settings);
+		settings_menu(commands, asset_server.as_ref(), game_settings);
 	});
 }
 
@@ -41,7 +42,9 @@ fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>, game_setting
 // Add CursorComponent to each of the interactable items and use "cursor: Handle<Image>" in the same way the main menu does.
 
 ///This function is used to create the settings menu for the settings scene and the settings menu in-game
-pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handle<Font>, font_bold: Handle<Font>, game_settings: Res<GameSettings>) {
+pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_server: &AssetServer, game_settings: Res<GameSettings>) {
+	let font = asset_server.load(GEORGIA);
+	let font_bold = asset_server.load(GEORGIA_BOLD);
 	//settings container
 	commands.spawn((
 		Node {
@@ -92,7 +95,7 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handl
 				TabButton {tab_fn: video_tab, font: font.clone()},
 				children![(
 					TabLabel::Video,
-					Text::new("video"),
+					Text::new("Video"),
 					TextFont::from_font(font_bold.clone())
 				)]
 			)).observe(click_tab);
@@ -101,10 +104,10 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handl
 					..default()
 				},
 				Button,
-				TabButton {tab_fn: audio_tab, font: font.clone()},
+				TabButton {tab_fn: audio_tab, font: font_bold},
 				children![(
 					TabLabel::Audio,
-					Text::new("audio"),
+					Text::new("Audio"),
 					TextFont::from_font(font.clone())
 				)]
 			)).observe(click_tab);
@@ -113,10 +116,10 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handl
 					..default()
 				},
 				Button,
-				TabButton {tab_fn: keybinds_tab, font: font_bold},
+				TabButton {tab_fn: keybinds_tab, font: font.clone()},
 				children![(
 					TabLabel::Keybinds,
-					Text::new("keybinds"),
+					Text::new("Keybinds"),
 					TextFont::from_font(font.clone())
 				)]
 			)).observe(click_tab);
@@ -128,7 +131,7 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handl
 				TabButton {tab_fn: account_tab, font: font.clone()},
 				children![(
 					TabLabel::Account,
-					Text::new("account"),
+					Text::new("Account"),
 					TextFont::from_font(font.clone())
 				)]
 			)).observe(click_tab);
@@ -141,7 +144,7 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handl
 			TabContent
 		)).with_children(|commands| {
 			//video tab is default tab
-			new_tab(commands, font, game_settings, video_tab);
+			new_tab(commands, asset_server, game_settings, video_tab);
 		});
 		//version text
 		commands.spawn((
@@ -170,7 +173,7 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handl
 						..default()
 					},
 					children![(
-						Text::new("Rebind Key")
+						Text::new("Rebind Keys")
 					)]
 				));
 				//modal instruction
@@ -188,7 +191,7 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handl
 						..default()
 					},
 					children![(
-						Text::new("Press any key...")
+						Text::new("Press any keys...")
 					)]
 				));
 				//modal buttons
@@ -221,10 +224,10 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handl
 	});
 }
 
-type TabFn = fn(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handle<Font>, game_settings: &GameSettings);
-type InteractiveFn<C: SettingsItem> = fn(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, font: Handle<Font>, game_settings: &GameSettings);
+type TabFn = fn(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_server: &AssetServer, game_settings: &GameSettings);
+type InteractiveFn<C: SettingsItem> = fn(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings);
 
-fn new_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handle<Font>, game_settings: Res<GameSettings>, tab: TabFn) {
+fn new_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_server: &AssetServer, game_settings: Res<GameSettings>, tab: TabFn) {
 	//tab panel
 	commands.spawn((
 		Node {
@@ -238,42 +241,42 @@ fn new_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handle<Font>, g
 			}
 		)).with_children(|commands| {
 			//specific tab
-			tab(commands, font, game_settings.as_ref());
+			tab(commands, asset_server, game_settings.as_ref());
 		});
 	});
 }
 
-fn video_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handle<Font>, game_settings: &GameSettings) {
-	new_setting_item(commands, "VSync", VSync, font.clone(), game_settings, new_checkbox);
-	new_setting_item(commands, "Max Frame Rate", MaxFrameRate, font.clone(), game_settings, new_spinbox);
-	new_setting_item(commands, "Fullscreen", Fullscreen, font.clone(), game_settings, new_checkbox);
-	new_setting_item(commands, "Default Monitor", DefaultMonitor, font.clone(), game_settings, new_dropdown);
-	new_setting_item(commands, "Monitor Index", MonitorIndex, font, game_settings, new_spinbox);
+fn video_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_server: &AssetServer, game_settings: &GameSettings) {
+	new_setting_item(commands, VSync, asset_server, game_settings, new_checkbox);
+	new_setting_item(commands, MaxFrameRate, asset_server, game_settings, new_spinbox);
+	new_setting_item(commands, Fullscreen, asset_server, game_settings, new_checkbox);
+	new_setting_item(commands, DefaultMonitor, asset_server, game_settings, new_dropdown);
+	new_setting_item(commands, MonitorIndex, asset_server, game_settings, new_spinbox);
 }
 
-fn audio_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handle<Font>, game_settings: &GameSettings) {
-	new_setting_item(commands, "Master Volume", MasterVolume, font.clone(), game_settings, new_slider);
-	new_setting_item(commands, "Music Volume", MusicVolume, font.clone(), game_settings, new_slider);
-	new_setting_item(commands, "Effects Volume", EffectsVolume, font, game_settings, new_slider);
+fn audio_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_server: &AssetServer, game_settings: &GameSettings) {
+	new_setting_item(commands, MasterVolume, asset_server, game_settings, new_slider);
+	new_setting_item(commands, MusicVolume, asset_server, game_settings, new_slider);
+	new_setting_item(commands, EffectsVolume, asset_server, game_settings, new_slider);
 }
 
-fn keybinds_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, font_bold: Handle<Font>, game_settings: &GameSettings) {
-	new_keybind_item(commands, "Pass", PassKeybind(game_settings.bid_0.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Bid 2", Bid2Keybind(game_settings.bid_2.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Bid 3", Bid3Keybind(game_settings.bid_3.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Bid 4", Bid4Keybind(game_settings.bid_4.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Play Card 1", PlayCard1Keybind(game_settings.play_card_1.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Play Card 2", PlayCard2Keybind(game_settings.play_card_2.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Play Card 3", PlayCard3Keybind(game_settings.play_card_3.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Play Card 4", PlayCard4Keybind(game_settings.play_card_4.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Play Card 5", PlayCard5Keybind(game_settings.play_card_5.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Play Card 6", PlayCard6Keybind(game_settings.play_card_6.clone()), game_settings, font_bold.clone());
-	new_keybind_item(commands, "Toggle Settings", ToggleSettingsKeybind(game_settings.toggle_settings.clone()), game_settings, font_bold);
+fn keybinds_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_server: &AssetServer, game_settings: &GameSettings) {
+	new_keybind_item(commands, PassKeybind(game_settings.bid_0.clone()), asset_server, game_settings);
+	new_keybind_item(commands, Bid2Keybind(game_settings.bid_2.clone()), asset_server, game_settings);
+	new_keybind_item(commands, Bid3Keybind(game_settings.bid_3.clone()), asset_server, game_settings);
+	new_keybind_item(commands, Bid4Keybind(game_settings.bid_4.clone()), asset_server, game_settings);
+	new_keybind_item(commands, PlayCard1Keybind(game_settings.play_card_1.clone()), asset_server, game_settings);
+	new_keybind_item(commands, PlayCard2Keybind(game_settings.play_card_2.clone()), asset_server, game_settings);
+	new_keybind_item(commands, PlayCard3Keybind(game_settings.play_card_3.clone()), asset_server, game_settings);
+	new_keybind_item(commands, PlayCard4Keybind(game_settings.play_card_4.clone()), asset_server, game_settings);
+	new_keybind_item(commands, PlayCard5Keybind(game_settings.play_card_5.clone()), asset_server, game_settings);
+	new_keybind_item(commands, PlayCard6Keybind(game_settings.play_card_6.clone()), asset_server, game_settings);
+	new_keybind_item(commands, ToggleSettingsKeybind(game_settings.toggle_settings.clone()), asset_server, game_settings);
 }
 
-fn account_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handle<Font>, game_settings: &GameSettings) {
-	new_setting_item(commands, "Save Credentials", SaveLoginCredentials, font.clone(), game_settings, new_checkbox);
-	new_setting_item(commands, "Account Actions", LogoutButton, font.clone(), game_settings, new_logout_button);
+fn account_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_server: &AssetServer, game_settings: &GameSettings) {
+	new_setting_item(commands, SaveLoginCredentials, asset_server, game_settings, new_checkbox);
+	new_setting_item(commands, LogoutButton, asset_server, game_settings, new_button);
 	//logout message
 	commands.spawn((
 		LogoutMessage,
@@ -288,9 +291,8 @@ fn account_tab(commands: &mut RelatedSpawnerCommands<ChildOf>, font: Handle<Font
 
 fn item_label_and_control<C: SettingsItem>(
 	commands: &mut RelatedSpawnerCommands<ChildOf>,
-	label: &str,
 	marker: C,
-	font: Handle<Font>,
+	asset_server: &AssetServer,
 	game_settings: &GameSettings,
 	interactive: InteractiveFn<C>
 ) {
@@ -300,7 +302,7 @@ fn item_label_and_control<C: SettingsItem>(
 			..default()
 		},
 		children![(
-			Text::new(label)
+			Text::new(C::get_label())
 		)]
 	));
 	//setting control
@@ -310,15 +312,14 @@ fn item_label_and_control<C: SettingsItem>(
 		}
 	)).with_children(|commands| {
 		//checkbox/spin box/dropdown/slider/keybind
-		interactive(commands, marker, font, game_settings);
+		interactive(commands, marker, asset_server, game_settings);
 	});
 }
 
 fn new_setting_item<C: SettingsItem>(
 	commands: &mut RelatedSpawnerCommands<ChildOf>,
-	label: &str,
 	marker: C,
-	font: Handle<Font>,
+	asset_server: &AssetServer,
 	game_settings: &GameSettings,
 	interactive: InteractiveFn<C>
 ) {
@@ -327,48 +328,49 @@ fn new_setting_item<C: SettingsItem>(
 			..default()
 		}
 	)).with_children(|commands| {
-		item_label_and_control(commands, label, marker, font, game_settings, interactive);
+		item_label_and_control(commands, marker, asset_server, game_settings, interactive);
 	});
 }
 
-fn new_keybind_item(
+fn new_keybind_item<C: SettingsItem>(
 	commands: &mut RelatedSpawnerCommands<ChildOf>,
-	label: &str,
-	marker: impl SettingsItem,
-	game_settings: &GameSettings,
-	font_bold: Handle<Font>
+	marker: C,
+	asset_server: &AssetServer,
+	game_settings: &GameSettings
 ) {
 	commands.spawn((
 		Node {
 			..default()
 		}
 	)).with_children(|commands| {
-		item_label_and_control(commands, label, marker, font_bold, game_settings, new_keybind);
+		item_label_and_control(commands, marker, asset_server, game_settings, new_keybind);
 	});
 }
 
-fn new_checkbox<C: SettingsItem<Output=bool>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, font: Handle<Font>, game_settings: &GameSettings) {
-	let default_val = C::get_setting(game_settings);
+fn new_checkbox<C: SettingsItem<Output=bool>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
+	let value = C::get_setting(game_settings);
 	todo!()
 }
 
-fn new_spinbox<C: SettingsItem<Output=f64>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, font: Handle<Font>, game_settings: &GameSettings) {
+fn new_spinbox<C: SettingsItem<Output=f64>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
 	todo!()
 }
 
-fn new_dropdown<C: SettingsItem>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, font: Handle<Font>, game_settings: &GameSettings) {
+fn new_dropdown<const N: usize, C: DropdownOptions<N>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
+	let (curr_opt, remain_opt) = C::get_options(game_settings);
 	todo!()
 }
 
-fn new_slider<C: SettingsItem<Output=f64>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, font_bold: Handle<Font>, game_settings: &GameSettings) {
+fn new_slider<C: SettingsItem<Output=f64>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
+	let font_bold = asset_server.load(GEORGIA_BOLD);
 	todo!()
 }
 
-fn new_logout_button<C: SettingsItem<Output=()>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, font: Handle<Font>, game_settings: &GameSettings) {
+fn new_button<C: SettingsButton>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
 	todo!()
 }
 
-fn new_keybind<C: SettingsItem<Output=Vec<KeyCode>>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, font: Handle<Font>, game_settings: &GameSettings) {
+fn new_keybind<C: SettingsItem<Output=Vec<KeyCode>>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
 	todo!()
 }
 
@@ -386,7 +388,7 @@ fn click_tab(
 	let tab_button = tab_button.get(trigger.target).expect("Tab button observer should target entity containing TabButton component");
 	tab_content.despawn_related::<Children>();
 	tab_content.with_children(|commands| {
-		(tab_button.tab_fn)(commands, tab_button.font.clone(), game_settings.as_ref());
+		(tab_button.tab_fn)(commands, asset_server.as_ref(), game_settings.as_ref());
 	});
 	
 	#[cfg(debug_assertions)]
@@ -425,7 +427,7 @@ fn logout(
 	trigger: Trigger<Pointer<Click>>,
 	mut commands: Commands,
 	server: Option<Res<ServerConn>>,
-	logout_button: Query<&mut Node, With<LogoutButton>>,
+	buttons: Query<&mut Node, With<LogoutButton>>,
 	mut logout_message: Query<(&mut Text, &ChildOf), With<LogoutMessage>>,
 	logout_message_node: Query<&mut Node>,
 	scene: Res<State<UiScene>>
@@ -435,7 +437,7 @@ fn logout(
 	if server.is_some() && matches!(scene.get(), UiScene::Settings) {
 		commands.remove_resource::<ServerConn>();
 	}
-	let mut logout_button = logout_button.single().expect(SINGLE_COMPONENT_QUERY_ERROR);
+	let mut logout_button = buttons.single().expect(SINGLE_COMPONENT_QUERY_ERROR);
 	let (mut logout_message, parent) = logout_message.single_mut().expect(SINGLE_COMPONENT_QUERY_ERROR);
 	let mut logout_message_node = logout_message_node.get(parent.parent()).expect(SINGLE_COMPONENT_QUERY_ERROR);
 	todo!("disable and gray out the logout button");
@@ -455,6 +457,7 @@ fn logout(
 trait SettingsItem: Component {
 	type Output;
 	fn get_setting(game_settings: &GameSettings) -> Self::Output;
+	fn get_label() -> &'static str;
 }
 
 #[derive(Component)]
@@ -478,152 +481,97 @@ struct TabContent;
 // #[derive(Component)]
 // struct RestartMessage;
 
-#[derive(Component)]
-struct VSync;
-impl SettingsItem for VSync {
-	type Output = bool;
-	fn get_setting(game_settings: &GameSettings) -> bool {game_settings.vsync}
+macro_rules! settings_item {
+    ($name:ident, $output:ty, $field:ident, $label:literal) => {
+        #[derive(Component)]
+        struct $name;
+        impl SettingsItem for $name {
+            type Output = $output;
+            const fn get_setting(game_settings: &GameSettings) -> Self::Output {game_settings.$field.clone()}
+	        const fn get_label() -> &'static str {$label}
+        }
+    };
+	($name:ident, $field:ident, $output:ty, $label:literal) => {
+        #[derive(Component)]
+        struct $name($output);
+        impl SettingsItem for $name {
+            type Output = $output;
+            const fn get_setting(game_settings: &GameSettings) -> Self::Output {game_settings.$field.clone()}
+	        const fn get_label() -> &'static str {$label}
+        }
+    };
 }
 
-#[derive(Component)]
-struct MaxFrameRate;
-impl SettingsItem for MaxFrameRate {
-	type Output = f64;
-	fn get_setting(game_settings: &GameSettings) -> f64 {game_settings.max_frame_rate}
-}
-
-#[derive(Component)]
-struct Fullscreen;
-impl SettingsItem for Fullscreen {
-	type Output = bool;
-	fn get_setting(game_settings: &GameSettings) -> bool {game_settings.fullscreen}
-}
-
-#[derive(Component)]
-struct DefaultMonitor;
-impl SettingsItem for DefaultMonitor {
-	type Output = MonitorSelection;
-	fn get_setting(game_settings: &GameSettings) -> MonitorSelection {game_settings.default_monitor}
-}
-
-#[derive(Component)]
-struct MonitorIndex;
-impl SettingsItem for MonitorIndex {
-	type Output = usize;
-	fn get_setting(game_settings: &GameSettings) -> usize {game_settings.monitor_index}
-}
-
-#[derive(Component)]
-struct MasterVolume;
-impl SettingsItem for MasterVolume {
-	type Output = f64;
-	fn get_setting(game_settings: &GameSettings) -> f64 {game_settings.master_volume}
-}
-
-#[derive(Component)]
-struct MusicVolume;
-impl SettingsItem for MusicVolume {
-	type Output = f64;
-	fn get_setting(game_settings: &GameSettings) -> f64 {game_settings.music_volume}
-}
-
-#[derive(Component)]
-struct EffectsVolume;
-impl SettingsItem for EffectsVolume {
-	type Output = f64;
-	fn get_setting(game_settings: &GameSettings) -> f64 {game_settings.effects_volume}
-}
-
-#[derive(Component)]
-struct PassKeybind(Vec<KeyCode>);
-impl SettingsItem for PassKeybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.bid_0.clone()}
-}
-
-#[derive(Component)]
-struct Bid2Keybind(Vec<KeyCode>);
-impl SettingsItem for Bid2Keybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.bid_2.clone()}
-}
-
-#[derive(Component)]
-struct Bid3Keybind(Vec<KeyCode>);
-impl SettingsItem for Bid3Keybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.bid_3.clone()}
-}
-
-#[derive(Component)]
-struct Bid4Keybind(Vec<KeyCode>);
-impl SettingsItem for Bid4Keybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.bid_4.clone()}
-}
-
-#[derive(Component)]
-struct PlayCard1Keybind(Vec<KeyCode>);
-impl SettingsItem for PlayCard1Keybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.play_card_1.clone()}
-}
-
-#[derive(Component)]
-struct PlayCard2Keybind(Vec<KeyCode>);
-impl SettingsItem for PlayCard2Keybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.play_card_2.clone()}
-}
-
-#[derive(Component)]
-struct PlayCard3Keybind(Vec<KeyCode>);
-impl SettingsItem for PlayCard3Keybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.play_card_3.clone()}
-}
-
-#[derive(Component)]
-struct PlayCard4Keybind(Vec<KeyCode>);
-impl SettingsItem for PlayCard4Keybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.play_card_4.clone()}
-}
-
-#[derive(Component)]
-struct PlayCard5Keybind(Vec<KeyCode>);
-impl SettingsItem for PlayCard5Keybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.play_card_5.clone()}
-}
-
-#[derive(Component)]
-struct PlayCard6Keybind(Vec<KeyCode>);
-impl SettingsItem for PlayCard6Keybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.play_card_6.clone()}
-}
-
-#[derive(Component)]
-struct ToggleSettingsKeybind(Vec<KeyCode>);
-impl SettingsItem for ToggleSettingsKeybind {
-	type Output = Vec<KeyCode>;
-	fn get_setting(game_settings: &GameSettings) -> Vec<KeyCode> {game_settings.toggle_settings.clone()}
-}
-
-#[derive(Component)]
-struct SaveLoginCredentials;
-impl SettingsItem for SaveLoginCredentials {
-	type Output = bool;
-	fn get_setting(game_settings: &GameSettings) -> bool {game_settings.save_login_credentials}
-}
+settings_item!(VSync, bool, vsync, "VSync");
+settings_item!(MaxFrameRate, f64, max_frame_rate, "Max Frame Rate");
+settings_item!(Fullscreen, bool, fullscreen, "Fullscreen");
+settings_item!(DefaultMonitor, u8, default_monitor, "Default Monitor");
+settings_item!(MonitorIndex, usize, monitor_index, "Monitor Index");
+settings_item!(MasterVolume, f64, master_volume, "Master Volume");
+settings_item!(MusicVolume, f64, music_volume, "Music Volume");
+settings_item!(EffectsVolume, f64, effects_volume, "Effects Volume");
+settings_item!(PassKeybind, bid_0, Vec<KeyCode>, "Pass");
+settings_item!(Bid2Keybind, bid_2, Vec<KeyCode>, "Bid 2");
+settings_item!(Bid3Keybind, bid_3, Vec<KeyCode>, "Bid 3");
+settings_item!(Bid4Keybind, bid_4, Vec<KeyCode>, "Bid 4");
+settings_item!(PlayCard1Keybind, play_card_1, Vec<KeyCode>, "Play Card 1");
+settings_item!(PlayCard2Keybind, play_card_2, Vec<KeyCode>, "Play Card 2");
+settings_item!(PlayCard3Keybind, play_card_3, Vec<KeyCode>, "Play Card 3");
+settings_item!(PlayCard4Keybind, play_card_4, Vec<KeyCode>, "Play Card 4");
+settings_item!(PlayCard5Keybind, play_card_5, Vec<KeyCode>, "Play Card 5");
+settings_item!(PlayCard6Keybind, play_card_6, Vec<KeyCode>, "Play Card 6");
+settings_item!(ToggleSettingsKeybind, toggle_settings, Vec<KeyCode>, "Toggle Settings");
+settings_item!(SaveLoginCredentials, bool, save_login_credentials, "Save Credentials");
 
 #[derive(Component)]
 struct LogoutButton;
 impl SettingsItem for LogoutButton {
-	type Output = ();
-	fn get_setting(_game_settings: &GameSettings) {panic!("This is only to satisfy the compiler")}
+	type Output = !;
+	const fn get_setting(_game_settings: &GameSettings) -> Self::Output {panic!("This item does not have a corresponding setting")}
+	const fn get_label() -> &'static str {"Account Actions"}
+}
+trait SettingsButton: SettingsItem {
+	fn get_btn_label() -> &'static str;
+}
+impl SettingsButton for LogoutButton {
+	const fn get_btn_label() -> &'static str {"Logout"}
 }
 
 #[derive(Component)]
 struct LogoutMessage;
+
+trait DropdownOptions<const N: usize>: SettingsItem<Output=u8> {
+	fn get_options(game_settings: &GameSettings) -> (&'static str, [&'static str; N]);
+	fn get_monitor_selection(curr_index: u8) -> MonitorSelection;
+}
+
+impl DropdownOptions<2> for DefaultMonitor {
+	const fn get_options(game_settings: &GameSettings) -> (&'static str, [&'static str; 2]) {
+		static CURRENT: &str = "Current";
+		static PRIMARY: &str = "Primary";
+		static INDEX: &str = "Index";
+		match game_settings.default_monitor {
+			1 => (PRIMARY, [CURRENT, INDEX]),
+			2 => (INDEX, [CURRENT, PRIMARY]),
+			_ => (CURRENT, [PRIMARY, INDEX])
+		}
+	}
+	
+	const fn get_monitor_selection(game_settings: &GameSettings) -> MonitorSelection {
+		match game_settings.default_monitor {
+			1 => MonitorSelection::Current,
+			2 => MonitorSelection::Index(game_settings.monitor_index),
+			_ => MonitorSelection::Primary
+		}
+	}
+}
+
+fn update_checkbox() {}
+
+fn update_spinbox() {}
+
+fn update_dropdown() {}
+
+fn update_button() {}
+
+fn update_keybind() {}

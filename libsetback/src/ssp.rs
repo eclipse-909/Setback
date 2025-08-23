@@ -63,7 +63,6 @@ impl Display for Version {
 //Internal - server/game sends message to itself.
 ///When the client sends a request, they won't wait for a response.
 ///The client must handle the response the same way it would handle a spontaneous message.
-#[repr(u8)]
 #[derive(Encode, Decode)]
 pub enum Protocol {
 	///Client ---Authenticate--> Server<br>

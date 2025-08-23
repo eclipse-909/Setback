@@ -61,7 +61,7 @@ pub struct GameSettings {
 	pub vsync: bool,
 	pub max_frame_rate: f64,
 	pub fullscreen: bool,
-	pub default_monitor: MonitorSelection,
+	pub default_monitor: u8,
 	pub monitor_index: usize,
 	
 	//audio
@@ -92,7 +92,7 @@ impl Default for GameSettings {
 		vsync: false,
 		max_frame_rate: 60.,
 		fullscreen: true,
-		default_monitor: MonitorSelection::Primary,
+		default_monitor: MonitorSetting::Primary,
 		monitor_index: 0,
 		
 		//audio

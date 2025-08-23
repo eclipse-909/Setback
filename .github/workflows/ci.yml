@@ -72,13 +72,13 @@ jobs:
         include:
           # Linux-only packages (server components)
           - os: ubuntu-latest
-            package: admin_controller
-          - os: ubuntu-latest
             package: setback_server
           - os: ubuntu-latest
             package: setback_website
           - os: ubuntu-latest
             package: libsetback
+          - os: ubuntu-latest
+            package: setbackctl
           - os: ubuntu-latest
             package: setbackd
           # Cross-platform package (client)
@@ -248,9 +248,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p SetbackServer
-          cp target/release/admin_controller SetbackServer/
           cp target/release/setback_server SetbackServer/
           cp target/release/setback_website SetbackServer/
+          cp target/release/setbackctl SetbackServer/
           cp target/release/setbackd SetbackServer/
           chmod +x SetbackServer/*
           cp -r setback_website/client SetbackServer/

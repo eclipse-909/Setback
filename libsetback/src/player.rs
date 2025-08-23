@@ -55,7 +55,6 @@ impl Player {
 	pub fn can_follow(&self, lead: Suit) -> bool { self.hand.iter().any(|card| {card.suit == lead}) }
 }
 
-#[repr(u8)]
 pub enum PlayerType {
 	///Yourself in singleplayer.
 	SingleplayerSelf,

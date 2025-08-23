@@ -45,7 +45,6 @@ impl Display for Card {
 	}
 }
 
-#[repr(u8)]
 #[derive(Encode, Decode, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Suit {
 	Hearts,
@@ -70,7 +69,6 @@ pub struct GameFilter {
 	pub max_players_value: u8
 }
 
-#[repr(u8)]
 #[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
 pub enum Comparison {
 	Equal,
@@ -120,7 +118,6 @@ pub struct RoundScores {
 ///The game will emit these events in singleplayer.
 ///In multiplayer, the TCP stream will receive [ssp] messages from the server, which may contain these events.
 #[derive(Encode, Decode)]
-#[repr(u8)]
 pub enum GameEvent {
 	///Index player bid the amount
 	PlayerBid{index: u8, amount: u8},
@@ -142,7 +139,6 @@ pub enum GameEvent {
 	GameError(Error)
 }
 
-#[repr(u8)]
 pub enum TurnResult {
 	NextTurn,
 	///A re-deal is required after this one
@@ -163,7 +159,6 @@ pub struct PublicGame {
 // clean up unused errors
 // rename poorly-named errors
 // add http status errors that can be returned from the api
-#[repr(u8)]
 #[derive(Encode, Decode, Debug, Clone, Copy)]
 pub enum Error {
 	BadRequest,
