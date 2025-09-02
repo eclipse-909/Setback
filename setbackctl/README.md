@@ -1,4 +1,4 @@
-# admin_controller
+# setbackctl
 This is a CLI app that interfaces with the server and has access to admin commands. Upon startup, the app will try to detect the running servers. If none are running, the app will display that message and exit. If one is running, it will immediately try connecting to and interfacing with that server. If two are running, you will be prompted to select which server to interface into.
 ## Commands
 Commands always accessible.
@@ -12,7 +12,7 @@ Commands always accessible.
 ## Admin Commands
   Commands only accessible after authenticating.
 - close - stops the server from accepting new connections. The server will automatically shutdown when all players have disconnected. All players will receive a message that the server is closing. The game client will handle this by attempting to reconnect to the server that is accepting new connections, but only if the client is not in a setup/game, and there is a running server accepting new connections.
-- reopen - allows the server to accept new connections again. The server starts open so this is not needed when the server is first started. This should only be used if you closed the server and want to reopen it. All players will receive a message that the server is reopening. The game client will handle this by not disconnecting from the server.  
+- reopen - allows the server to accept new connections again. The server starts open so this is not needed when the server is first started. This should only be used if you closed the server and want to reopen it. All players will receive a message that the server is reopening. The game client will handle this by not disconnecting from the server.
 - kill - immediately kills the running server process.
 - logout - deauthenticates admin access.
 ## Network

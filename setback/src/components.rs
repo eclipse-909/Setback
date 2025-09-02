@@ -1,6 +1,6 @@
 use {
 	crate::plugins::*,
-	bevy::prelude::{Component, World, Image, Handle}
+	bevy::prelude::{Component, World, Text}
 };
 
 /// The UI for each scene is built on an entity with a RootNode component.
@@ -18,4 +18,17 @@ pub struct CursorComponent {
 }
 
 #[derive(Component)]
-pub struct Url(pub String);
+#[require(Text)]
+pub struct Url;
+
+#[derive(Component)]
+pub struct UsernameInput;
+
+#[derive(Component)]
+pub struct PasswordInput;
+
+#[derive(Component)]
+pub struct GameCodeInput;
+
+#[derive(Component)]
+pub struct GamePasswordInput;

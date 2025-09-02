@@ -63,7 +63,6 @@ impl Display for Version {
 //Internal - server/game sends message to itself.
 ///When the client sends a request, they won't wait for a response.
 ///The client must handle the response the same way it would handle a spontaneous message.
-#[repr(u8)]
 #[derive(Encode, Decode)]
 pub enum Protocol {
 	///Client ---Authenticate--> Server<br>
@@ -97,13 +96,13 @@ pub enum Protocol {
 	///Client ---CreateGame--> Server<br>
 	///Client <--Game--- Server<br>
 	///Request only<br><br>
-	///Client creates game.
-	CreateGame{public: bool},
+	///Client creates game. A password indicates a private game.
+	CreateGame{password: Option<String>},
 	///Client ---JoinGame--> Server<br>
 	///Client <--Game--- Server<br>
 	///Request only<br><br>
-	///Client requests to join game.
-	JoinGame{code: u32},
+	///Client requests to join game. A password indicates a private game.
+	JoinGame{code: String, password: Option<String>},
 	///Client ---CreateGame--> Server<br>
 	///Client <--Game--- Server<br>
 	///Response only<br><br>

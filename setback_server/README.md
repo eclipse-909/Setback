@@ -2,7 +2,7 @@
 This is the dedicated server that will host multiplayer games for Setback.
 ## Network
 The server will use the following ports:
-- ADMIN_PORT_1 - incoming traffic blocked by firewall. See [admin_controller](../admin_controller/README.md)
+- ADMIN_PORT_1 - incoming traffic blocked by firewall. See [setbackctl](../admin_controller/README.md)
 - ADMIN_PORT_2 - ibid
 - ACCEPT_PORT - this port is used to accept clients who are connecting to the server. Once a client has been accepted and authenticated, the server will send them the CLIENT_PORT that is being used by the process. The client will disconnect from the ACCEPT_PORT and connect to the CLIENT_PORT. If 2 servers are running, only 1 will have the ACCEPT_PORT open because only 1 of the servers should accept new connections. The purpose of this is to gracefully shutdown one server and start another server (presumably for an update). The old server stops accepting clients and the new server takes over.
 - CLIENT_PORT_1 - after a client has been accepted and authorized by the server, they are sent a CLIENT_PORT to connect to. Once the client connects with this port, all further communication between the client and server will take place on this port.

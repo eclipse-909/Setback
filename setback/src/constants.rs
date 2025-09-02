@@ -1,27 +1,26 @@
 use {
 	crate::models::*,
-	bevy::prelude::*
+	bevy::prelude::*,
+	regex::Regex,
+	once_cell::sync::Lazy
 };
 
 pub static CARDS_ICON: &[u8] = include_bytes!("../assets/images/cardsIcon.png");
 pub static CURSOR_ATLAS: &str = "setback/assets/cursors/cursor_atlas.json";//TODO these paths may need to be changed for release
-pub static USR_CRD: &str = "setback/usr/usr.crd";
+pub static USR_CRD: &str = "setback/usr.crd";
 pub static LATEST_LOG: &str = "setback/logs/latest.log";
 pub static CRASH_LOG: &str = "setback/logs/crash.log";
-pub static CURSOR_ERROR: &str = "There should be exactly one cursor at all times";
+pub static SETTINGS_CFG: &str = "setback/settings.cfg";
+pub static SINGLE_COMPONENT_QUERY_ERROR: &str = "There should be exactly one component returned from the query";
 pub static TASK_ERROR: &str = "Failed to send command queue following task completion";
-pub static ROOT_NODE_ERROR: &str = "There should be exactly one RootNode";
-pub static BTN_CONTAINER_ERR: &str = "There should be exactly one ButtonContainer";
 pub static KEYRING_PASSWORD: &str = "service-keyring-setback-user-password";
-pub static URL_INDEX: &str = "";
-pub static URL_404: &str = "file_not_found";
-pub static URL_DOWNLOAD: &str = "downloads";
-pub static URL_LOGIN: &str = "login";
-pub static URL_ACCOUNT: &str = "account";
+pub static URL_SIGNUP: &str = "signup";
 pub static GEORGIA: &str = "fonts/georgia.ttf";
 pub static GEORGIA_BOLD: &str = "fonts/georgiab.ttf";
 pub static GEORGIA_ITALIC: &str = "fonts/georgiai.ttf";
 pub static TIMES_NEW_ROMAN: &str = "fonts/times.ttf";
+pub static LOADING: &str = "images/loading.gif";
+pub static GAME_CODE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9]*$").unwrap());
 
 /// Singleton for [Pallet] struct
 pub static PALLET: Pallet = Pallet {
@@ -37,7 +36,10 @@ pub static PALLET: Pallet = Pallet {
 	card_shadow: Color::srgba(0., 0., 0., 0.3),
 	text_shadow: Color::srgba(0., 0., 0., 0.5),
 	url: Color::srgb_u8(173, 194, 252),
-	border_radius: Val::Px(12.)
+	border_radius: Val::Px(12.),
+	disabled_color: Color::srgb_u8(0x66, 0x66, 0x66),
+	disabled_bg: Color::srgb_u8(0x33, 0x33, 0x33),
+	modal_overlay: Color::srgba(0., 0., 0., 0.7)
 };
 
 pub const CURSOR_FPS: f32 = 15.;

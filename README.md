@@ -1,6 +1,7 @@
 [![CI](https://github.com/eclipse-909/Setback-Source/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eclipse-909/Setback-Source/actions/workflows/ci.yml)
-- [admin_controller README](admin_controller/README.md)
 - [libsetback README](libsetback/README.md)
 - [setback README](setback/README.md)
 - [setback_server README](setback_server/README.md)
 - [setback_website README](setback_website/README.md)
+- [setbackctl README](setbackctl/README.md)
+- [setbackd README](setbackd/README.md)

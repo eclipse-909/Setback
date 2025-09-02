@@ -25,11 +25,15 @@ pub trait Connection {
 		writer
 			.write_u32_le(bytes.len() as u32)
 			.await
-			.map_err(|_| Error::IoError)?;
+			.map_err(|_| Error::NetworkError)?;
 		writer
 			.write_all(bytes.as_slice())
 			.await
-			.map_err(|_| Error::IoError)
+			.map_err(|_| Error::NetworkError)?;
+		writer
+			.flush()
+			.await
+			.map_err(|_| Error::NetworkError)
 	}}
 	
 	fn read(reader: &mut BufReader<impl AsyncReadExt + Unpin>, buffer: &mut Vec<u8>) -> impl Future<Output=Result<Ssp, Error>> {async move {
@@ -48,9 +52,9 @@ pub trait SetbackConnection: Connection + Sized {
 	///- Connects to Setback dedicated server on accept port.
 	///- Reconnects to server on client port.
 	///- Listens for messages from server in background task and sends them via mpsc channel.
-	fn new(username: String, password: String, api: &impl WebsiteConnection) -> impl Future<Output=Result<Self, Error>>;
-	fn send_create_game(&mut self, public: bool) -> impl Future<Output=Result<(), Error>>;
-	fn send_join_game(&mut self, code: u32) -> impl Future<Output=Result<(), Error>>;
+	fn new(username: String, password: String, api: &impl WebsiteConnection) -> impl Future<Output=Result<(Self, UnboundedReceiver<Result<Ssp, Error>>), Error>>;
+	fn send_create_game(&mut self, password: Option<String>) -> impl Future<Output=Result<(), Error>>;
+	fn send_join_game(&mut self, code: String, password: Option<String>) -> impl Future<Output=Result<(), Error>>;
 	fn send_search_games(&mut self, filter: GameFilter) -> impl Future<Output=Result<(), Error>>;
 	///Host-only
 	fn send_game_meta(&mut self, setup_data: SetupData) -> impl Future<Output=Result<(), Error>>;
@@ -69,8 +73,8 @@ pub trait WebsiteConnection {
 	fn new_api() -> Self;
 	fn as_client(&self) -> &Client;
 	fn login(&self, credentials: &LoginRequest) -> impl Future<Output=Result<LoginResponse, Error>>;
-	fn logout(&self, auth_token: String) -> impl Future<Output=Result<(), Error>>;
-	fn id(&self, auth_token: String) -> impl Future<Output=Result<u32, Error>>;
+	fn logout(&self, auth_token: &str) -> impl Future<Output=Result<(), Error>>;
+	fn id(&self, auth_token: &str) -> impl Future<Output=Result<u32, Error>>;
 	fn update(&self) -> impl Future<Output=Result<Version, Error>>;
 }
 
@@ -78,15 +82,14 @@ pub trait WebsiteConnection {
 pub struct ServerConnection {
 	tcp_writer: BufWriter<OwnedWriteHalf>,
 	cancellation_token: CancellationToken,
-	auth_token: String,
-	refresh_token: String,
-	pub ssp_rx: UnboundedReceiver<Result<Ssp, Error>>,
+	pub auth_token: String,
+	pub refresh_token: String,
 	pub account_id: u32,
 	pub ready: bool
 }
 
 impl SetbackConnection for ServerConnection {
-	async fn new(username: String, password: String, api: &impl WebsiteConnection) -> Result<Self, Error> {
+	async fn new(username: String, password: String, api: &impl WebsiteConnection) -> Result<(Self, UnboundedReceiver<Result<Ssp, Error>>), Error> {
 		//login and get account_id
 		let session = api.login(&LoginRequest{username, password}).await?;
 		
@@ -101,7 +104,6 @@ impl SetbackConnection for ServerConnection {
 			cancellation_token,
 			auth_token: session.auth_token.clone(),
 			refresh_token: session.refresh_token,
-			ssp_rx,
 			account_id: session.account_id,
 			ready: false
 		};
@@ -132,15 +134,15 @@ impl SetbackConnection for ServerConnection {
 			_ = read_cancel_token.cancelled() => {}
 		}});
 		
-		Ok(server_connection)
+		Ok((server_connection, ssp_rx))
 	}
 	
-	async fn send_create_game(&mut self, public: bool) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::CreateGame{public}, self.account_id)).await
+	async fn send_create_game(&mut self, password: Option<String>) -> Result<(), Error> {
+		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::CreateGame{password}, self.account_id)).await
 	}
 	
-	async fn send_join_game(&mut self, code: u32) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::JoinGame{code}, self.account_id)).await
+	async fn send_join_game(&mut self, code: String, password: Option<String>) -> Result<(), Error> {
+		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::JoinGame{code, password}, self.account_id)).await
 	}
 	
 	async fn send_search_games(&mut self, filter: GameFilter) -> Result<(), Error> {
@@ -186,7 +188,7 @@ impl SetbackConnection for ServerConnection {
 			.json(&RefreshRequest {refresh_token: self.refresh_token.clone()})
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?
 			.json::<RefreshResponse>()
@@ -224,7 +226,7 @@ impl ClientConnection {
 			let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
 			let ssp: Ssp = Self::read(&mut reader, &mut buffer).await.map_err(|_| Error::ServerError)?;
 			if let Protocol::Authenticate(auth_token) = ssp.protocol {
-				let account_id: u32 = api.id(auth_token).await.map_err(|_| Error::ServerError)?;
+				let account_id: u32 = api.id(auth_token.as_str()).await.map_err(|_| Error::ServerError)?;
 				if account_id != ssp.src_id {
 					return Err(Error::Forbidden);
 				}
@@ -251,7 +253,7 @@ impl ClientConnection {
 			let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
 			let ssp: Ssp = Self::read(&mut reader, &mut buffer).await.map_err(|_| Error::ServerError)?;
 			if let Protocol::Authenticate(auth_token) = ssp.protocol {
-				let account_id: u32 = api.id(auth_token).await.map_err(|_| Error::ServerError)?;
+				let account_id: u32 = api.id(auth_token.as_str()).await.map_err(|_| Error::ServerError)?;
 				if account_id != ssp.src_id {
 					return Err(Error::Forbidden);
 				}
@@ -309,7 +311,7 @@ impl WebsiteConnection for Client {
 			.json(credentials)
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?
 			.json::<LoginResponse>()
@@ -317,25 +319,25 @@ impl WebsiteConnection for Client {
 			.map_err(|_| Error::BadRequest)
 	}
 	
-	async fn logout(&self, auth_token: String) -> Result<(), Error> {
+	async fn logout(&self, auth_token: &str) -> Result<(), Error> {
 		self
 			.get(website!(URL_API_LOGOUT))
 			.bearer_auth(auth_token)
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?;
 		Ok(())
 	}
 	
-	async fn id(&self, auth_token: String) -> Result<u32, Error> {
+	async fn id(&self, auth_token: &str) -> Result<u32, Error> {
 		Ok(self
 			.get(website!(URL_API_ID))
 			.bearer_auth(auth_token)
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?
 			.json::<IdResponse>()
@@ -350,7 +352,7 @@ impl WebsiteConnection for Client {
 			.get(website!(URL_API_UPDATE))
 			.send()
 			.await
-			.map_err(|_| Error::IoError)?
+			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|err| Error::from(err.status().unwrap()))?
 			.json::<Version>()

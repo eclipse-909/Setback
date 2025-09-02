@@ -29,15 +29,15 @@ pub mod testing {
 	}
 	
 	impl SetbackConnection for MockServer {
-		async fn new(username: String, password: String, api: &impl WebsiteConnection) -> Result<Self, Error> {
+		async fn new(username: String, password: String, api: &impl WebsiteConnection) -> Result<(Self, UnboundedReceiver<Result<Ssp, Error>>), Error> {
 			todo!()
 		}
 		
-		async fn send_create_game(&mut self, public: bool) -> Result<(), Error> {
+		async fn send_create_game(&mut self, password: Option<String>) -> Result<(), Error> {
 			todo!()
 		}
 		
-		async fn send_join_game(&mut self, code: u32) -> Result<(), Error> {
+		async fn send_join_game(&mut self, code: String, password: Option<String>) -> Result<(), Error> {
 			todo!()
 		}
 		
@@ -102,8 +102,8 @@ pub mod testing {
 				account_id: 1,
 			})
 		}
-		async fn logout(&self, _auth_token: String) -> Result<(), Error> {Ok(())}
-		async fn id(&self, _auth_token: String) -> Result<u32, Error> {Ok(1)}
+		async fn logout(&self, _auth_token: &str) -> Result<(), Error> {Ok(())}
+		async fn id(&self, _auth_token: &str) -> Result<u32, Error> {Ok(1)}
 		async fn update(&self) -> Result<Version, Error> {Ok(SETBACK_VERSION)}
 	}
 }

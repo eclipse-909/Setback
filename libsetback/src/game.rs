@@ -44,7 +44,6 @@ pub struct Game {
 impl Game {
 	/// Starts the game and initializes the game data.
 	/// The caller must deal the cards after this function has been called.
-	#[inline(always)]
 	pub fn new(mut setup_data: SetupData) -> Self {
 		//consolidate teams so the team_ids match indices contiguously starting at 0
 		let mut team_ids: HashMap<u8, u8> = HashMap::with_capacity(setup_data.players.len());

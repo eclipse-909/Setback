@@ -17,7 +17,10 @@ pub struct Pallet {
 	pub card_shadow: Color,
 	pub text_shadow: Color,
 	pub url: Color,
-	pub border_radius: Val
+	pub border_radius: Val,
+	pub disabled_color: Color,
+	pub disabled_bg: Color,
+	pub modal_overlay: Color
 }
 
 #[derive(Deserialize)]
