@@ -1005,7 +1005,7 @@ fn update_menu_button(
 		mut outline,
 		children
 	) in menu_buttons.iter_mut() {
-		let child = if children.len() == 1 {children[0]} else {unreachable!("Node is supposed to have 1 child")};
+		let child = if children.len() == 1 {(*children)[0]} else {unreachable!("Node is supposed to have 1 child")};
 		let mut text_color = text_colors.get_mut(child).expect("Child is supposed to have TextColors component");
 		match *interaction {
 			Interaction::None => {

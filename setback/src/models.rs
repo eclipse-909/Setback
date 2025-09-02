@@ -1,7 +1,6 @@
 use {
-	crate::resources::*,
 	bevy::prelude::*,
-	serde::{Serialize, Deserialize}
+	serde::Deserialize
 };
 
 /// This struct is the color pallet for the UI. It is intended to be used as a singleton, so don't create another pallet.
