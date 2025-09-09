@@ -57,21 +57,9 @@ pub fn compare_version(current: Version, latest: Version) -> ClientUpdate {
 	}
 }
 
-pub fn menu_background(commands: &mut Commands, times: Handle<Font>, with_children: impl FnOnce(&mut RelatedSpawnerCommands<ChildOf>)) {
+pub fn menu_background(commands: &mut Commands, times: Handle<Font>, body: Node, with_children: impl FnOnce(&mut RelatedSpawnerCommands<ChildOf>)) {
 	commands.spawn((
-		Node {
-			width: Val::Percent(100.),
-			height: Val::Percent(100.),
-			margin: UiRect::all(Val::Px(0.)),
-			padding: UiRect::all(Val::Px(0.)),
-			box_sizing: BoxSizing::BorderBox,
-			min_height: Val::Vh(100.),
-			display: Display::Flex,
-			justify_content: JustifyContent::Center,
-			align_items: AlignItems::Center,
-			overflow: Overflow::hidden(),
-			..default()
-		},
+		body,
 		BackgroundColor(PALLET.primary_green),
 		RootNode
 	)).with_children(|commands| {

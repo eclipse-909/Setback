@@ -3,7 +3,9 @@ use {
 		constants::*,
 		resources::*,
 		states::*,
-		systems::*
+		systems::*,
+		components::*,
+		plugins::*
 	},
 	bevy::{
 		ecs::{
@@ -17,8 +19,6 @@ use {
 	libsetback::{SETBACK_VERSION, WebsiteConnection},
 	std::{convert::Infallible, fs}
 };
-use crate::components::CursorComponent;
-use crate::plugins::CursorStyle;
 
 pub struct SettingsPlugin;
 
@@ -37,7 +37,19 @@ impl Plugin for SettingsPlugin {
 
 fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>, game_settings: Res<GameSettings>) {
 	info!("Entering Settings");
-	menu_background(&mut commands, asset_server.load(TIMES_NEW_ROMAN), |commands| {
+	menu_background(&mut commands, asset_server.load(TIMES_NEW_ROMAN), Node {
+		width: Val::Percent(100.),
+		height: Val::Percent(100.),
+		margin: UiRect::axes(Val::Px(0.), Val::Percent(3.)),
+		padding: UiRect::all(Val::Px(0.)),
+		box_sizing: BoxSizing::BorderBox,
+		min_height: Val::Vh(100.),
+		display: Display::Flex,
+		justify_content: JustifyContent::Center,
+		align_items: AlignItems::FlexStart,
+		overflow: Overflow::hidden(),
+		..default()
+	}, |commands| {
 		settings_menu(commands, asset_server.as_ref(), game_settings);
 	});
 }
@@ -93,7 +105,8 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_serve
 			},
 			BackgroundColor(Color::srgb_u8(26, 122, 62).with_alpha(0.3)),
 			BorderColor(PALLET.accent_gold),
-			BorderBottom(Val::Px(2.))
+			// BorderBottom(Val::Px(2.)),
+			Outline::new(Val::Px(2.), Val::Px(0.), PALLET.accent_gold)
 		)).with_children(|commands| {
 			//back button
 			commands.spawn((
@@ -170,7 +183,8 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_serve
 					..default()
 				},
 				BackgroundColor(PALLET.accent_gold),
-				BorderRight(Val::Px(1.)),
+				// BorderRight(Val::Px(1.)),
+				Outline::new(Val::Px(1.), Val::Px(0.), PALLET.accent_gold),
 				BorderColor(PALLET.accent_gold),
 				TabButton {tab_fn: video_tab, font: font.clone()},
 				CursorComponent {
@@ -194,7 +208,8 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_serve
 					..default()
 				},
 				BackgroundColor(Color::srgb_u8(13, 93, 46).with_alpha(0.5)),
-				BorderRight(Val::Px(1.)),
+				// BorderRight(Val::Px(1.)),
+				Outline::new(Val::Px(1.), Val::Px(0.), PALLET.accent_gold),
 				BorderColor(PALLET.accent_gold),
 				TabButton {tab_fn: audio_tab, font: font_bold.clone()},
 				CursorComponent {
@@ -217,7 +232,8 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_serve
 					..default()
 				},
 				BackgroundColor(Color::srgb_u8(13, 93, 46).with_alpha(0.5)),
-				BorderRight(Val::Px(1.)),
+				// BorderRight(Val::Px(1.)),
+				Outline::new(Val::Px(1.), Val::Px(0.), PALLET.accent_gold),
 				BorderColor(PALLET.accent_gold),
 				TabButton {tab_fn: keybinds_tab, font: font.clone()},
 				CursorComponent {
@@ -273,7 +289,8 @@ pub fn settings_menu(commands: &mut RelatedSpawnerCommands<ChildOf>, asset_serve
 				padding: UiRect::all(Val::Px(20.)),
 				..default()
 			},
-			BorderTop(Val::Px(1.)),
+			// BorderTop(Val::Px(1.)),
+			Outline::new(Val::Px(1.), Val::Px(0.), PALLET.accent_gold),
 			BorderColor(PALLET.accent_gold.with_alpha(0.3)),
 			children![(
 				Text::new(format!("Version {SETBACK_VERSION}")),
@@ -604,7 +621,12 @@ struct KeybindModalDisplay;
 #[derive(Component)]
 struct TabActive;
 
-fn new_checkbox<C: SettingsItem<Output=bool>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
+fn new_checkbox<C: SettingsItem<Output=bool>>(
+	commands: &mut RelatedSpawnerCommands<ChildOf>,
+	marker: C,
+	asset_server: &AssetServer,
+	game_settings: &GameSettings
+) {
 	let checked = C::get_setting(game_settings);
 	let cursor = asset_server.load(BJ_NORMAL_SELECT);
 	commands.spawn((
@@ -640,7 +662,12 @@ fn new_checkbox<C: SettingsItem<Output=bool>>(commands: &mut RelatedSpawnerComma
 	)).observe(C::apply());
 }
 
-fn new_spinbox<C: SettingsItem<Output=usize>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
+fn new_spinbox<C: SettingsItem<Output=usize>>(
+	commands: &mut RelatedSpawnerCommands<ChildOf>,
+	marker: C,
+	asset_server: &AssetServer,
+	game_settings: &GameSettings
+) {
 	let num = C::get_setting(game_settings);
 	let cursor = asset_server.load(BJ_NORMAL_SELECT);
 	let font = asset_server.load(GEORGIA);
@@ -678,7 +705,12 @@ fn new_spinbox<C: SettingsItem<Output=usize>>(commands: &mut RelatedSpawnerComma
 	));
 }
 
-fn new_dropdown<T, const N: usize, C: DropdownOptions<T, N>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
+fn new_dropdown<T: Clone, const N: usize, C: DropdownOptions<T, N>>(
+	commands: &mut RelatedSpawnerCommands<ChildOf>,
+	marker: C,
+	asset_server: &AssetServer,
+	game_settings: &GameSettings
+) {
 	let (curr_opt, remain_opt) = C::get_options(game_settings);
 	let cursor = asset_server.load(BJ_NORMAL_SELECT);
 	let font = asset_server.load(GEORGIA);
@@ -710,7 +742,12 @@ fn new_dropdown<T, const N: usize, C: DropdownOptions<T, N>>(commands: &mut Rela
 	)).observe(C::apply());
 }
 
-fn new_slider<C: SettingsItem<Output=f64>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
+fn new_slider<C: SettingsItem<Output=f64>>(
+	commands: &mut RelatedSpawnerCommands<ChildOf>,
+	marker: C,
+	asset_server: &AssetServer,
+	game_settings: &GameSettings
+) {
 	let num = C::get_setting(game_settings);
 	let font_bold = asset_server.load(GEORGIA_BOLD);
 	let cursor = asset_server.load(BJ_NORMAL_SELECT);
@@ -777,7 +814,12 @@ fn new_slider<C: SettingsItem<Output=f64>>(commands: &mut RelatedSpawnerCommands
 	});
 }
 
-fn new_button<C: SettingsButton>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
+fn new_button<C: SettingsButton>(
+	commands: &mut RelatedSpawnerCommands<ChildOf>,
+	marker: C,
+	asset_server: &AssetServer,
+	_game_settings: &GameSettings
+) {
 	let cursor = asset_server.load(BJ_NORMAL_SELECT);
 	let font = asset_server.load(GEORGIA);
 
@@ -812,7 +854,12 @@ fn new_button<C: SettingsButton>(commands: &mut RelatedSpawnerCommands<ChildOf>,
 	)).observe(C::apply());
 }
 
-fn new_keybind<C: SettingsItem<Output=Vec<KeyCode>>>(commands: &mut RelatedSpawnerCommands<ChildOf>, marker: C, asset_server: &AssetServer, game_settings: &GameSettings) {
+fn new_keybind<C: SettingsItem<Output=Vec<KeyCode>>>(
+	commands: &mut RelatedSpawnerCommands<ChildOf>,
+	marker: C,
+	asset_server: &AssetServer,
+	game_settings: &GameSettings
+) {
 	let key_codes = C::get_setting(game_settings);
 	let cursor = asset_server.load(BJ_NORMAL_SELECT);
 	let font = asset_server.load(GEORGIA);
@@ -1026,11 +1073,12 @@ fn apply_vsync(
 	trigger: Trigger<Pointer<Click>>,
 	mut game_settings: ResMut<GameSettings>,
 	mut window: Query<&mut Window>,
-	vsync: Query<&Checkbox, With<VSync>>
+	mut vsync: Query<&mut Checkbox, With<VSync>>
 ) {
 	if !matches!(trigger.button, PointerButton::Primary) {return;}
 	let window = window.single_mut().expect(SINGLE_COMPONENT_QUERY_ERROR);
-	let vsync = vsync.single().expect(SINGLE_COMPONENT_QUERY_ERROR);
+	let mut vsync = vsync.single_mut().expect(SINGLE_COMPONENT_QUERY_ERROR);
+	vsync.0 = !vsync.0;
 	window.present_mode = if vsync.0 {PresentMode::AutoVsync} else {PresentMode::AutoNoVsync};
 	game_settings.vsync = vsync.0;
 	todo!("if vsync is on, disable max frame rate setting")

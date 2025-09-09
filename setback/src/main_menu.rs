@@ -83,7 +83,19 @@ fn on_enter(mut commands: Commands, asset_server: Res<AssetServer>) {
 	let font_bold: Handle<Font> = asset_server.load(GEORGIA_BOLD);
 	let times: Handle<Font> = asset_server.load(TIMES_NEW_ROMAN);
 	// Create the main background with a green felt texture
-	menu_background(&mut commands, times, |commands| {
+	menu_background(&mut commands, times, Node {
+		width: Val::Percent(100.),
+		height: Val::Percent(100.),
+		margin: UiRect::all(Val::Px(0.)),
+		padding: UiRect::all(Val::Px(0.)),
+		box_sizing: BoxSizing::BorderBox,
+		min_height: Val::Vh(100.),
+		display: Display::Flex,
+		justify_content: JustifyContent::Center,
+		align_items: AlignItems::Center,
+		overflow: Overflow::hidden(),
+		..default()
+	}, |commands| {
 		//menu
 		commands.spawn((
 			Node {
