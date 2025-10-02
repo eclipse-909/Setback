@@ -8,7 +8,7 @@ pub struct LoginRequest {
 }
 
 ///Used for /api/login
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LoginResponse {
 	pub auth_token: String,
 	pub refresh_token: String,

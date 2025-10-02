@@ -6,7 +6,7 @@ mod models;
 mod connection;
 mod game;
 mod setup_data;
-mod unit_tests;
+mod tests;
 
 pub use {
 	constants::*,
@@ -20,4 +20,4 @@ pub use {
 };
 
 #[cfg(test)]
-pub use unit_tests::testing::*;
+pub use tests::testing::*;

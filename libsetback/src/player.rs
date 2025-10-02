@@ -14,7 +14,7 @@ use {
 	}
 };
 
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct Player {
 	pub player_type: PlayerType,
 	pub username: String,
@@ -32,7 +32,7 @@ impl Player {
 			team_id
 		}
 	}
-	
+
 	///Empty slot for a human player in multiplayer. This function should only be called by the server.
 	pub fn new_human_empty(team_id: u8) -> Self {
 		Self {
@@ -42,7 +42,7 @@ impl Player {
 			team_id
 		}
 	}
-	
+
 	pub fn new_ai(team_id: u8) -> Self {
 		Self {
 			player_type: PlayerType::AI,
@@ -51,10 +51,11 @@ impl Player {
 			team_id
 		}
 	}
-	
+
 	pub fn can_follow(&self, lead: Suit) -> bool { self.hand.iter().any(|card| {card.suit == lead}) }
 }
 
+#[derive(Debug)]
 pub enum PlayerType {
 	///Yourself in singleplayer.
 	SingleplayerSelf,
@@ -77,6 +78,25 @@ impl PlayerType {
 			return;
 		}
 		*self = other;
+	}
+}
+
+impl Clone for PlayerType {
+	fn clone(&self) -> Self {
+	    match self {
+			Self::SingleplayerSelf => Self::SingleplayerSelf,
+			Self::HumanEmpty => Self::HumanEmpty,
+			//HumanConnection is cloned as MultiplayerHuman
+			Self::HumanConnection(connection) => Self::MultiplayerHuman {
+				account_id: connection.account_id,
+				ready: connection.ready
+			},
+			Self::MultiplayerHuman{account_id, ready} => Self::MultiplayerHuman {
+				account_id: *account_id,
+				ready: *ready
+			},
+			Self::AI => Self::AI
+		}
 	}
 }
 

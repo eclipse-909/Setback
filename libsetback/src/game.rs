@@ -15,7 +15,7 @@ use {
 };
 
 /// Game Data to manage the game state after it starts.
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct Game {
 	pub setup_data: SetupData,
 	pub teams: Vec<Team>,
@@ -72,7 +72,7 @@ impl Game {
 			}
 		}
 		shuffle(&mut deck);
-		
+
 		Self {
 			setup_data,
 			teams,
@@ -91,7 +91,7 @@ impl Game {
 			round_number: 0
 		}
 	}
-	
+
 	///Jumps to the next player's turn and increments turn and round data.
 	///If Ok, the TurnResult represents what action the caller needs to take immediately after.
 	///If Err, the caller needs to handle it, usually be terminating the game.
@@ -142,7 +142,7 @@ impl Game {
 		}
 		Ok(TurnResult::NextTurn)
 	}
-	
+
 	///Caller must deal cards for next round after this function is called.
 	///Use RoundScores to notify players the results of the round.
 	pub fn end_round(&mut self) -> Result<RoundScores, Error> {
@@ -212,7 +212,7 @@ impl Game {
 			team_scores
 		})
 	}
-	
+
 	pub fn deal_cards(&mut self) {
 		//reset game data
 		self.highest_bid = 0;
@@ -240,10 +240,10 @@ impl Game {
 			}
 		}
 	}
-	
+
 	///Which ever player's turn it currently is, this checks if that player is an AI.
 	pub fn is_ai_turn(&self) -> bool {matches!(self.setup_data.players[self.turn_index as usize].player_type, PlayerType::AI)}
-	
+
 	///Validates the bid and updates game state. Returns early if the bid was invalid. Call [Self::next_turn] after this.
 	pub fn validate_bid(&mut self, bid: u8) -> bool {
 		if bid == 0 {return true;}
@@ -255,7 +255,7 @@ impl Game {
 		}
 		true
 	}
-	
+
 	///Returns early if the card played is invalid. Call [Self::next_turn] after this.
 	pub fn validate_card(&mut self, card: Card) -> bool {
 		let player: &mut Player = &mut self.setup_data.players[self.turn_index as usize];
@@ -284,7 +284,7 @@ impl Game {
 		self.pile.push(player.hand.remove(card_index));
 		true
 	}
-	
+
 	///Algorithm for deciding how the AI should bid
 	fn ai_eval_bid(&self) -> (Suit, u8) {
 		let player: &Player = &self.setup_data.players[self.turn_index as usize];
@@ -314,7 +314,7 @@ impl Game {
 		let (suit, num) = suit_points.iter().max_by(|(_, num1), (_, num2)| {num1.cmp(num2)}).unwrap();
 		(*suit, *num)
 	}
-	
+
 	///Uses a card-scoring system, the turn order, and the game score to determine the bid
 	pub fn ai_bid(&mut self) -> u8 {
 		let (_, points) = self.ai_eval_bid();
@@ -347,7 +347,7 @@ impl Game {
 		if bid <= 1 || bid <= self.highest_bid {bid = 0;}
 		bid
 	}
-	
+
 	///Plays the highest card if this player had the highest bid.
 	///Currently picks a random valid card until a proper AI is implemented.
 	pub fn ai_play_card(&mut self) -> Card {
@@ -363,14 +363,14 @@ impl Game {
 		} else {
 			player.hand.clone()
 		};
-		
+
 		//For now I'm gonna get a random card
 		let mut rng: ThreadRng = rng();
 		let index: usize = rng.random_range(0..playable_card.len());
-		
-		
+
+
 		//TODO make AI to choose card to play
-		
+
 		/*
 		Factors:
 			legal cards in hand
@@ -389,7 +389,7 @@ impl Game {
 		Heuristics:
 			if AI can follow, only allow follow suit or trump suit, else allow all cards
 		*/
-		
+
 		let card: Card = playable_card[index];
 		card
 	}

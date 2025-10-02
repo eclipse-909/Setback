@@ -14,7 +14,7 @@ use {
 
 /// Setup Data is written to during the setup of the game.
 /// It is read from when the game is being played to handle the rules of the game.
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct SetupData {
 	pub players: Vec<Player>,
 	pub std_team_mode: bool,
@@ -45,33 +45,33 @@ impl SetupData {
 		}
 		setup_data
 	}
-	
+
 	pub fn add_ai(&mut self) {
 		self.players.push(Player::new_ai(self.players.len() as u8));
 	}
-	
+
 	///Updates a player's status as AI or human. This should only be called by the server.
 	pub fn update_human(&mut self, index: u8, human: bool) {
 		self.players[index as usize].player_type.set(if human {PlayerType::HumanEmpty} else {PlayerType::AI});
 	}
-	
+
 	///Updates a player's team.
 	pub fn update_team(&mut self, index: u8, team_id: u8) {
 		self.players[index as usize].team_id = team_id;
 	}
-	
+
 	///Makes this player type a networked client. This should only be called by the server.
 	pub fn set_client(&mut self, index: u8, connection: ClientConnection) {
 		self.players[index as usize].player_type.set(PlayerType::HumanConnection(connection));
 	}
-	
+
 	///Removes a player from the list, and reinserts it at the given index, sliding the remaining players if necessary.
 	///Do not call this after starting the game.
 	pub fn re_insert_player(&mut self, init_index: u8, new_index: u8) {
 		let player: Player = self.players.remove(init_index as usize);
 		self.players.insert(new_index as usize, player);
 	}
-	
+
 	///Initializes any remaining data and starts the game loop.
 	///Further communication between the game and the players is handled through the returned [GameRuntime].
 	pub fn start_game(self) -> GameRuntime {

@@ -1,8 +1,8 @@
-/target
 /.idea
 /.zed
-setback.db
-rustc-ice-*
+/target
+/*.bak
 /setback/logs/*
 /setback/usr.crd
 /setback/settings.cfg
+setback.db

@@ -92,7 +92,7 @@ impl Comparison {
 	}
 }
 
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct Team {
 	//the cards the team collects after winning a turn
 	pub pile: Vec<Card>,
@@ -104,7 +104,7 @@ impl Default for Team {
 	fn default() -> Self {Self {pile: Vec::with_capacity((MAX_PLAYERS * CARDS_PER_PLAYER) as usize), score: 0}}
 }
 
-#[derive(Encode, Decode, Debug)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct RoundScores {
 	pub high_team_id: u8,
 	pub low_team_id: u8,
@@ -117,7 +117,7 @@ pub struct RoundScores {
 ///Events that can be sent from the game to the player.
 ///The game will emit these events in singleplayer.
 ///In multiplayer, the TCP stream will receive [ssp] messages from the server, which may contain these events.
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum GameEvent {
 	///Index player bid the amount
 	PlayerBid{index: u8, amount: u8},
@@ -149,7 +149,7 @@ pub enum TurnResult {
 	GameOver(RoundScores, Vec<i8>)
 }
 
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct PublicGame {
 	pub join_code: u32,
 	pub setup_data: SetupData
@@ -171,6 +171,7 @@ pub enum Error {
 	Indeterminate,
 	BadVersion(Version),
 	UnexpectedProtocol,
+	Disconnected,
 	GamesAtCapacity,
 	GameAtCapacity,
 	GameNotFound,
@@ -198,6 +199,7 @@ impl Display for Error {
 				str.as_str()
 			},
 			Error::UnexpectedProtocol => "Unexpected protocol",
+			Error::Disconnected => "Not connected to server",
 			Error::GamesAtCapacity => "Cannot create game right now - server is at capacity - try again later",
 			Error::GameAtCapacity => "Cannot join - game has maximum number of players",
 			Error::GameNotFound => "Game not found - invalid game code",

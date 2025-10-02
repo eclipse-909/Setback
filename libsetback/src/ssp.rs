@@ -17,7 +17,7 @@ use {
 };
 
 ///Setback Server Protocol
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub struct Ssp {
 	pub version: Version,
 	///0 = server/game, other = specific client_id
@@ -29,10 +29,10 @@ pub struct Ssp {
 impl Ssp {
 	pub fn new(protocol: Protocol) -> Self {Self {version: SETBACK_VERSION, src_id: 0, protocol}}
 	pub fn new_with_src(protocol: Protocol, src_id: u32) -> Self {Self {version: SETBACK_VERSION, src_id, protocol}}
-	
+
 	//Server/Game -> Client protocols are implemented where needed and don't require separate functions.
 	//You can find functions for each Client -> Server/Game protocol in the game code
-	
+
 	//Encodes the SSP into a Vec<u8>, which is prefixed with 2 bytes representing the length of THE REST of the vector in little-endian.
 	pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
 		let mut bytes: Vec<u8> = bincode::encode_to_vec(self, standard())?;
@@ -63,7 +63,7 @@ impl Display for Version {
 //Internal - server/game sends message to itself.
 ///When the client sends a request, they won't wait for a response.
 ///The client must handle the response the same way it would handle a spontaneous message.
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug, Clone)]
 pub enum Protocol {
 	///Client ---Authenticate--> Server<br>
 	///Client <--Connect--- Server<br>
@@ -187,16 +187,11 @@ pub enum Protocol {
 	///Request only<br>
 	///Host only<br><br>
 	///The host can remove a player from the game.
-	RemovePlayer{index: u8},
-	///Client ---Admin--> Server<br>
-	///Server <--Admin--- Client<br>
-	///Request and response<br>
-	///Client sends an admin message to the server.
-	Admin(AdminMessage)
+	RemovePlayer{index: u8}
 }
 
 ///Admins can use these messages to mess with the server with admin privileges.
-#[derive(Encode, Decode)]
+#[derive(Encode, Decode, Debug)]
 pub enum AdminMessage {
 	///Admin ---Authorize--> Server<br>
 	///Admin <--AuthorizeResponse--- Server<br>
