@@ -1,0 +1,82 @@
+{
+  "vsync": true,
+  "max_fps": 60,
+  "antialiasing": true,
+  "fullscreen": "Windowed",
+  "monitor": "Current",
+  "resolution": null,
+  "refresh_rate_mhz": null,
+  "bit_depth": null,
+  "dpi_scale": 1.0,
+  "master_volume": 100.0,
+  "music_volume": 100.0,
+  "effects_volume": 100.0,
+  "bid_0": {
+    "key_code": "Digit0",
+    "logical_key": {
+      "Character": "0"
+    }
+  },
+  "bid_2": {
+    "key_code": "Digit2",
+    "logical_key": {
+      "Character": "2"
+    }
+  },
+  "bid_3": {
+    "key_code": "Digit3",
+    "logical_key": {
+      "Character": "3"
+    }
+  },
+  "bid_4": {
+    "key_code": "Digit4",
+    "logical_key": {
+      "Character": "4"
+    }
+  },
+  "play_card_1": {
+    "key_code": "Digit1",
+    "logical_key": {
+      "Character": "1"
+    }
+  },
+  "play_card_2": {
+    "key_code": "Digit2",
+    "logical_key": {
+      "Character": "2"
+    }
+  },
+  "play_card_3": {
+    "key_code": "Digit3",
+    "logical_key": {
+      "Character": "3"
+    }
+  },
+  "play_card_4": {
+    "key_code": "Digit4",
+    "logical_key": {
+      "Character": "4"
+    }
+  },
+  "play_card_5": {
+    "key_code": "Digit5",
+    "logical_key": {
+      "Character": "5"
+    }
+  },
+  "play_card_6": {
+    "key_code": "Digit6",
+    "logical_key": {
+      "Character": "6"
+    }
+  },
+  "toggle_settings": {
+    "key_code": "Escape",
+    "logical_key": {
+      "Named": "Escape"
+    }
+  },
+  "save_login_credentials": true,
+  "log_level": "Debug"
+}

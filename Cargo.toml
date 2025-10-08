@@ -58,7 +58,7 @@ reqwest = { version = "0.12.23", features = ["cookies", "json"] }
 rpassword = "7.4.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
-sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-native-tls", "postgres", "sqlite", "chrono"] }
+sqlx = { version = "0.8.6", features = ["runtime-tokio", "postgres", "sqlite", "chrono"] }
 taffy = "0.9.1"
 tokio = { version = "1.47.1", features = ["full"] }
 tokio-util = "0.7.16"

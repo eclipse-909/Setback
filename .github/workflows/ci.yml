@@ -132,18 +132,12 @@ jobs:
         with:
           tool: cargo-tarpaulin
       - name: Generate coverage report
-        run: cargo +nightly tarpaulin --workspace --all-targets --all-features --locked --out Stdout Xml
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          slug: eclipse-909/Setback-Source
-          fail_ci_if_error: true
+        run: cargo +nightly tarpaulin --workspace --all-targets --all-features --locked --fail-under 80 --out Stdout Html --output-dir tmp
 
   build:
     name: Build
     runs-on: ${{ matrix.os }}
-    needs: [coverage, audit, bench]
+    needs: [audit, clippy, bench, coverage]
     strategy:
       matrix:
         include:

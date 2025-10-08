@@ -367,10 +367,12 @@ fn main() {
 			animations
 		},
 		loading: images_from_gif_with_size(LOADING, Size::new(1567., 1561.)),
-		georgia: georgia.unwrap(),
-		georgia_bold: georgia_bold.unwrap(),
-		georgia_italic: georgia_italic.unwrap(),
-		times_new_roman: times_new_roman.unwrap()
+		fonts: Fonts {
+			georgia: georgia.unwrap(),
+			georgia_bold: georgia_bold.unwrap(),
+			georgia_italic: georgia_italic.unwrap(),
+			times_new_roman: times_new_roman.unwrap()
+		}
 	};
 	
 	log::info!("Running app");

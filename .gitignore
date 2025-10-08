@@ -2,6 +2,7 @@
 /.zed
 /target
 /*.bak
+/tmp
 /setback/logs/*
 /setback/usr.crd
 /setback/settings.cfg

@@ -24,14 +24,24 @@ impl Image {
 		let peniko_img = if width != size.width as u32 || height != size.height as u32 {
 			let width = size.width as u32;
 			let height = size.height as u32;
-			peniko::Image::new(Blob::new(Arc::new(image::imageops::resize(
-				&image_img,
+			peniko::Image::new(
+				Blob::new(Arc::new(image::imageops::resize(
+					&image_img,
+					width,
+					height,
+					image::imageops::FilterType::CatmullRom
+				).into_raw())),
+				ImageFormat::Rgba8,
 				width,
-				height,
-				image::imageops::FilterType::CatmullRom
-			).into_raw())), ImageFormat::Rgba8, width, height)
+				height
+			)
 		} else {
-			peniko::Image::new(Blob::new(Arc::new(image_img.as_raw().clone())), ImageFormat::Rgba8, width, height)
+			peniko::Image::new(
+				Blob::new(Arc::new(image_img.as_raw().clone())),
+				ImageFormat::Rgba8,
+				width,
+				height
+			)
 		};
 		Self {image_img, peniko_img}
 	}
@@ -39,7 +49,12 @@ impl Image {
 	pub fn load_png(bytes: &[u8]) -> Self {
 		let image_img = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).unwrap().into_rgba8();
 		let (width, height) = image_img.dimensions();
-		let peniko_img = peniko::Image::new(Blob::new(Arc::new(image_img.as_raw().clone())), ImageFormat::Rgba8, width, height);
+		let peniko_img = peniko::Image::new(
+			Blob::new(Arc::new(image_img.as_raw().clone())),
+			ImageFormat::Rgba8,
+			width,
+			height
+		);
 		Self {image_img, peniko_img}
 	}
 	
@@ -53,14 +68,24 @@ impl Image {
 		let peniko_img = if scale != 1.0 {
 			let width = (width as f32 * scale) as u32;
 			let height = (height as f32 * scale) as u32;
-			peniko::Image::new(Blob::new(Arc::new(image::imageops::resize(
-				&image_img,
+			peniko::Image::new(
+				Blob::new(Arc::new(image::imageops::resize(
+					&image_img,
+					width,
+					height,
+					image::imageops::FilterType::CatmullRom
+				).into_raw())),
+				ImageFormat::Rgba8,
 				width,
-				height,
-				image::imageops::FilterType::CatmullRom
-			).into_raw())), ImageFormat::Rgba8, width, height)
+				height
+			)
 		} else {
-			peniko::Image::new(Blob::new(Arc::new(image_img.as_raw().clone())), ImageFormat::Rgba8, width, height)
+			peniko::Image::new(
+				Blob::new(Arc::new(image_img.as_raw().clone())),
+				ImageFormat::Rgba8,
+				width,
+				height
+			)
 		};
 		Self {image_img, peniko_img}
 	}
@@ -79,7 +104,12 @@ impl Image {
 			image::imageops::FilterType::CatmullRom
 		);
 		let (width, height) = resized.dimensions();
-		Some(peniko::Image::new(Blob::new(Arc::new(resized.into_raw())), ImageFormat::Rgba8, width, height))
+		Some(peniko::Image::new(
+			Blob::new(Arc::new(resized.into_raw())),
+			ImageFormat::Rgba8,
+			width,
+			height
+		))
 	}
 }
 

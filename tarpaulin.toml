@@ -1,0 +1,9 @@
+[run]
+run-types = ["AllTargets"]
+all-features = true
+workspace = true
+
+[report]
+output-dir = "tmp"
+out = ["Stdout"]
+fail-under = 80

@@ -1,19 +1,17 @@
 use {
-	crate::app::*,
 	glyphon::{
-		cosmic_text::Selection,
 		fontdb::ID,
-		Attrs, Buffer, Cursor, Edit, Editor, FontSystem, LayoutRun, Metrics, Shaping,
+		Attrs, Buffer, Cursor, Edit, Editor, FontSystem, LayoutRun, Metrics, Shaping, Wrap
 	},
 	std::{
 		cmp,
-		collections::HashMap,
 		sync::Arc
 	},
+	taffy::AvailableSpace,
 	unicode_segmentation::UnicodeSegmentation,
 	vello::{
 		kurbo::{Affine, Point, Rect, Size},
-		peniko::{self, color::palette, Blob, Color, Fill},
+		peniko::{self, Color, Fill},
 		Glyph, Scene
 	}
 };
@@ -23,11 +21,158 @@ pub struct Font {
 	pub blob: peniko::Font
 }
 
-impl CosmicTextScene {
-	fn render(&mut self, scene: &mut Scene, app: &App) {
-		let buffer_glyphs = &self.buffer_glyphs;
+pub struct Fonts {
+	pub georgia: Font,
+	pub georgia_bold: Font,
+	pub georgia_italic: Font,
+	pub times_new_roman: Font
+}
+
+impl Fonts {
+	pub fn get_font(&self, id: ID) -> peniko::Font {
+		match id {
+			id if id == self.georgia.id => self.georgia.blob.clone(),
+			id if id == self.georgia_bold.id => self.georgia_bold.blob.clone(),
+			id if id == self.georgia_italic.id => self.georgia_italic.blob.clone(),
+			id if id == self.times_new_roman.id => self.times_new_roman.blob.clone(),
+			_ => unreachable!("Font not loaded")
+		}
+	}
+}
+
+pub struct TextSettings<'a> {
+	text: &'a str,
+	font: ID,
+	color: Color,
+	font_size: f32,
+	line_height: f32
+}
+
+pub struct EditorSettings<'a> {
+	text_settings: TextSettings<'a>,
+	cursor_color: Color,
+	selection_color: Color,
+	selected_text_color: Color,
+}
+
+#[derive(Debug, Clone)]
+enum InnerText<'buffer> {
+	Buffer(Buffer),
+	Editor(Editor<'buffer>)
+}
+
+#[derive(Debug, Clone)]
+pub struct TextElement<'buffer> {
+	inner_text: InnerText<'buffer>,
+	buffer_glyphs: Option<BufferGlyphs>,
+	color: Color,
+	cursor_color: Color,
+	selection_color: Color,
+	selected_text_color: Color,
+}
+
+impl<'buffer> TextElement<'buffer> {
+	pub fn new_text(settings: TextSettings, font_system: &mut FontSystem) -> Self {
+		let metrics = Metrics::new(settings.font_size, settings.line_height);
+		let mut buffer = Buffer::new(font_system, metrics);
+		buffer.set_metrics(font_system, metrics);
 		
+		// Attributes indicate what font to choose
+		let attrs = Attrs::new();
+		
+		buffer.set_text(font_system, settings.text, &attrs, Shaping::Advanced);
+		buffer.set_wrap(font_system, Wrap::Word);
+		buffer.set_tab_width(font_system, 4);
+		Self {
+			inner_text: InnerText::Buffer(buffer),
+			buffer_glyphs: None,
+			color: settings.color,
+			cursor_color: Color::TRANSPARENT,
+			selection_color: Color::TRANSPARENT,
+			selected_text_color: Color::TRANSPARENT
+		}
+	}
+	
+	pub fn new_editor(settings: EditorSettings, font_system: &mut FontSystem) -> Self {
+		let metrics = Metrics::new(settings.text_settings.font_size, settings.text_settings.line_height);
+		let buffer = Buffer::new(font_system, metrics);
+		let mut editor = Editor::new(buffer);
+		editor.with_buffer_mut(|buffer| {
+			buffer.set_metrics(font_system, metrics);
+			
+			// Attributes indicate what font to choose
+			let attrs = Attrs::new();
+			
+			buffer.set_text(font_system, settings.text_settings.text, &attrs, Shaping::Advanced);
+			buffer.set_wrap(font_system, Wrap::Word);
+			buffer.set_tab_width(font_system, 4);
+		});
+		editor.set_cursor(Cursor::new(0, 0));
+		Self {
+			inner_text: InnerText::Editor(editor),
+			buffer_glyphs: None,
+			color: settings.text_settings.color,
+			cursor_color: settings.cursor_color,
+			selection_color: settings.selection_color,
+			selected_text_color: settings.selected_text_color
+		}
+	}
+	
+	pub fn measure(
+		&mut self,
+		known_dimensions: taffy::Size<Option<f32>>,
+		available_space: taffy::Size<AvailableSpace>,
+		font_system: &mut FontSystem,
+	) -> taffy::Size<f32> {
+		let width_constraint = known_dimensions.width.or(match available_space.width {
+			AvailableSpace::MinContent => Some(0.0),
+			AvailableSpace::MaxContent => None,
+			AvailableSpace::Definite(width) => Some(width)
+		});
+		let height_constraint = known_dimensions.height.or(match available_space.height {
+			AvailableSpace::MinContent => Some(0.0),
+			AvailableSpace::MaxContent => None,
+			AvailableSpace::Definite(height) => Some(height)
+		});
+		let (width, total_lines, line_height) = match &mut self.inner_text {
+			InnerText::Buffer(buffer) => {
+				buffer.set_size(font_system, width_constraint, height_constraint);
+				buffer.shape_until_scroll(font_system, false);
+				self.buffer_glyphs = Some(create_glyphs(buffer, self.color, None));
+				let d = buffer
+					.layout_runs()
+					.fold((0.0, 0usize), |(width, total_lines), run| (run.line_w.max(width), total_lines + 1));
+				(d.0, d.1, buffer.metrics().line_height)
+			}
+			InnerText::Editor(editor) => {
+				let d = editor.with_buffer_mut(|buffer| {
+					buffer.set_size(font_system, width_constraint, height_constraint);
+					let d = buffer
+						.layout_runs()
+						.fold((0.0, 0usize), |(width, total_lines), run| (run.line_w.max(width), total_lines + 1));
+					(d.0, d.1, buffer.metrics().line_height)
+				});
+				editor.shape_as_needed(font_system, false);
+				self.buffer_glyphs = Some(create_glyphs_for_editor(
+					editor,
+					self.color,
+					self.cursor_color,
+					self.selection_color,
+					self.selected_text_color
+				));
+				d
+			}
+		};
+		
+		// Determine measured size of text
+		let height = total_lines as f32 * line_height;
+		
+		taffy::Size { width, height }
+	}
+	
+	pub fn draw(&self, scene: &mut Scene, fonts: &Fonts) {
 		let text_transform = Affine::translate((500.0, 300.0));
+		let buffer_glyphs = self.buffer_glyphs.as_ref().unwrap();
 		
 		// Draw the Glyphs
 		for buffer_line in &buffer_glyphs.buffer_lines {
@@ -52,7 +197,7 @@ impl CosmicTextScene {
 			}
 			
 			for glyph_run in &buffer_line.glyph_runs {
-				let font = app.get_font(glyph_run.font);
+				let font = fonts.get_font(glyph_run.font);
 				let glyph_color = glyph_run.glyph_color;
 				let glyphs = glyph_run.glyphs.clone();
 				scene
@@ -66,19 +211,8 @@ impl CosmicTextScene {
 	}
 }
 
-pub struct CosmicTextScene {
-	pub buffer_glyphs: BufferGlyphs,
-}
-
 pub struct CosmicFontBlobAdapter {
 	pub font: Arc<glyphon::Font>,
-}
-
-/// Adapter to allow `cosmic_text::Font` to be used as a Blob.
-impl CosmicFontBlobAdapter {
-	fn new(font: Arc<glyphon::Font>) -> Self {
-		Self { font }
-	}
 }
 
 impl AsRef<[u8]> for CosmicFontBlobAdapter {
@@ -87,72 +221,7 @@ impl AsRef<[u8]> for CosmicFontBlobAdapter {
 	}
 }
 
-impl CosmicTextScene {
-	pub fn new() -> Self {
-		let mut font_system = FontSystem::new();
-		let mut vello_fonts = HashMap::new();
-		
-		// Copy fonts from cosmic_text, so vello can use them
-		let font_faces: Vec<(ID, u32)> = font_system
-			.db()
-			.faces()
-			.map(|face| (face.id, face.index))
-			.collect();
-		
-		for (font_id, index) in font_faces {
-			if let Some(font) = font_system.get_font(font_id) {
-				// For now use an adapter, to avoid cloning the entire font data.
-				// For alternatives, see https://github.com/linebender/vello/pull/739#discussion_r1858293718
-				let font_blob = Blob::new(Arc::new(CosmicFontBlobAdapter::new(font)));
-				let vello_font = peniko::Font::new(font_blob, index);
-				vello_fonts.insert(font_id, vello_font);
-			}
-		}
-		
-		let text = "おはよう (ja) (ohayō) 🌅✨ (morning), こんにちは (ja) (konnichi wa) ☀️😊 (daytime), こんばんは (ja) (konban wa) 🌙🌟 (evening)";
-		
-		// Text metrics indicate the font size and line height of a buffer
-		const FONT_SIZE: f32 = 24.0;
-		const LINE_HEIGHT: f32 = FONT_SIZE * 1.2;
-		let metrics = Metrics::new(FONT_SIZE, LINE_HEIGHT);
-		
-		// A Buffer provides shaping and layout for a UTF-8 string, create one per text widget
-		let buffer = Buffer::new(&mut font_system, metrics);
-		let mut editor = Editor::new(buffer);
-		
-		// Set a size for the text buffer, in pixels
-		let width = 200.0;
-		
-		// The height is unbounded
-		editor.with_buffer_mut(|buffer| {
-			buffer.set_metrics(&mut font_system, metrics);
-			buffer.set_size(&mut font_system, Some(width), None);
-			
-			// Attributes indicate what font to choose
-			let attrs = Attrs::new();
-			
-			// Ensure advanced shaping is enabled for complex scripts
-			buffer.set_text(&mut font_system, text, &attrs, Shaping::Advanced);
-		});
-		
-		// Perform shaping as desired
-		editor.shape_as_needed(&mut font_system, true);
-		
-		editor.set_cursor(Cursor::new(0, 36));
-		editor.set_selection(Selection::Normal(Cursor::new(0, 43)));
-		
-		Self {
-			buffer_glyphs: create_glyphs_for_editor(
-				&editor,
-				palette::css::WHITE,
-				palette::css::RED,
-				palette::css::BLUE,
-				palette::css::WHITE,
-			),
-		}
-	}
-}
-
+#[derive(Debug, Clone)]
 pub struct BufferGlyphs {
 	font_size: f32,
 	glyph_highlight_color: Color,
@@ -160,12 +229,14 @@ pub struct BufferGlyphs {
 	buffer_lines: Vec<BufferLine>,
 }
 
+#[derive(Debug, Clone)]
 pub struct BufferLine {
 	glyph_highlights: Vec<Rect>,
 	cursor: Option<Rect>,
 	glyph_runs: Vec<BufferGlyphRun>,
 }
 
+#[derive(Debug, Clone)]
 struct BufferGlyphRun {
 	font: ID,
 	glyphs: Vec<Glyph>,
@@ -254,57 +325,55 @@ fn create_glyphs(
 		
 		if let Some(editor_info) = &editor_info {
 			// Highlight selection
-			if let Some((start, end)) = editor_info.selection_bounds {
-				if line_i >= start.line && line_i <= end.line {
-					let mut range_opt = None;
-					for glyph in layout_run.glyphs.iter() {
-						// Guess x offset based on characters
-						let cluster = &layout_run.text[glyph.start..glyph.end];
-						let total = cluster.grapheme_indices(true).count();
-						let mut c_x = glyph.x;
-						let c_w = glyph.w / total as f32;
-						for (i, c) in cluster.grapheme_indices(true) {
-							let c_start = glyph.start + i;
-							let c_end = glyph.start + i + c.len();
-							if (start.line != line_i || c_end > start.index)
-								&& (end.line != line_i || c_start < end.index)
-							{
-								range_opt = match range_opt.take() {
-									Some((min, max)) => Some((
-										cmp::min(min, c_x as i32),
-										cmp::max(max, (c_x + c_w) as i32),
-									)),
-									None => Some((c_x as i32, (c_x + c_w) as i32)),
-								};
-							} else if let Some((min, max)) = range_opt.take() {
-								buffer_line.glyph_highlights.push(Rect::from_origin_size(
-									Point::new(min as f64, line_top),
-									Size::new(cmp::max(0, max - min) as f64, line_height),
-								));
-							}
-							c_x += c_w;
+			if let Some((start, end)) = editor_info.selection_bounds && (line_i >= start.line && line_i <= end.line) {
+				let mut range_opt = None;
+				for glyph in layout_run.glyphs.iter() {
+					// Guess x offset based on characters
+					let cluster = &layout_run.text[glyph.start..glyph.end];
+					let total = cluster.grapheme_indices(true).count();
+					let mut c_x = glyph.x;
+					let c_w = glyph.w / total as f32;
+					for (i, c) in cluster.grapheme_indices(true) {
+						let c_start = glyph.start + i;
+						let c_end = glyph.start + i + c.len();
+						if (start.line != line_i || c_end > start.index)
+							&& (end.line != line_i || c_start < end.index)
+						{
+							range_opt = match range_opt.take() {
+								Some((min, max)) => Some((
+									cmp::min(min, c_x as i32),
+									cmp::max(max, (c_x + c_w) as i32),
+								)),
+								None => Some((c_x as i32, (c_x + c_w) as i32)),
+							};
+						} else if let Some((min, max)) = range_opt.take() {
+							buffer_line.glyph_highlights.push(Rect::from_origin_size(
+								Point::new(min as f64, line_top),
+								Size::new(cmp::max(0, max - min) as f64, line_height),
+							));
+						}
+						c_x += c_w;
+					}
+				}
+				
+				if layout_run.glyphs.is_empty() && end.line > line_i {
+					// Highlight all internal empty lines
+					range_opt = Some((0, buffer.size().0.unwrap_or(0.0) as i32));
+				}
+				
+				if let Some((mut min, mut max)) = range_opt.take() {
+					if end.line > line_i {
+						// Draw to end of line
+						if layout_run.rtl {
+							min = 0;
+						} else {
+							max = buffer.size().0.unwrap_or(0.0) as i32;
 						}
 					}
-					
-					if layout_run.glyphs.is_empty() && end.line > line_i {
-						// Highlight all internal empty lines
-						range_opt = Some((0, buffer.size().0.unwrap_or(0.0) as i32));
-					}
-					
-					if let Some((mut min, mut max)) = range_opt.take() {
-						if end.line > line_i {
-							// Draw to end of line
-							if layout_run.rtl {
-								min = 0;
-							} else {
-								max = buffer.size().0.unwrap_or(0.0) as i32;
-							}
-						}
-						buffer_line.glyph_highlights.push(Rect::from_origin_size(
-							Point::new(min as f64, line_top),
-							Size::new(cmp::max(0, max - min) as f64, line_height),
-						));
-					}
+					buffer_line.glyph_highlights.push(Rect::from_origin_size(
+						Point::new(min as f64, line_top),
+						Size::new(cmp::max(0, max - min) as f64, line_height),
+					));
 				}
 			}
 			
@@ -323,29 +392,23 @@ fn create_glyphs(
 				None => text_color,
 			};
 			
-			if let Some(editor_info) = &editor_info {
-				if text_color != editor_info.selected_text_color {
-					if let Some((start, end)) = editor_info.selection_bounds {
-						if line_i >= start.line
-							&& line_i <= end.line
-							&& (start.line != line_i || glyph.end > start.index)
-							&& (end.line != line_i || glyph.start < end.index)
-						{
-							glyph_color = editor_info.selected_text_color;
-						}
-					}
-				}
+			if let Some(editor_info) = &editor_info
+				&& text_color != editor_info.selected_text_color
+				&& let Some((start, end)) = editor_info.selection_bounds && (line_i >= start.line
+				&& line_i <= end.line
+				&& (start.line != line_i || glyph.end > start.index)
+				&& (end.line != line_i || glyph.start < end.index))
+			{
+				glyph_color = editor_info.selected_text_color;
 			}
 			
-			if let Some((last_font, last_glyph_color)) = last_font {
-				if last_font != glyph.font_id || last_glyph_color != glyph_color {
-					buffer_line.glyph_runs.push(BufferGlyphRun {
-						font: last_font,
-						glyphs: current_glyphs,
-						glyph_color: last_glyph_color,
-					});
-					current_glyphs = vec![];
-				}
+			if let Some((last_font, last_glyph_color)) = last_font && (last_font != glyph.font_id || last_glyph_color != glyph_color) {
+				buffer_line.glyph_runs.push(BufferGlyphRun {
+					font: last_font,
+					glyphs: current_glyphs,
+					glyph_color: last_glyph_color,
+				});
+				current_glyphs = vec![];
 			}
 			
 			last_font = Some((glyph.font_id, glyph_color));

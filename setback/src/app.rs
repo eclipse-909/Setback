@@ -1,4 +1,3 @@
-use glyphon::fontdb::ID;
 use {
 	crate::{
 		constants::*,
@@ -17,11 +16,11 @@ use {
 		sync::Arc,
 		time::{Duration, Instant}
 	},
-	taffy::{style_helpers::TaffyMaxContent, NodeId, Size, TaffyTree},
+	taffy::{style_helpers::TaffyMaxContent, Display, NodeId, Rect, Size, Style, TaffyTree},
 	tokio::runtime::Runtime,
 	vello::{
-		kurbo::Rect,
-		peniko::Color,
+		kurbo::{self, Affine, RoundedRect, RoundedRectRadii},
+		peniko::{Color, Fill, Mix},
 		util::RenderContext,
 		wgpu,
 		AaConfig, AaSupport, Renderer, RendererOptions
@@ -37,7 +36,7 @@ use {
 	}
 };
 
-pub struct App {
+pub struct App<'buffer> {
 	//general app data
 	
 	pub settings: Settings,
@@ -64,7 +63,7 @@ pub struct App {
 	
 	//UI
 	
-	pub ui_tree: TaffyTree<Paint>,
+	pub ui_tree: TaffyTree<Paint<'buffer>>,
 	pub root_node: NodeId,
 	
 	//font
@@ -169,22 +168,33 @@ pub struct App {
 	
 	//animated cursor data
 	pub cursor_atlas: Image,
-	pub animated_cursors: [Vec<Rect>;10],
+	pub animated_cursors: [Vec<kurbo::Rect>;10],
 	
 	//gifs
 	pub loading: Vec<Image>,
 	
 	//fonts
-	pub georgia: Font,//TODO font type
-	pub georgia_bold: Font,//TODO font type
-	pub georgia_italic: Font,//TODO font type
-	pub times_new_roman: Font//TODO font type
+	pub fonts: Fonts
 }
 
-impl App {
+impl<'buffer> App<'buffer> {
 	#[inline]
 	pub fn start(&mut self) {
 		// todo!("handle startup logic")
+		let front = self.ui_tree.new_leaf(Style {
+			display: Display::Flex,
+			size: Size::length(250.),
+			margin: Rect::length(25.),
+			padding: Rect::length(25.),
+			border: Rect::length(25.),
+			..Default::default()
+		}).unwrap();
+		
+		self.ui_tree.set_style(self.root_node, Style {
+			display: Display::Flex,
+			size: Size::length(500.),
+			..Default::default()
+		}).unwrap();
 	}
 	
 	#[inline]
@@ -217,8 +227,113 @@ impl App {
 			}
 		).unwrap();
 		
+		//order nodes
+		let default_paint = Paint::default();
+		let vec_len = self.ui_tree.total_node_count();
+		let mut layouts = Vec::with_capacity(vec_len);
+		let mut stack = Vec::with_capacity(vec_len);
+		stack.push(self.root_node);
+		while let Some(node) = stack.pop() {
+			layouts.push((self.ui_tree.layout(node).unwrap(), self.ui_tree.get_node_context(node).unwrap_or(&default_paint)));
+			let Ok(children) = self.ui_tree.children(node) else {continue};
+			for child in children.into_iter().rev() {
+				stack.push(child);
+			}
+		}
+		layouts.sort_by(|(layout_a,paint_a), (layout_b,paint_b)|
+			(paint_a.z_index, layout_a.order).cmp(&(paint_b.z_index, layout_b.order))
+		);
+		
 		//draw frame
-		// todo!("draw frame")
+		for (layout, paint) in layouts.iter() {
+			let border_rect = kurbo::Rect::new(
+				layout.location.x as f64,
+				layout.location.y as f64,
+				(layout.location.x + layout.size.width + layout.border.left + layout.border.right) as f64,
+				(layout.location.x + layout.size.height + layout.border.top + layout.border.bottom) as f64
+			);
+			//shadow
+			if let Some(shadow) = &paint.box_shadow {
+				self.scene.draw_blurred_rounded_rect(
+					Affine::IDENTITY,
+					border_rect.inflate(shadow.spread, shadow.spread).with_origin((layout.location.x + shadow.offset_x, layout.location.y + shadow.offset_y)),
+					shadow.color,
+					(paint.border_radius.top_left
+						+ paint.border_radius.bottom_left
+						+ paint.border_radius.top_right
+						+ paint.border_radius.bottom_right
+					) / 4.,
+					shadow.blur as f64,
+				);
+			}
+			
+			//border
+			if layout.border.top > 0.
+				&& layout.border.bottom > 0.
+				&& layout.border.left > 0.
+				&& layout.border.right > 0.
+				&& let Some(r) = paint.border_radius.as_single_radius()
+				&& r > 0.
+			{
+				self.scene.fill(
+					Fill::NonZero,
+					Affine::IDENTITY,
+					&paint.background,
+					None,
+					&RoundedRect::from_rect(
+						border_rect,
+						paint.border_radius
+					)
+				);
+			}
+			
+			//background
+			const fn shrink_radius(r: f64, bx: f32, by: f32) -> f64 {
+				(r - (bx as f64).max(by as f64)).max(0.0)
+			}
+			let bg_rect = RoundedRect::new(
+				(layout.location.x + layout.border.left) as f64,
+				(layout.location.y + layout.border.top) as f64,
+				(layout.location.x + layout.size.width + layout.border.left) as f64,
+				(layout.location.x + layout.size.height + layout.border.top) as f64,
+				RoundedRectRadii {
+					top_left: shrink_radius(paint.border_radius.top_left, layout.border.left, layout.border.top),
+					top_right: shrink_radius(paint.border_radius.top_right, layout.border.right, layout.border.top),
+					bottom_right: shrink_radius(paint.border_radius.bottom_right, layout.border.right, layout.border.bottom),
+					bottom_left: shrink_radius(paint.border_radius.bottom_left, layout.border.left, layout.border.bottom),
+				}
+			);
+			self.scene.fill(
+				Fill::NonZero,
+				Affine::IDENTITY,
+				&paint.background,
+				None,
+				&bg_rect
+			);
+			
+			//inner
+			if let Some(inner) = &paint.inner {
+				if paint.clip {
+					if paint.opacity < 1. {
+						self.scene.push_layer(Mix::Normal, paint.opacity, Affine::IDENTITY, &bg_rect);
+					} else {
+						// self.scene.push_clip_layer(Affine::IDENTITY, &bg_rect);//TODO vello 0.6.0 introduces this change, but dependencies don't compile locally
+						self.scene.push_layer(Mix::Clip, 1., Affine::IDENTITY, &bg_rect);
+					}
+				}
+				match inner {
+					InnerElement::Image(img) => {
+						self.scene.draw_image(img, Affine::IDENTITY);
+					}
+					InnerElement::Text(text) => {
+						text.draw(&mut self.scene, &self.fonts);
+					}
+				}
+				if paint.clip {
+					self.scene.pop_layer();
+				}
+			}
+		};
 	}
 	
 	#[inline]
@@ -299,29 +414,21 @@ impl App {
 			|| self.settings.bit_depth.is_some()
 		{
 			let candidate = monitor.video_modes().find(|m| {
-				if let Some(res) = self.settings.resolution {
-					if m.size() != res {
-						return false;
-					}
+				if let Some(res) = self.settings.resolution && m.size() != res {
+					return false;
 				}
-				if let Some(rate) = self.settings.refresh_rate_mhz {
-					if m.refresh_rate_millihertz() != rate * 1000 {
-						return false;
-					}
+				if let Some(rate) = self.settings.refresh_rate_mhz && m.refresh_rate_millihertz() != rate * 1000 {
+					return false;
 				}
-				if let Some(depth) = self.settings.bit_depth {
-					if m.bit_depth() != depth {
-						return false;
-					}
+				if let Some(depth) = self.settings.bit_depth && m.bit_depth() != depth {
+					return false;
 				}
 				true
 			});
-			
 			if candidate.is_some() {
 				return candidate;
 			}
 		}
-		
 		// Fallback: pick the best available
 		monitor.video_modes().max_by(|a, b| {
 			(
@@ -337,19 +444,9 @@ impl App {
 			))
 		})
 	}
-	
-	pub fn get_font(&self, id: ID) -> vello::peniko::Font {
-		match id {
-			id if id == self.georgia.id => self.georgia.blob.clone(),
-			id if id == self.georgia_bold.id => self.georgia_bold.blob.clone(),
-			id if id == self.georgia_italic.id => self.georgia_italic.blob.clone(),
-			id if id == self.times_new_roman.id => self.times_new_roman.blob.clone(),
-			_ => unreachable!("Font not loaded")
-		}
-	}
 }
 
-impl ApplicationHandler for App {
+impl<'buffer> ApplicationHandler for App<'buffer> {
 	fn resumed(&mut self, event_loop: &ActiveEventLoop) {
 		let RenderState::Suspended(cached_window) = &mut self.state else {return};
 		let window = cached_window
