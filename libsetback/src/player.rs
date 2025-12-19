@@ -1,17 +1,11 @@
 use {
-	crate::{
-		constants::*,
-		items::*,
-		connection::*
-	},
+	crate::{connection::*, constants::*, items::*},
 	bincode::{
-		BorrowDecode,
-		Decode,
-		Encode,
+		BorrowDecode, Decode, Encode,
 		de::{BorrowDecoder, Decoder},
 		enc::Encoder,
-		error::{DecodeError, EncodeError}
-	}
+		error::{DecodeError, EncodeError},
+	},
 };
 
 #[derive(Encode, Decode, Debug, Clone)]
@@ -19,7 +13,7 @@ pub struct Player {
 	pub player_type: PlayerType,
 	pub username: String,
 	pub hand: Vec<Card>,
-	pub team_id: u8
+	pub team_id: u8,
 }
 
 impl Player {
@@ -29,7 +23,7 @@ impl Player {
 			//TODO load username from disk
 			username: String::from("Me"),
 			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
-			team_id
+			team_id,
 		}
 	}
 
@@ -39,7 +33,7 @@ impl Player {
 			player_type: PlayerType::HumanEmpty,
 			username: String::from("Waiting for player to connect..."),
 			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
-			team_id
+			team_id,
 		}
 	}
 
@@ -48,11 +42,13 @@ impl Player {
 			player_type: PlayerType::AI,
 			username: String::from("Bot"),
 			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
-			team_id
+			team_id,
 		}
 	}
 
-	pub fn can_follow(&self, lead: Suit) -> bool { self.hand.iter().any(|card| {card.suit == lead}) }
+	pub fn can_follow(&self, lead: Suit) -> bool {
+		self.hand.iter().any(|card| card.suit == lead)
+	}
 }
 
 #[derive(Debug)]
@@ -66,13 +62,18 @@ pub enum PlayerType {
 	///The account id and ready status of a connected player in multiplayer.
 	///The server will convert a HumanConnection to a MultiplayerHuman when serializing and sending it to clients.
 	///The client doesn't store this, they just take the account id and ready status from the HumanConnection and update the UI accordingly.
-	MultiplayerHuman{account_id: u32, ready: bool},
-	AI
+	MultiplayerHuman {
+		account_id: u32,
+		ready: bool,
+	},
+	AI,
 }
 
 impl PlayerType {
 	pub fn set(&mut self, other: Self) {
-		if let Self::HumanConnection(connection) = self && let Self::MultiplayerHuman{account_id, ready} = other {
+		if let Self::HumanConnection(connection) = self
+			&& let Self::MultiplayerHuman { account_id, ready } = other
+		{
 			connection.account_id = account_id;
 			connection.ready = ready;
 			return;
@@ -83,19 +84,19 @@ impl PlayerType {
 
 impl Clone for PlayerType {
 	fn clone(&self) -> Self {
-	    match self {
+		match self {
 			Self::SingleplayerSelf => Self::SingleplayerSelf,
 			Self::HumanEmpty => Self::HumanEmpty,
 			//HumanConnection is cloned as MultiplayerHuman
 			Self::HumanConnection(connection) => Self::MultiplayerHuman {
 				account_id: connection.account_id,
-				ready: connection.ready
+				ready: connection.ready,
 			},
-			Self::MultiplayerHuman{account_id, ready} => Self::MultiplayerHuman {
+			Self::MultiplayerHuman { account_id, ready } => Self::MultiplayerHuman {
 				account_id: *account_id,
-				ready: *ready
+				ready: *ready,
 			},
-			Self::AI => Self::AI
+			Self::AI => Self::AI,
 		}
 	}
 }
@@ -103,20 +104,20 @@ impl Clone for PlayerType {
 impl Encode for PlayerType {
 	fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
 		match self {
-			Self::SingleplayerSelf => {Encode::encode(&0, encoder)}
-			Self::HumanEmpty => {Encode::encode(&1, encoder)}
+			Self::SingleplayerSelf => Encode::encode(&0, encoder),
+			Self::HumanEmpty => Encode::encode(&1, encoder),
 			Self::HumanConnection(connection) => {
 				//HumanConnection is encoded as MultiplayerHuman
 				Encode::encode(&3, encoder)?;
 				Encode::encode(&connection.account_id, encoder)?;
 				Encode::encode(&connection.ready, encoder)
 			}
-			Self::MultiplayerHuman{account_id, ready} => {
+			Self::MultiplayerHuman { account_id, ready } => {
 				Encode::encode(&3, encoder)?;
 				Encode::encode(&account_id, encoder)?;
 				Encode::encode(&ready, encoder)
 			}
-			Self::AI => {Encode::encode(&4, encoder)}
+			Self::AI => Encode::encode(&4, encoder),
 		}
 	}
 }
@@ -128,9 +129,12 @@ impl<Context> Decode<Context> for PlayerType {
 			0 => Ok(Self::SingleplayerSelf),
 			1 => unreachable!("HumanConnection is encoded as MultiplayerHuman"),
 			2 => Ok(Self::HumanEmpty),
-			3 => Ok(Self::MultiplayerHuman{account_id: Decode::decode(decoder)?, ready: Decode::decode(decoder)?}),
+			3 => Ok(Self::MultiplayerHuman {
+				account_id: Decode::decode(decoder)?,
+				ready: Decode::decode(decoder)?,
+			}),
 			4 => Ok(Self::AI),
-			_ => unreachable!("Invalid player type: {}", player_type)
+			_ => unreachable!("Invalid player type: {}", player_type),
 		}
 	}
 }
@@ -142,9 +146,12 @@ impl<'de, Context> BorrowDecode<'de, Context> for PlayerType {
 			0 => Ok(Self::SingleplayerSelf),
 			1 => unreachable!("HumanConnection is encoded as MultiplayerHuman"),
 			2 => Ok(Self::HumanEmpty),
-			3 => Ok(Self::MultiplayerHuman{account_id: BorrowDecode::borrow_decode(decoder)?, ready: BorrowDecode::borrow_decode(decoder)?}),
+			3 => Ok(Self::MultiplayerHuman {
+				account_id: BorrowDecode::borrow_decode(decoder)?,
+				ready: BorrowDecode::borrow_decode(decoder)?,
+			}),
 			4 => Ok(Self::AI),
-			_ => unreachable!("Invalid player type: {}", player_type)
+			_ => unreachable!("Invalid player type: {}", player_type),
 		}
 	}
 }

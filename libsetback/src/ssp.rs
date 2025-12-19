@@ -1,19 +1,12 @@
 use {
-	std::fmt::{Display, Formatter},
+	crate::{constants::*, game::*, items::*, player::*, setup_data::*},
 	bincode::{
-		Decode,
-		Encode,
-		config::{standard, Configuration},
-		error::{DecodeError, EncodeError}
+		Decode, Encode,
+		config::{Configuration, standard},
+		error::{DecodeError, EncodeError},
 	},
-	crate::{
-		player::*,
-		items::*,
-		game::*,
-		setup_data::*,
-		constants::*
-	},
-	serde::{Deserialize, Serialize}
+	serde::{Deserialize, Serialize},
+	std::fmt::{Display, Formatter},
 };
 
 ///Setback Server Protocol
@@ -23,12 +16,24 @@ pub struct Ssp {
 	///0 = server/game, other = specific client_id
 	pub src_id: u32,
 	///the context of the data being sent
-	pub protocol: Protocol
+	pub protocol: Protocol,
 }
 
 impl Ssp {
-	pub fn new(protocol: Protocol) -> Self {Self {version: SETBACK_VERSION, src_id: 0, protocol}}
-	pub fn new_with_src(protocol: Protocol, src_id: u32) -> Self {Self {version: SETBACK_VERSION, src_id, protocol}}
+	pub fn new(protocol: Protocol) -> Self {
+		Self {
+			version: SETBACK_VERSION,
+			src_id: 0,
+			protocol,
+		}
+	}
+	pub fn new_with_src(protocol: Protocol, src_id: u32) -> Self {
+		Self {
+			version: SETBACK_VERSION,
+			src_id,
+			protocol,
+		}
+	}
 
 	//Server/Game -> Client protocols are implemented where needed and don't require separate functions.
 	//You can find functions for each Client -> Server/Game protocol in the game code
@@ -43,7 +48,7 @@ impl Ssp {
 	}
 	//Decodes the SSP from a &mut [u8], which is NOT prefixed with the 2-byte length.
 	pub fn decode(buffer: &mut [u8]) -> Result<Ssp, DecodeError> {
-		bincode::decode_from_slice::<Ssp, Configuration>(buffer, standard()).map(|(ssp, _)| {ssp})
+		bincode::decode_from_slice::<Ssp, Configuration>(buffer, standard()).map(|(ssp, _)| ssp)
 	}
 }
 
@@ -97,12 +102,15 @@ pub enum Protocol {
 	///Client <--Game--- Server<br>
 	///Request only<br><br>
 	///Client creates game. A password indicates a private game.
-	CreateGame{password: Option<String>},
+	CreateGame { password: Option<String> },
 	///Client ---JoinGame--> Server<br>
 	///Client <--Game--- Server<br>
 	///Request only<br><br>
 	///Client requests to join game. A password indicates a private game.
-	JoinGame{code: String, password: Option<String>},
+	JoinGame {
+		code: String,
+		password: Option<String>,
+	},
 	///Client ---CreateGame--> Server<br>
 	///Client <--Game--- Server<br>
 	///Response only<br><br>
@@ -111,7 +119,10 @@ pub enum Protocol {
 	///Client <--Game--- Server<br>
 	///Response only<br><br>
 	///Server sends game info when client creates or joins a game.
-	Game{setup_data: SetupData, is_host: bool},
+	Game {
+		setup_data: SetupData,
+		is_host: bool,
+	},
 	///Client ---SearchGames--> Server<br>
 	///Client <--PublicGames--- Server<br>
 	///Request only<br><br>
@@ -134,12 +145,12 @@ pub enum Protocol {
 	///All-Clients <--UpdatePlayerTeam--- Game<br>
 	///Request and response<br>
 	///The host or a player can update the team of that player.
-	UpdatePlayerTeam{index: u8, team: u8},
+	UpdatePlayerTeam { index: u8, team: u8 },
 	///Client ---UpdatePlayerType--> Game<br>
 	///All-Clients <--UpdatePlayerType--- Game<br>
 	///Request and response<br>
 	///The host or a player can update the type of that player.
-	UpdatePlayerType{index: u8, human: bool},
+	UpdatePlayerType { index: u8, human: bool },
 	///Host-Client ---AddPlayer--> Game<br>
 	///All-Clients <--Players--- Game<br>
 	///Response only<br>
@@ -150,13 +161,16 @@ pub enum Protocol {
 	///Response only<br><br>
 	///When information about multiple players changes or the number of players changes.
 	///The game updates its state and propagates the message to all other clients.
-	Players{players: Vec<Player>, local_player_index: u8},
+	Players {
+		players: Vec<Player>,
+		local_player_index: u8,
+	},
 	///Client ---Ready--> Game<br>
 	///All-Clients <--Ready--- Game<br>
 	///Request and response<br>
 	///Spontaneous<br><br>
 	///When a client ready-ups, the game updates the state and propagates it to all other clients.
-	Ready{is_ready: bool, index: u8},
+	Ready { is_ready: bool, index: u8 },
 	///Client <--Start--- Game<br>
 	///Response only<br>
 	///Spontaneous<br><br>
@@ -187,7 +201,7 @@ pub enum Protocol {
 	///Request only<br>
 	///Host only<br><br>
 	///The host can remove a player from the game.
-	RemovePlayer{index: u8}
+	RemovePlayer { index: u8 },
 }
 
 ///Admins can use these messages to mess with the server with admin privileges.
@@ -197,7 +211,7 @@ pub enum AdminMessage {
 	///Admin <--AuthorizeResponse--- Server<br>
 	///Request only<br><br>
 	///Client sends an authorize message to the server with their username, password, account_id, and admin_password.
-	Authorize{admin_password: String},
+	Authorize { admin_password: String },
 	///Admin ---Any--> Server<br>
 	///Admin <--AuthorizeResponse--- Server<br>
 	///Authorization error response only<br><br>
@@ -217,5 +231,5 @@ pub enum AdminMessage {
 	///Admin <--NumActiveGames--- Server<br>
 	///Request and response<br><br>
 	///Server sends the number of active games to the admin.
-	NumActiveGames(u8)
+	NumActiveGames(u8),
 }

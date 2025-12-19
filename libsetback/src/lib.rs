@@ -1,23 +1,17 @@
+#![feature(allocator_api)]
+#![feature(slice_ptr_get)]
+
+mod arena;
+mod connection;
 mod constants;
-mod ssp;
-mod player;
+mod game;
 mod items;
 mod models;
-mod connection;
-mod game;
+mod player;
 mod setup_data;
-mod tests;
+mod ssp;
 
 pub use {
-	constants::*,
+	arena::*, connection::*, constants::*, game::*, items::*, models::*, player::*, setup_data::*,
 	ssp::*,
-	player::*,
-	items::*,
-	models::*,
-	connection::*,
-	game::*,
-	setup_data::*
 };
-
-#[cfg(test)]
-pub use tests::testing::*;

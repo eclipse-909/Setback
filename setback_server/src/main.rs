@@ -1,33 +1,41 @@
 use {
-	crate::mp_game::{MPGame, Games, MAX_GAMES},
-	libsetback::{TcpClient, ssp, Protocol, Version, Player, Error, ClientError, spawn_async, spawn_sync},
+	crate::mp_game::{Games, MAX_GAMES, MPGame},
+	bincode::config::{Configuration, standard},
+	libsetback::{
+		ClientError, Error, Player, Protocol, TcpClient, Version, spawn_async, spawn_sync, ssp,
+	},
 	std::{
 		collections::HashMap,
-		sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard}
+		sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 	},
 	tokio::{
 		io::AsyncWriteExt,
 		net::TcpListener,
-		sync::{watch, mpsc},
-		time::{self, Duration, Interval}
+		sync::{mpsc, watch},
+		time::{self, Duration, Interval},
 	},
-	bincode::config::{Configuration, standard}
 };
 
-mod mp_game;
 mod client_connection;
 mod constants;
+mod mp_game;
 
 type Clients = Arc<RwLock<HashMap<u32, Arc<RwLock<TcpClient>>>>>;
 
-const SOCKET: &str = if cfg!(debug_assertions) {"127.0.0.1:42069"} else {"0.0.0.0:42069"};
+const SOCKET: &str = if cfg!(debug_assertions) {
+	"127.0.0.1:42069"
+} else {
+	"0.0.0.0:42069"
+};
 const MIN_CLIENTS: usize = 20;
 const MAX_CLIENTS: usize = 1000;
 
 #[tokio::main]
 async fn main() {
 	//create the server in main
-	let listener: TcpListener = TcpListener::bind(SOCKET).await.unwrap_or_else(|_| panic!("Server could not be bound to {}", SOCKET));
+	let listener: TcpListener = TcpListener::bind(SOCKET)
+		.await
+		.unwrap_or_else(|_| panic!("Server could not be bound to {}", SOCKET));
 	//these clients are owned by the server. other hashmaps will be owned by individual games, which are owned by the server
 	let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
 	//the lobbies/games that are active
@@ -44,17 +52,28 @@ async fn main() {
 	let server_term_rx: watch::Receiver<()> = server_terminator_rx.clone();
 	spawn_async(server_terminator_rx.clone(), async move {
 		loop {
-			let Some(ssp) = client_rx.recv().await else {continue;};
+			let Some(ssp) = client_rx.recv().await else {
+				continue;
+			};
 			match &ssp.protocol {
-				Protocol::Disconnect => {remove_player(&clients_clone, ssp.src_id).await;}
+				Protocol::Disconnect => {
+					remove_player(&clients_clone, ssp.src_id).await;
+				}
 				Protocol::CreateGame => {
 					if games.read().unwrap().len() >= MAX_GAMES as usize {
 						send_error_back(&clients_clone, ssp.src_id, Error::GamesAtCapacity).await;
 						continue;
 					}
-					let Some(client) = clients_clone.write().unwrap().remove(&ssp.src_id) else {continue;};
+					let Some(client) = clients_clone.write().unwrap().remove(&ssp.src_id) else {
+						continue;
+					};
 					//create the bevy_game and add the client to it
-					let game: Arc<RwLock<MPGame>> = MPGame::create(games.clone(), server_term_tx.clone(), server_term_rx.clone()).await;
+					let game: Arc<RwLock<MPGame>> = MPGame::create(
+						games.clone(),
+						server_term_tx.clone(),
+						server_term_rx.clone(),
+					)
+					.await;
 					let mut game_guard: RwLockWriteGuard<MPGame> = game.write().unwrap();
 					game_guard.add_client(client.clone(), true).await;
 					//fill the rest with AIs
@@ -63,12 +82,22 @@ async fn main() {
 						game_guard.sp_game.players.push(Player::new_ai(team_id));
 					}
 					//Send bevy_game info back to client, letting them know they've joined the lobby
-					if client.write().unwrap().message_client(&ssp::new(Protocol::Game(game_guard.sp_game.meta_data.clone(), game_guard.sp_game.players.clone()))).await.is_err() {
+					if client
+						.write()
+						.unwrap()
+						.message_client(&ssp::new(Protocol::Game(
+							game_guard.sp_game.meta_data.clone(),
+							game_guard.sp_game.players.clone(),
+						)))
+						.await
+						.is_err()
+					{
 						remove_player(&clients_clone, ssp.src_id).await;
 					}
 				}
 				Protocol::JoinGame(code) => {
-					let games_guard: RwLockReadGuard<HashMap<u32, Arc<RwLock<MPGame>>>> = games.read().unwrap();
+					let games_guard: RwLockReadGuard<HashMap<u32, Arc<RwLock<MPGame>>>> =
+						games.read().unwrap();
 					let Some(game) = games_guard.get(code) else {
 						send_error_back(&clients_clone, ssp.src_id, Error::GameNotFound).await;
 						continue;
@@ -78,16 +107,36 @@ async fn main() {
 						send_error_back(&clients_clone, ssp.src_id, Error::GameAtCapacity).await;
 						continue;
 					}
-					let Some(client) = clients_clone.write().unwrap().remove(&ssp.src_id) else {continue;};
+					let Some(client) = clients_clone.write().unwrap().remove(&ssp.src_id) else {
+						continue;
+					};
 					game_guard.add_client(client.clone(), false).await;
-					if client.write().unwrap().message_client(&ssp::new(Protocol::Game(game_guard.sp_game.meta_data.clone(), game_guard.sp_game.players.clone()))).await.is_err() {
+					if client
+						.write()
+						.unwrap()
+						.message_client(&ssp::new(Protocol::Game(
+							game_guard.sp_game.meta_data.clone(),
+							game_guard.sp_game.players.clone(),
+						)))
+						.await
+						.is_err()
+					{
 						remove_player(&clients_clone, ssp.src_id).await;
 					}
 				}
 				Protocol::SearchGames(filter) => {
-					send_message(&clients_clone, &ssp::new(Protocol::GameMetas(MPGame::get_game_metas(&games, filter).await)), ssp.src_id).await;
+					send_message(
+						&clients_clone,
+						&ssp::new(Protocol::GameMetas(
+							MPGame::get_game_metas(&games, filter).await,
+						)),
+						ssp.src_id,
+					)
+					.await;
 				}
-				_ => {send_error_back(&clients_clone, ssp.src_id, Error::InvalidProtocol).await;}
+				_ => {
+					send_error_back(&clients_clone, ssp.src_id, Error::InvalidProtocol).await;
+				}
 			}
 		}
 	});
@@ -178,17 +227,29 @@ async fn main() {
 }
 
 async fn send_message(clients: &Clients, ssp: &Ssp, dest_id: u32) {
-	let clients_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> = clients.write().unwrap();
-	let Some(client) = clients_guard.get(&dest_id) else {return;};
+	let clients_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> =
+		clients.write().unwrap();
+	let Some(client) = clients_guard.get(&dest_id) else {
+		return;
+	};
 	if client.write().unwrap().message_client(ssp).await.is_err() {
 		remove_player(clients, dest_id).await;
 	}
 }
 
 async fn send_error_back(clients: &Clients, src_id: u32, err: Error) {
-	let client_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> = clients.write().unwrap();
-	let Some(client) = client_guard.get(&src_id) else {return;};
-	if client.write().unwrap().message_client(&ssp::new(Protocol::ServerErr(err))).await.is_err() {
+	let client_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> =
+		clients.write().unwrap();
+	let Some(client) = client_guard.get(&src_id) else {
+		return;
+	};
+	if client
+		.write()
+		.unwrap()
+		.message_client(&ssp::new(Protocol::ServerErr(err)))
+		.await
+		.is_err()
+	{
 		remove_player(clients, src_id).await;
 	}
 }

@@ -5,8 +5,12 @@ edition = "2024"
 
 [dependencies]
 bincode.workspace = true
+log.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+
+[dev-dependencies]
+trybuild.workspace = true

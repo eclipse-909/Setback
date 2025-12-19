@@ -1,9 +1,6 @@
 use {
-	crate::{
-		state::*,
-		keyboard::*
-	},
-	libsetback::*
+	crate::{keyboard::*, state::*},
+	libsetback::*,
 };
 
 #[derive(Debug, Clone)]
@@ -21,12 +18,12 @@ pub enum Message {
 	ClickMultiplayer,
 	PromptLogin,
 	RepromptLogin,
-	SubmitCredentials {username: String, password: String},
+	SubmitCredentials { username: String, password: String },
 	ClickCreatePrivateGame,
-	CreatePrivateGame {password: String},
+	CreatePrivateGame { password: String },
 	ClickCreatePublicGame,
 	ClickJoinPrivateGame,
-	JoinPrivateGame {code: String, password: String},
+	JoinPrivateGame { code: String, password: String },
 	ClickBrowsePublicGames,
 	Back,
 	Exit,
@@ -52,7 +49,6 @@ pub enum Message {
 	Logout,
 	Rebind,
 	CancelRebind,
-
 	//multiplayer
 
 	//setup

@@ -3,7 +3,7 @@
 /target
 /*.bak
 /tmp
-/setback/logs/*
+/setback/logs
 /setback/usr.crd
-/setback/settings.cfg
+/setback/settings.json
 setback.db

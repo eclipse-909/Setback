@@ -1,24 +1,20 @@
-use {
-	once_cell::sync::Lazy,
-	regex::Regex,
-	vello::peniko::Color,
-};
+use {once_cell::sync::Lazy, regex::Regex, vello::peniko::Color};
 
 macro_rules! setback_path {
-    ($path:literal) => {
-	    if cfg!(debug_assertions) {
-		    concat!("setback/", $path)
-	    } else {
-		    $path
-	    }
-    };
+	($path:literal) => {
+		if cfg!(debug_assertions) {
+			concat!("setback/", $path)
+		} else {
+			$path
+		}
+	};
 	($path:expr) => {
-	    if cfg!(debug_assertions) {
-		    concat!("setback/", $path)
-	    } else {
-		    $path
-	    }
-    };
+		if cfg!(debug_assertions) {
+			concat!("setback/", $path)
+		} else {
+			$path
+		}
+	};
 }
 
 //Files
@@ -81,7 +77,8 @@ pub const BJ_CLUB_SELECT: &[u8] = include_bytes!("../assets/cursors/Blackjack-Cl
 /// Heart
 pub const BJ_HEART_SELECT: &[u8] = include_bytes!("../assets/cursors/Blackjack Heart Select.png");
 /// Diamond
-pub const BJ_DIAMOND_SELECT: &[u8] = include_bytes!("../assets/cursors/Blackjack Diamond Select.png");
+pub const BJ_DIAMOND_SELECT: &[u8] =
+	include_bytes!("../assets/cursors/Blackjack Diamond Select.png");
 /// Card front
 pub const BJ_CARD_FRONT: &[u8] = include_bytes!("../assets/cursors/Blackjack Card Front.png");
 /// Card back
@@ -105,7 +102,8 @@ pub const TIMES_NEW_ROMAN: &[u8] = include_bytes!("../assets/fonts/times.ttf");
 
 // Text
 
-pub const SINGLE_COMPONENT_QUERY_ERROR: &str = "There should be exactly one component returned from the query";
+pub const SINGLE_COMPONENT_QUERY_ERROR: &str =
+	"There should be exactly one component returned from the query";
 pub const TASK_ERROR: &str = "Failed to send command queue following task completion";
 pub const KEYRING_PASSWORD: &str = "service-keyring-setback-user-password";
 pub const URL_SIGNUP: &str = "signup";
@@ -118,7 +116,7 @@ pub const fn color_hex(hex: u32) -> Color {
 		((hex & 0xFF_00_00_00) >> 24) as u8,
 		((hex & 0x00_FF_00_00) >> 16) as u8,
 		((hex & 0x00_00_FF_00) >> 8) as u8,
-		(hex & 0x00_00_00_FF) as u8
+		(hex & 0x00_00_00_FF) as u8,
 	)
 }
 pub const COLOR_PRIMARY_GREEN: Color = color_hex(0x0d5d2eff);

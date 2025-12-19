@@ -1,15 +1,15 @@
 use {
-	serde::{Deserialize, Serialize},
-	chrono::{Utc, Duration},
-	jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation},
 	actix_web::{
-		dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
 		Error, HttpMessage, HttpResponse,
+		body::EitherBody,
 		cookie::Key,
-		body::EitherBody
+		dev::{Service, ServiceRequest, ServiceResponse, Transform, forward_ready},
 	},
-	futures_util::future::{ok, Ready, LocalBoxFuture},
-	lazy_static::lazy_static
+	chrono::{Duration, Utc},
+	futures_util::future::{LocalBoxFuture, Ready, ok},
+	jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode},
+	lazy_static::lazy_static,
+	serde::{Deserialize, Serialize},
 };
 
 lazy_static! {
@@ -23,7 +23,7 @@ pub struct Claims {
 	///the user ID or unique identifier
 	pub sub: String,
 	///expiration time as a timestamp
-	exp: usize
+	exp: usize,
 }
 
 //Creates only the access token
@@ -32,9 +32,9 @@ pub fn create_access_token(user_id: String) -> jsonwebtoken::errors::Result<Stri
 		&Header::default(),
 		&Claims {
 			sub: user_id,
-			exp: (Utc::now() + Duration::hours(2)).timestamp() as usize
+			exp: (Utc::now() + Duration::hours(2)).timestamp() as usize,
 		},
-		&ENCODING_KEY
+		&ENCODING_KEY,
 	)
 }
 
@@ -46,41 +46,64 @@ pub fn create_jwts(user_id: String) -> jsonwebtoken::errors::Result<(String, Str
 			&Header::default(),
 			&Claims {
 				sub: user_id,
-				exp: (Utc::now() + Duration::days(7)).timestamp() as usize
+				exp: (Utc::now() + Duration::days(7)).timestamp() as usize,
 			},
-			&ENCODING_KEY
-		)?
+			&ENCODING_KEY,
+		)?,
 	))
 }
 
 pub struct JwtValidator;
 
 impl<S, B> Transform<S, ServiceRequest> for JwtValidator
-where S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static, S::Future: 'static, B: 'static {
+where
+	S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+	S::Future: 'static,
+	B: 'static,
+{
 	type Response = ServiceResponse<EitherBody<B>>;
 	type Error = Error;
 	type Transform = JwtMiddleware<S>;
 	type InitError = ();
 	type Future = Ready<Result<Self::Transform, Self::InitError>>;
-	fn new_transform(&self, service: S) -> Self::Future {ok(JwtMiddleware{service})}
+	fn new_transform(&self, service: S) -> Self::Future {
+		ok(JwtMiddleware { service })
+	}
 }
 
-pub struct JwtMiddleware<S> {service: S}
+pub struct JwtMiddleware<S> {
+	service: S,
+}
 
 impl<S, B> Service<ServiceRequest> for JwtMiddleware<S>
-where S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static, S::Future: 'static, B: 'static {
+where
+	S: Service<ServiceRequest, Response = ServiceResponse<B>, Error = Error> + 'static,
+	S::Future: 'static,
+	B: 'static,
+{
 	type Response = ServiceResponse<EitherBody<B>>;
 	type Error = Error;
 	type Future = LocalBoxFuture<'static, Result<Self::Response, Self::Error>>;
 	forward_ready!(service);
 	fn call(&self, req: ServiceRequest) -> Self::Future {
-		if let Some(token) = req.headers().get("Authorization").and_then(|h| h.to_str().ok()).and_then(|h| h.strip_prefix("Bearer ")) {
-			if let Ok(decoded_token) = decode::<Claims>(token, &DECODING_KEY, &Validation::default()) {
+		if let Some(token) = req
+			.headers()
+			.get("Authorization")
+			.and_then(|h| h.to_str().ok())
+			.and_then(|h| h.strip_prefix("Bearer "))
+		{
+			if let Ok(decoded_token) =
+				decode::<Claims>(token, &DECODING_KEY, &Validation::default())
+			{
 				req.extensions_mut().insert(decoded_token.claims);
 				let fut: <S as Service<ServiceRequest>>::Future = self.service.call(req);
-				return Box::pin(async {Ok(fut.await?.map_into_left_body())});
+				return Box::pin(async { Ok(fut.await?.map_into_left_body()) });
 			}
 		}
-		Box::pin(async {Ok(req.into_response(HttpResponse::Unauthorized()).map_into_right_body())})
+		Box::pin(async {
+			Ok(req
+				.into_response(HttpResponse::Unauthorized())
+				.map_into_right_body())
+		})
 	}
 }

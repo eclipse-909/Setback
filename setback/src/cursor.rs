@@ -1,10 +1,6 @@
 use {
 	serde::Deserialize,
-	winit::{
-		event::ElementState,
-		event_loop::EventLoop,
-		window::CustomCursor
-	}
+	winit::{event::ElementState, event_loop::EventLoop, window::CustomCursor},
 };
 
 pub enum CursorImage {
@@ -12,12 +8,14 @@ pub enum CursorImage {
 	Animated {
 		animated_cursor: AnimatedCursor,
 		curr_duration: f32,
-		max_duration: f32
-	}
+		max_duration: f32,
+	},
 }
 
 pub fn custom_cursor_from_bytes(event_loop: &EventLoop<()>, icon: &[u8]) -> CustomCursor {
-	let img = image::load_from_memory_with_format(icon, image::ImageFormat::Png).unwrap().to_rgba8();
+	let img = image::load_from_memory_with_format(icon, image::ImageFormat::Png)
+		.unwrap()
+		.to_rgba8();
 	let samples = img.into_flat_samples();
 	let (_, w, h) = samples.extents();
 	let (w, h) = (w as u16, h as u16);
@@ -27,13 +25,13 @@ pub fn custom_cursor_from_bytes(event_loop: &EventLoop<()>, icon: &[u8]) -> Cust
 
 #[derive(Deserialize)]
 pub struct TextureAtlasJson {
-	pub frames: Vec<Frame>
+	pub frames: Vec<Frame>,
 }
 
 #[derive(Deserialize)]
 pub struct Frame {
 	pub filename: String,
-	pub frame: RectData
+	pub frame: RectData,
 }
 
 #[derive(Deserialize)]
@@ -41,7 +39,7 @@ pub struct RectData {
 	pub x: u32,
 	pub y: u32,
 	pub w: u32,
-	pub h: u32
+	pub h: u32,
 }
 
 #[repr(usize)]
@@ -71,12 +69,12 @@ pub enum AnimatedCursor {
 
 pub struct MouseButtonInput {
 	pub mouse_button: MouseButton,
-	pub state: ElementState
+	pub state: ElementState,
 }
 
 pub enum MouseButton {
 	Left,
-	Right
+	Right,
 }
 
 impl TryFrom<winit::event::MouseButton> for MouseButton {
@@ -85,7 +83,7 @@ impl TryFrom<winit::event::MouseButton> for MouseButton {
 		match button {
 			winit::event::MouseButton::Left => Ok(Self::Left),
 			winit::event::MouseButton::Right => Ok(Self::Right),
-			_ => Err(())
+			_ => Err(()),
 		}
 	}
 }

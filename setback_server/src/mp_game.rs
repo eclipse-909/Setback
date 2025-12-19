@@ -1,21 +1,20 @@
 use {
 	libsetback::{
-		ssp, Protocol, Player, PlayerType, PlayerClient, GameMeta, GameData, GameFilter, Error, TcpClient, MAX_GAME_METAS, MAX_PLAYERS,
-		game::{Game, TurnResult}
+		Error, GameData, GameFilter, GameMeta, MAX_GAME_METAS, MAX_PLAYERS, Player, PlayerClient,
+		PlayerType, Protocol, TcpClient,
+		game::{Game, TurnResult},
+		ssp,
 	},
+	rand::{Rng, rng, rngs::ThreadRng},
 	std::{
-		sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard},
 		collections::HashMap,
-		mem
+		mem,
+		sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 	},
 	tokio::{
+		sync::{mpsc, watch},
 		time::{self, Duration, Interval},
-		sync::{mpsc, watch}
 	},
-	rand::{
-		rngs::ThreadRng,
-		Rng, rng
-	}
 };
 
 pub const MAX_GAMES: u32 = 100;
@@ -32,7 +31,7 @@ pub struct MPGame {
 	server_terminator: watch::Sender<()>,
 	countdown_signal: watch::Sender<bool>,
 	client_id_to_index: HashMap<u32, u8>,
-	pub sp_game: Game
+	pub sp_game: Game,
 }
 
 impl MPGame {
@@ -40,7 +39,7 @@ impl MPGame {
 	pub async fn create(
 		games: Games,
 		server_terminator_tx: watch::Sender<()>,
-		mut server_terminator_rx: watch::Receiver<()>
+		mut server_terminator_rx: watch::Receiver<()>,
 	) -> Arc<RwLock<Self>> {
 		//create the bevy_game
 		let (tx, rx) = mpsc::unbounded_channel::<Ssp>();
@@ -53,23 +52,26 @@ impl MPGame {
 			server_terminator: server_terminator_tx,
 			countdown_signal,
 			client_id_to_index: HashMap::with_capacity(MAX_PLAYERS as usize),
-			sp_game: Game::default()
+			sp_game: Game::default(),
 		}));
 
 		//create a join code and add the bevy_game to the hashmap
 		let mut code: u32;
 		{
-			let games_guard: RwLockReadGuard<HashMap<u32, Arc<RwLock<Self>>>> = games.read().unwrap();
+			let games_guard: RwLockReadGuard<HashMap<u32, Arc<RwLock<Self>>>> =
+				games.read().unwrap();
 			let mut rng: ThreadRng = rng();
 			code = rng.random();
-			
+
 			//TODO come up with a better way to generate a bevy_game code
-			
-			while games_guard.contains_key(&code) {code = rng.random();}
-		}//rng must be dropped before the next yield
+
+			while games_guard.contains_key(&code) {
+				code = rng.random();
+			}
+		} //rng must be dropped before the next yield
 		games.write().unwrap().insert(code, game.clone());
 		let return_game: Arc<RwLock<Self>> = game.clone();
-		
+
 		//create a task for the countdown
 		let mut server_term_rx: watch::Receiver<()> = server_terminator_rx.clone();
 		let mut term_rx: watch::Receiver<()> = terminator_rx.clone();
@@ -332,7 +334,8 @@ impl MPGame {
 			}
 
 			//The bevy_game shuts down here. Clean up the players and resources, and remove the bevy_game from the server's games hashmap
-			let mut games_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<MPGame>>>> = games.write().unwrap();
+			let mut games_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<MPGame>>>> =
+				games.write().unwrap();
 			if let Some(this_game) = games_guard.remove(&code) {
 				let mut game_guard: RwLockWriteGuard<Self> = this_game.write().unwrap();
 				for i in (0..game_guard.sp_game.players.len()).rev() {
@@ -340,7 +343,9 @@ impl MPGame {
 				}
 			}
 			//occasionally shrink HashMap capacity when bevy_game ends to clean up unused memory
-			if (games_guard.len() as f32) < f32::max(games_guard.capacity() as f32 * 0.1, MIN_GAMES as f32) {
+			if (games_guard.len() as f32)
+				< f32::max(games_guard.capacity() as f32 * 0.1, MIN_GAMES as f32)
+			{
 				let num_games: usize = games_guard.len();
 				games_guard.shrink_to(usize::max(num_games * 5, MIN_GAMES));
 			}
@@ -348,21 +353,31 @@ impl MPGame {
 		return_game
 	}
 
-	pub fn can_add_player(&self) -> bool {self.sp_game.players.len() < MAX_PLAYERS as usize }
-	
-	fn get_player(&mut self, index: u8) -> &mut Player {&mut self.sp_game.players[index as usize]}
-	
+	pub fn can_add_player(&self) -> bool {
+		self.sp_game.players.len() < MAX_PLAYERS as usize
+	}
+
+	fn get_player(&mut self, index: u8) -> &mut Player {
+		&mut self.sp_game.players[index as usize]
+	}
+
 	fn get_player_client(&mut self, account_id: u32) -> Option<(&mut PlayerClient, u8)> {
 		let index: u8 = *self.client_id_to_index.get(&account_id)?;
-		let Player{player_type: PlayerType::Client(player_client),..} = self.get_player(index) else {return None;};
+		let Player {
+			player_type: PlayerType::Client(player_client),
+			..
+		} = self.get_player(index)
+		else {
+			return None;
+		};
 		Some((player_client, index))
 	}
-	
+
 	fn get_client(&mut self, account_id: u32) -> Option<(&mut Arc<RwLock<TcpClient>>, u8)> {
 		let (player_client, index) = self.get_player_client(account_id)?;
 		Some((player_client.client.as_mut()?, index))
 	}
-	
+
 	///To add a client to a bevy_game, the server must remove the client from its hashmap, and move it into this function.
 	///Called when a player creates or joins a bevy_game.
 	///Call [Self::can_add_player] before this function to determine if a client can be added.
@@ -378,13 +393,27 @@ impl MPGame {
 		let mut client_guard: RwLockWriteGuard<TcpClient> = c.write().unwrap();
 		client_guard.owner_tx = self.game_tx.clone();
 		if let Some(index) = next_index {
-			self.client_id_to_index.insert(client_guard.account_id, index);
+			self.client_id_to_index
+				.insert(client_guard.account_id, index);
 			drop(client_guard);
-			self.sp_game.players[index as usize].player_type = PlayerType::Client(PlayerClient::new(c, h).await);
+			self.sp_game.players[index as usize].player_type =
+				PlayerType::Client(PlayerClient::new(c, h).await);
 		} else {
-			self.client_id_to_index.insert(client_guard.account_id, self.sp_game.players.len() as u8);
+			self.client_id_to_index
+				.insert(client_guard.account_id, self.sp_game.players.len() as u8);
 			drop(client_guard);
-			self.sp_game.players.push(Player::new_client(c, h, if self.sp_game.meta_data.std_team_mode { (self.sp_game.players.len() % 2 + 1) as u8 } else {0}).await);
+			self.sp_game.players.push(
+				Player::new_client(
+					c,
+					h,
+					if self.sp_game.meta_data.std_team_mode {
+						(self.sp_game.players.len() % 2 + 1) as u8
+					} else {
+						0
+					},
+				)
+				.await,
+			);
 		}
 	}
 
@@ -395,12 +424,17 @@ impl MPGame {
 			}
 		}
 	}
-	
+
 	///Sends a message to everyone except the client that matches the given ssp's src_id.
 	async fn broadcast_message(&mut self, ssp: &Ssp) {
 		let mut remove: Vec<u8> = Vec::new();
 		for (index, player) in self.sp_game.players.iter().enumerate() {
-			let PlayerType::Client(PlayerClient{client, account_id,..}) = &player.player_type else {continue;};
+			let PlayerType::Client(PlayerClient {
+				client, account_id, ..
+			}) = &player.player_type
+			else {
+				continue;
+			};
 			let Some(client) = client.as_ref() else {
 				remove.push(index as u8);
 				continue;
@@ -419,105 +453,162 @@ impl MPGame {
 	}
 
 	async fn send_error_back(&mut self, src_id: u32, err: Error) {
-		let Some((client, index)) = self.get_client(src_id) else {return;};
-		if client.write().unwrap().message_client(&ssp::new(Protocol::ServerErr(err))).await.is_err() {
+		let Some((client, index)) = self.get_client(src_id) else {
+			return;
+		};
+		if client
+			.write()
+			.unwrap()
+			.message_client(&ssp::new(Protocol::ServerErr(err)))
+			.await
+			.is_err()
+		{
 			self.remove_player(index);
 		}
 	}
-	
+
 	///Removes a player from the list of players, shuts down the TcpSteam, and drops the client.
 	fn remove_player(&mut self, index: u8) {
 		let player: Player = self.sp_game.players.remove(index as usize);
-		let PlayerType::Client(PlayerClient{account_id,..}) = player.player_type else {return;};
+		let PlayerType::Client(PlayerClient { account_id, .. }) = player.player_type else {
+			return;
+		};
 		self.client_id_to_index.remove(&account_id);
 	}
-	
+
 	///Disconnects the client and turns it into an empty slot. Doesn't change the number of players in the list.
 	fn remove_client(&mut self, account_id: u32) -> Option<PlayerClient> {
 		let index = self.client_id_to_index.get(&account_id)?;
-		let Player{player_type,..} = self.get_player(*index);
-		let PlayerType::Client(client) = mem::replace(player_type, PlayerType::Human) else {return None;};
+		let Player { player_type, .. } = self.get_player(*index);
+		let PlayerType::Client(client) = mem::replace(player_type, PlayerType::Human) else {
+			return None;
+		};
 		self.client_id_to_index.remove(&account_id);
 		Some(client)
 	}
-	
+
 	///Tries to terminate this bevy_game only. If that fails, it tries to terminate the server. If that fails, it panics.
 	pub fn terminate(&mut self) {
 		if self.game_terminator.send(()).is_err() {
-			self.server_terminator.send(()).expect("Could not gracefully shut down server.");
+			self.server_terminator
+				.send(())
+				.expect("Could not gracefully shut down server.");
 		}
 	}
-	
+
 	async fn matches_filter(&self, filter: &GameFilter) -> bool {
-		filter.max_players_cmp.compare(filter.max_players_value, self.sp_game.players.len() as u8)
+		filter
+			.max_players_cmp
+			.compare(filter.max_players_value, self.sp_game.players.len() as u8)
 			&& filter.std_team_mode == self.sp_game.meta_data.std_team_mode
-			&& filter.max_score_cmp.compare(filter.max_score_value, self.sp_game.meta_data.max_score)
+			&& filter
+				.max_score_cmp
+				.compare(filter.max_score_value, self.sp_game.meta_data.max_score)
 			&& filter.win_by_2 == self.sp_game.meta_data.win_by_2
 			&& filter.negative_scores == self.sp_game.meta_data.negative_scores
 	}
-	
+
 	pub async fn get_game_metas(games: &Games, filter: &GameFilter) -> Vec<GameMeta> {
 		let mut game_metas: Vec<GameMeta> = Vec::new();
 		for (_, game) in games.read().unwrap().iter() {
 			let game_guard: RwLockReadGuard<MPGame> = game.read().unwrap();
 			if game_guard.matches_filter(filter).await {
 				game_metas.push(game_guard.sp_game.meta_data.clone());
-				if game_metas.len() as u8 == MAX_GAME_METAS {break;}
+				if game_metas.len() as u8 == MAX_GAME_METAS {
+					break;
+				}
 			}
 		}
 		game_metas
 	}
-	
+
 	async fn deal_cards(&mut self) -> Result<(), Error> {
 		self.sp_game.deal_cards()?;
 		//send Player to each player
 		for i in 0..self.sp_game.players.len() {
-			let PlayerType::Client(player_client) = &self.sp_game.players[i].player_type else { continue; };
-			self.send_message(&ssp::new(Protocol::Player(self.sp_game.players[i].clone(), i as u8)), player_client.account_id).await;
+			let PlayerType::Client(player_client) = &self.sp_game.players[i].player_type else {
+				continue;
+			};
+			self.send_message(
+				&ssp::new(Protocol::Player(self.sp_game.players[i].clone(), i as u8)),
+				player_client.account_id,
+			)
+			.await;
 		}
 		//broadcast bevy_game data
-		self.broadcast_message(&ssp::new(Protocol::GameData(self.sp_game.game_data.clone()))).await;
+		self.broadcast_message(&ssp::new(Protocol::GameData(
+			self.sp_game.game_data.clone(),
+		)))
+		.await;
 		Ok(())
 	}
-	
+
 	///Processes the next AI turns until it's a human's turn.
 	async fn ai_game_loop(&mut self, mut turn_result: Result<TurnResult, Error>) {
 		loop {
 			match turn_result {
 				Ok(TurnResult::IsAI(ai)) => {
-					if !ai {return;}
+					if !ai {
+						return;
+					}
 					if self.sp_game.game_data.turn_number == 0 {
 						let bid: u8 = self.sp_game.ai_bid();
 						turn_result = self.sp_game.next_turn();
 						self.broadcast_message(&ssp::new(Protocol::Bid(bid))).await;
-						self.broadcast_message(&ssp::new(Protocol::GameData(self.sp_game.game_data.clone()))).await;
+						self.broadcast_message(&ssp::new(Protocol::GameData(
+							self.sp_game.game_data.clone(),
+						)))
+						.await;
 					} else {
-						let Some(card) = self.sp_game.ai_play_card() else {return self.terminate();};
+						let Some(card) = self.sp_game.ai_play_card() else {
+							return self.terminate();
+						};
 						turn_result = self.sp_game.next_turn();
-						self.broadcast_message(&ssp::new(Protocol::PlayCard(card))).await;
-						self.broadcast_message(&ssp::new(Protocol::GameData(self.sp_game.game_data.clone()))).await;
+						self.broadcast_message(&ssp::new(Protocol::PlayCard(card)))
+							.await;
+						self.broadcast_message(&ssp::new(Protocol::GameData(
+							self.sp_game.game_data.clone(),
+						)))
+						.await;
 					}
 				}
 				Ok(TurnResult::ReDeal) => {
-					if self.deal_cards().await.is_err() {return self.terminate();}
+					if self.deal_cards().await.is_err() {
+						return self.terminate();
+					}
 					turn_result = Ok(TurnResult::IsAI(self.sp_game.is_ai_turn()));
 					self.broadcast_message(&ssp::new(Protocol::DealCards)).await;
-					self.broadcast_message(&ssp::new(Protocol::GameData(self.sp_game.game_data.clone()))).await;
+					self.broadcast_message(&ssp::new(Protocol::GameData(
+						self.sp_game.game_data.clone(),
+					)))
+					.await;
 				}
 				Ok(TurnResult::EndRound(scores)) => {
-					if self.deal_cards().await.is_err() {return self.terminate();}
+					if self.deal_cards().await.is_err() {
+						return self.terminate();
+					}
 					turn_result = Ok(TurnResult::IsAI(self.sp_game.is_ai_turn()));
-					self.broadcast_message(&ssp::new(Protocol::RoundScores(scores))).await;
+					self.broadcast_message(&ssp::new(Protocol::RoundScores(scores)))
+						.await;
 					self.broadcast_message(&ssp::new(Protocol::DealCards)).await;
-					self.broadcast_message(&ssp::new(Protocol::GameData(self.sp_game.game_data.clone()))).await;
+					self.broadcast_message(&ssp::new(Protocol::GameData(
+						self.sp_game.game_data.clone(),
+					)))
+					.await;
 				}
 				Ok(TurnResult::GameOver(scores)) => {
-					self.broadcast_message(&ssp::new(Protocol::RoundScores(scores))).await;
+					self.broadcast_message(&ssp::new(Protocol::RoundScores(scores)))
+						.await;
 					self.broadcast_message(&ssp::new(Protocol::GameOver)).await;
-					self.broadcast_message(&ssp::new(Protocol::GameData(self.sp_game.game_data.clone()))).await;
+					self.broadcast_message(&ssp::new(Protocol::GameData(
+						self.sp_game.game_data.clone(),
+					)))
+					.await;
 					return self.terminate();
 				}
-				Err(_) => {return self.terminate();}
+				Err(_) => {
+					return self.terminate();
+				}
 			}
 		}
 	}

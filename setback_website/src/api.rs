@@ -1,28 +1,41 @@
 use {
 	crate::{
+		SESSION_ACCOUNT_ID,
+		jwt::{Claims, DECODING_KEY, create_access_token, create_jwts},
 		sql::{DB, Database},
-		jwt::{create_jwts, create_access_token, Claims, DECODING_KEY},
-		SESSION_ACCOUNT_ID
 	},
-	libsetback::AccountData,
-	actix_web::{post, get, patch, delete, web, HttpResponse},
 	actix_session::Session,
+	actix_web::{HttpResponse, delete, get, patch, post, web},
+	jsonwebtoken::{Validation, decode},
+	libsetback::AccountData,
 	serde::Deserialize,
-	jsonwebtoken::{decode, Validation}
 };
 
 #[derive(Deserialize)]
-struct UsernameQuery {username: String}
+struct UsernameQuery {
+	username: String,
+}
 #[derive(Deserialize)]
-struct PasswordQuery {password: String}
+struct PasswordQuery {
+	password: String,
+}
 #[derive(Deserialize)]
-struct AuthQuery {username: String, password: String}
+struct AuthQuery {
+	username: String,
+	password: String,
+}
 
 ///Logs into an account.
 #[post("/login")]
-async fn session_login(session: Session, auth: web::Query<AuthQuery>, db: web::Data<Database>) -> HttpResponse {
+async fn session_login(
+	session: Session,
+	auth: web::Query<AuthQuery>,
+	db: web::Data<Database>,
+) -> HttpResponse {
 	let auth: AuthQuery = auth.into_inner();
-	let Ok(account_id) = db.verify_login(auth.username, auth.password).await else {return HttpResponse::Unauthorized().body("Incorrect username or password");};
+	let Ok(account_id) = db.verify_login(auth.username, auth.password).await else {
+		return HttpResponse::Unauthorized().body("Incorrect username or password");
+	};
 	session.renew();
 	if session.insert(SESSION_ACCOUNT_ID, account_id).is_ok() {
 		HttpResponse::Ok().finish()
@@ -34,17 +47,17 @@ async fn session_login(session: Session, auth: web::Query<AuthQuery>, db: web::D
 ///Logs into an account.
 #[post("/login")]
 async fn jwt_login(auth: web::Json<AuthQuery>, db: web::Data<Database>) -> HttpResponse {
-	if db.verify_login(auth.username.clone(), auth.password.clone()).await.is_ok() {
+	if db
+		.verify_login(auth.username.clone(), auth.password.clone())
+		.await
+		.is_ok()
+	{
 		match create_jwts(auth.username.clone()) {
-			Ok((access_token, refresh_token)) => {
-				HttpResponse::Ok().json(serde_json::json!({
-				    "access_token": access_token,
-				    "refresh_token": refresh_token
-				}))
-			}
-			Err(_) => {
-				HttpResponse::InternalServerError().body("Token creation failed")
-			}
+			Ok((access_token, refresh_token)) => HttpResponse::Ok().json(serde_json::json!({
+				"access_token": access_token,
+				"refresh_token": refresh_token
+			})),
+			Err(_) => HttpResponse::InternalServerError().body("Token creation failed"),
 		}
 	} else {
 		HttpResponse::Unauthorized().body("Invalid credentials")
@@ -53,7 +66,11 @@ async fn jwt_login(auth: web::Json<AuthQuery>, db: web::Data<Database>) -> HttpR
 
 ///Creates an account with the body of the post request and inserts it into the database.
 #[post("/")]
-async fn create_account(session: Session, user: web::Json<AccountData>, db: web::Data<Database>) -> HttpResponse {
+async fn create_account(
+	session: Session,
+	user: web::Json<AccountData>,
+	db: web::Data<Database>,
+) -> HttpResponse {
 	let user: AccountData = user.into_inner();
 	match db.create_account(user.username, user.password).await {
 		Ok(account_id) => {
@@ -63,24 +80,46 @@ async fn create_account(session: Session, user: web::Json<AccountData>, db: web:
 				HttpResponse::Ok().finish()
 			}
 		}
-		Err(str) => {HttpResponse::InternalServerError().body(str.to_string())}
+		Err(str) => HttpResponse::InternalServerError().body(str.to_string()),
 	}
 }
 
 ///Updates the user's username
 #[patch("/username")]
-async fn update_username(session: Session, username: web::Query<UsernameQuery>, db: web::Data<Database>) -> HttpResponse {
-	let Ok(Some(account_id)) = session.get(SESSION_ACCOUNT_ID) else {return HttpResponse::Unauthorized().body("Could not get session info");};
-	if let Err(str) = db.update_username(account_id, username.into_inner().username).await {return HttpResponse::InternalServerError().body(str.to_string());}
+async fn update_username(
+	session: Session,
+	username: web::Query<UsernameQuery>,
+	db: web::Data<Database>,
+) -> HttpResponse {
+	let Ok(Some(account_id)) = session.get(SESSION_ACCOUNT_ID) else {
+		return HttpResponse::Unauthorized().body("Could not get session info");
+	};
+	if let Err(str) = db
+		.update_username(account_id, username.into_inner().username)
+		.await
+	{
+		return HttpResponse::InternalServerError().body(str.to_string());
+	}
 	session.renew();
 	HttpResponse::Ok().finish()
 }
 
 ///Updates the user's password
 #[patch("/password")]
-async fn update_password(session: Session, password: web::Query<PasswordQuery>, db: web::Data<Database>) -> HttpResponse {
-	let Ok(Some(account_id)) = session.get(SESSION_ACCOUNT_ID) else {return HttpResponse::Unauthorized().body("Could not get session info");};
-	if let Err(str) = db.update_password(account_id, password.into_inner().password).await {return HttpResponse::InternalServerError().body(str.to_string());}
+async fn update_password(
+	session: Session,
+	password: web::Query<PasswordQuery>,
+	db: web::Data<Database>,
+) -> HttpResponse {
+	let Ok(Some(account_id)) = session.get(SESSION_ACCOUNT_ID) else {
+		return HttpResponse::Unauthorized().body("Could not get session info");
+	};
+	if let Err(str) = db
+		.update_password(account_id, password.into_inner().password)
+		.await
+	{
+		return HttpResponse::InternalServerError().body(str.to_string());
+	}
 	session.renew();
 	HttpResponse::Ok().finish()
 }
@@ -88,8 +127,12 @@ async fn update_password(session: Session, password: web::Query<PasswordQuery>, 
 ///Deletes the user's account
 #[delete("/")]
 async fn delete_account(session: Session, db: web::Data<Database>) -> HttpResponse {
-	let Ok(Some(account_id)) = session.get(SESSION_ACCOUNT_ID) else {return HttpResponse::Unauthorized().body("Could not get session info");};
-	if let Err(str) = db.delete_account(account_id).await {return HttpResponse::InternalServerError().body(str.to_string());}
+	let Ok(Some(account_id)) = session.get(SESSION_ACCOUNT_ID) else {
+		return HttpResponse::Unauthorized().body("Could not get session info");
+	};
+	if let Err(str) = db.delete_account(account_id).await {
+		return HttpResponse::InternalServerError().body(str.to_string());
+	}
 	session.renew();
 	HttpResponse::Ok().finish()
 }
@@ -114,7 +157,7 @@ async fn renew_jwt(refresh_token: web::Json<String>) -> HttpResponse {
 	let token_data = decode::<Claims>(
 		&refresh_token.into_inner(),
 		&DECODING_KEY,
-		&Validation::default()
+		&Validation::default(),
 	);
 	match token_data {
 		Ok(data) => {
@@ -124,6 +167,6 @@ async fn renew_jwt(refresh_token: web::Json<String>) -> HttpResponse {
 				HttpResponse::InternalServerError().body("Token creation failed")
 			}
 		}
-		Err(_) => {HttpResponse::Unauthorized().body("Invalid refresh token")}
+		Err(_) => HttpResponse::Unauthorized().body("Invalid refresh token"),
 	}
 }

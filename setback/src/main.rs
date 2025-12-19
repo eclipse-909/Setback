@@ -1,3 +1,5 @@
+#![feature(allocator_api)]
+
 mod app;
 mod connection;
 mod constants;
@@ -5,49 +7,51 @@ mod cursor;
 mod game;
 mod image;
 mod keyboard;
+mod layout;
 mod main_menu;
 mod message;
 mod multiplayer;
-mod paint;
 mod settings;
 mod setup;
 mod state;
+mod style;
 mod text;
+mod ui;
 mod widgets;
+
+#[cfg(test)]
+mod tests;
 
 use {
 	crate::{
-		app::*,
-		constants::*,
-		cursor::*,
-		image::*,
-		paint::*,
-		state::*,
-		text::*
+		app::*, constants::*, cursor::*, image::*, layout::*, settings::*, state::*, style::*, text::*, ui::*,
 	},
-	glyphon::{fontdb::Source, FontSystem, SwashCache},
+	glyphon::{FontSystem, SwashCache, fontdb::{Source, Weight}},
 	keyring::{default::default_credential_builder, set_default_credential_builder},
+	libsetback::Arena,
 	std::{
 		collections::HashSet,
 		fs::{self, File},
-		io::{BufReader, BufWriter, Write},
+		io::{BufWriter, Write},
 		path::Path,
 		sync::{Arc, OnceLock},
-		time::{Duration, Instant}
+		time::{Duration, Instant},
 	},
-	taffy::{Style, TaffyTree},
 	tokio::runtime::Builder,
 	tracing_appender::{non_blocking::WorkerGuard, rolling},
-	tracing_subscriber::fmt,
+	tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt},
 	vello::{
 		kurbo::{Point, Rect, Size},
 		peniko::{self, Blob},
-		util::RenderContext
+		util::RenderContext,
 	},
-	winit::event_loop::{ControlFlow, EventLoop}
+	winit::{
+		dpi::PhysicalSize,
+		event_loop::{ControlFlow, EventLoop},
+	},
 };
 
-static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
+static LOG_GUARDS: OnceLock<[WorkerGuard; 2]> = OnceLock::new();
 
 fn main() {
 	// set up crash log
@@ -55,7 +59,9 @@ fn main() {
 		std::env::set_var("RUST_BACKTRACE", "full");
 	}
 	std::panic::set_hook(Box::new(|panic_info| {
-		log::error!("Panic - see crash.log");
+		const PANIC_MSG: &str = "Panic - see crash.log";
+		log::error!("{}", PANIC_MSG);
+		println!("{}", PANIC_MSG);
 		let path = Path::new(CRASH_LOG);
 		const FS_ERR: &str = "Could create crash log";
 		fs::create_dir_all(path.parent().expect(FS_ERR)).expect(FS_ERR);
@@ -69,73 +75,22 @@ fn main() {
 		writeln!(writer, "Process finished with exit code 101").expect(WRITE_ERR);
 		writer.flush().expect(WRITE_ERR);
 	}));
-	
+
 	// load settings
-	let settings =
-		if let Ok(file) = File::open(SETTINGS_JSON) &&
-			let Ok(settings) = serde_json::from_reader(BufReader::new(file)) {
-			settings
-		} else {
-			let settings = Settings::default();
-			if let Ok(file) = File::create(SETTINGS_JSON) {
-				if serde_json::to_writer_pretty(BufWriter::new(file), &settings).is_err() {
-					log::warn!("Could not write to settings file");
-				}
-			} else {
-				log::warn!("Could not create settings file");
-			}
-			settings
-		};
-	
+	let settings = load_settings();
+
 	// init logger
-	
-	// let (startup_writer, startup_guard) = tracing_appender::non_blocking(rolling::never(LOG_DIR, "latest_startup.log"));
-	// let (setback_writer, setback_guard) = tracing_appender::non_blocking(rolling::never(LOG_DIR, "latest_setback.log"));
-	// LOG_GUARDS.set([startup_guard, setback_guard]).unwrap();
-	// let startup_layer = fmt::layer()
-	// 	.with_timer(fmt::time::SystemTime)
-	// 	.with_ansi(false)
-	// 	.log_internal_errors(true)
-	// 	.with_target(true)
-	// 	.with_file(true)
-	// 	.with_line_number(true)
-	// 	.with_level(true)
-	// 	.with_thread_names(true)
-	// 	.with_thread_ids(true)
-	// 	.pretty()
-	// 	.with_writer(startup_writer)
-	// 	.with_filter(
-	// 		EnvFilter::builder()
-	// 			.with_default_directive(tracing::Level::from(settings.log_level).into())
-	// 			.parse("wgpu,wgpu_hal,init,wgpu_core")
-	// 			.unwrap()
-	// 	);
-	// let setback_layer = fmt::layer()
-	// 	.with_timer(fmt::time::SystemTime)
-	// 	.with_ansi(false)
-	// 	.log_internal_errors(true)
-	// 	.with_target(true)
-	// 	.with_file(true)
-	// 	.with_line_number(true)
-	// 	.with_level(true)
-	// 	.with_thread_names(true)
-	// 	.with_thread_ids(true)
-	// 	.pretty()
-	// 	.with_writer(setback_writer)
-	// 	.with_filter(
-	// 		EnvFilter::builder()
-	// 			.with_default_directive(tracing::Level::from(settings.log_level).into())
-	// 			.parse("setback,libsetback")
-	// 			.unwrap()
-	// 	);
-	// tracing_subscriber::registry()
-	// 	.with(startup_layer)
-	// 	.with(setback_layer)
-	// 	.init();
-	
-	let (log_writer, log_guard) = tracing_appender::non_blocking(rolling::never(LOG_DIR, "latest.log"));
-	LOG_GUARD.set(log_guard).unwrap();
-	fmt::fmt()
+
+	const BACKEND_LOG: &str = "backend_latest.log";
+	const SETBACK_LOG: &str = "setback_latest.log";
+	_ = fs::remove_file(Path::new(LOG_DIR).join(BACKEND_LOG));
+	_ = fs::remove_file(Path::new(LOG_DIR).join(SETBACK_LOG));
+	let (startup_writer, startup_guard) =
+		tracing_appender::non_blocking(rolling::never(LOG_DIR, BACKEND_LOG));
+	let (setback_writer, setback_guard) =
+		tracing_appender::non_blocking(rolling::never(LOG_DIR, SETBACK_LOG));
+	LOG_GUARDS.set([startup_guard, setback_guard]).unwrap();
+	let startup_layer = fmt::layer()
 		.with_timer(fmt::time::SystemTime)
 		.with_ansi(false)
 		.log_internal_errors(true)
@@ -146,80 +101,124 @@ fn main() {
 		.with_thread_names(true)
 		.with_thread_ids(true)
 		.pretty()
-		.with_writer(log_writer)
-		// .with_max_level(tracing::Level::from(settings.log_level))
-		.with_max_level(tracing::Level::TRACE)
+		.with_writer(startup_writer)
+		.with_filter(
+			EnvFilter::builder()
+				.with_default_directive(tracing::Level::from(settings.backend_log_level).into()) //TODO figure out why filter isn't working
+				.parse("cosmic_text,wgpu_hal,wgpu_core,winit,naga")
+				.unwrap(),
+		);
+	let setback_layer = fmt::layer()
+		.with_timer(fmt::time::SystemTime)
+		.with_ansi(false)
+		.log_internal_errors(true)
+		.with_target(true)
+		.with_file(true)
+		.with_line_number(true)
+		.with_level(true)
+		.with_thread_names(true)
+		.with_thread_ids(true)
+		.pretty()
+		.with_writer(setback_writer)
+		.with_filter(
+			EnvFilter::builder()
+				.with_default_directive(tracing::Level::from(settings.setback_log_level).into())
+				.parse("setback,libsetback")
+				.unwrap(),
+		);
+	tracing_subscriber::registry()
+		.with(startup_layer)
+		.with(setback_layer)
 		.init();
+
 	log::info!("Initialized logger");
-	log::info!("{:#?}", settings);
-	
+	log::debug!("{:#?}", settings);
+
 	// sets mock keyring for debug builds
 	if cfg!(debug_assertions) {
 		set_default_credential_builder(default_credential_builder());
 		log::info!("Set mock keyring credential builder for development build");
 	}
-	
+
 	// create application
 	let event_loop = EventLoop::new().unwrap();
-	
-	let mut ui_tree = TaffyTree::<Paint>::new();
-	let root_node = ui_tree.new_leaf(Style::default()).unwrap();
-	
+
 	let last_frame_time = Instant::now();
-	let next_frame_time = last_frame_time + Duration::from_nanos(1_000_000_000 / settings.max_fps as u64);
-	
+	let next_frame_time =
+		last_frame_time + Duration::from_nanos(1_000_000_000 / settings.max_fps as u64);
+
 	let bj_normal_select = custom_cursor_from_bytes(&event_loop, BJ_NORMAL_SELECT);
-	
+
 	let mut font_system = FontSystem::new();
 	let db = font_system.db_mut();
 	let georgia_id = db.load_font_source(Source::Binary(Arc::new(GEORGIA)))[0];
 	let georgia_bold_id = db.load_font_source(Source::Binary(Arc::new(GEORGIA_BOLD)))[0];
 	let georgia_italic_id = db.load_font_source(Source::Binary(Arc::new(GEORGIA_ITALIC)))[0];
 	let times_new_roman_id = db.load_font_source(Source::Binary(Arc::new(TIMES_NEW_ROMAN)))[0];
-	let georgia_font = font_system.get_font(georgia_id).unwrap();
-	let georgia_bold_font = font_system.get_font(georgia_bold_id).unwrap();
-	let georgia_italic_font = font_system.get_font(georgia_italic_id).unwrap();
-	let times_new_roman_font = font_system.get_font(times_new_roman_id).unwrap();
+	let georgia_font = font_system.get_font(georgia_id, Weight::NORMAL).unwrap();
+	let georgia_bold_font = font_system.get_font(georgia_bold_id, Weight::BOLD).unwrap();
+	let georgia_italic_font = font_system.get_font(georgia_italic_id, Weight::NORMAL).unwrap();
+	let times_new_roman_font = font_system.get_font(times_new_roman_id, Weight::NORMAL).unwrap();
 	let mut georgia = None;
 	let mut georgia_bold = None;
 	let mut georgia_italic = None;
 	let mut times_new_roman = None;
-	font_system
-		.db()
-		.faces()
-		.for_each(|face| {
-			if face.id == georgia_id {
-				georgia = Some(Font {
-					id: face.id,
-					blob: peniko::Font::new(Blob::new(Arc::new(CosmicFontBlobAdapter {font: georgia_font.clone()})), face.index)
-				});
-			} else if face.id == georgia_bold_id {
-				georgia_italic = Some(Font {
-					id: face.id,
-					blob: peniko::Font::new(Blob::new(Arc::new(CosmicFontBlobAdapter {font: georgia_bold_font.clone()})), face.index)
-				});
-			} else if face.id == georgia_italic_id {
-				georgia_bold = Some(Font {
-					id: face.id,
-					blob: peniko::Font::new(Blob::new(Arc::new(CosmicFontBlobAdapter {font: georgia_italic_font.clone()})), face.index)
-				});
-			} else if face.id == times_new_roman_id {
-				times_new_roman = Some(Font {
-					id: face.id,
-					blob: peniko::Font::new(Blob::new(Arc::new(CosmicFontBlobAdapter {font: times_new_roman_font.clone()})), face.index)
-				});
-			}
-		});
-	
+	font_system.db().faces().for_each(|face| {
+		if face.id == georgia_id {
+			georgia = Some(Font {
+				id: face.id,
+				blob: peniko::Font::new(
+					Blob::new(Arc::new(CosmicFontBlobAdapter {
+						font: georgia_font.clone(),
+					})),
+					face.index,
+				),
+			});
+		} else if face.id == georgia_bold_id {
+			georgia_italic = Some(Font {
+				id: face.id,
+				blob: peniko::Font::new(
+					Blob::new(Arc::new(CosmicFontBlobAdapter {
+						font: georgia_bold_font.clone(),
+					})),
+					face.index,
+				),
+			});
+		} else if face.id == georgia_italic_id {
+			georgia_bold = Some(Font {
+				id: face.id,
+				blob: peniko::Font::new(
+					Blob::new(Arc::new(CosmicFontBlobAdapter {
+						font: georgia_italic_font.clone(),
+					})),
+					face.index,
+				),
+			});
+		} else if face.id == times_new_roman_id {
+			times_new_roman = Some(Font {
+				id: face.id,
+				blob: peniko::Font::new(
+					Blob::new(Arc::new(CosmicFontBlobAdapter {
+						font: times_new_roman_font.clone(),
+					})),
+					face.index,
+				),
+			});
+		}
+	});
+	let static_arena = Arena::new_with_capacity(100); //TODO adjust this when UI is finished
+	let mut ui_tree = LayoutTree::new(font_system);
+	let root_node = ui_tree.new_node(&static_arena, Style::default());
+
 	let mut app = App {
 		settings,
-		rt: Builder::new_multi_thread()
-			.enable_all()
-			.build()
-			.unwrap(),
+		rt: Builder::new_multi_thread().enable_all().build().unwrap(),
 		conn_state: ConnState::Singleplayer,
 		server: None,
 		api: None,
+		static_arena: Arena::new(), //TODO give initial capacity
+		scene_arena: Arena::new(),  //TODO give initial capacity
+		frame_arena: Arena::new(),  //TODO give initial capacity
 		mouse_pos: None,
 		mouse_button_events: Vec::with_capacity(2),
 		mouse_pressed_left: false,
@@ -230,16 +229,20 @@ fn main() {
 		pressed_keys: HashSet::with_capacity(2),
 		ui_tree,
 		root_node,
-		font_system,
+		mouse_scroll_subscribers: Vec::new(),
+		mouse_button_subscribers: Vec::new(),
+		key_subscribers: Vec::new(),
 		swash_cache: SwashCache::new(),
 		context: RenderContext::new(),
 		renderers: Vec::with_capacity(1),
 		scene: vello::Scene::new(),
 		state: RenderState::Suspended(None),
+		curr_size: PhysicalSize::default(),
+		requested_size: PhysicalSize::default(),
 		next_frame_time,
 		last_frame_time,
 		scale_factor: 1.,
-		bot_icon: Image::load_png(BOT_ICON),//TODO make sure all the image sizes/scales are set correctly
+		bot_icon: Image::load_png(BOT_ICON), //TODO make sure all the image sizes/scales are set correctly
 		cards_icon: Image::load_png(CARDS_ICON),
 		checkmark: Image::load_png(CHECKMARK),
 		dropdown_arrow: Image::load_png(DROPDOWN_ARROW),
@@ -311,20 +314,18 @@ fn main() {
 		bj_diamond_select: custom_cursor_from_bytes(&event_loop, BJ_DIAMOND_SELECT),
 		bj_card_front: custom_cursor_from_bytes(&event_loop, BJ_CARD_FRONT),
 		bj_card_back: custom_cursor_from_bytes(&event_loop, BJ_CARD_BACK),
-		cursor_atlas: Image::load_png(CURSOR_ATLAS),//TODO does the cursor atlas need to be scaled?
+		cursor_atlas: Image::load_png(CURSOR_ATLAS), //TODO does the cursor atlas need to be scaled?
 		animated_cursors: {
 			//TODO does the cursor atlas need to be scaled?
-			let cursor_atlas_json: TextureAtlasJson = serde_json::from_str(CURSOR_ATLAS_JSON).unwrap();
-			let mut animations = std::array::from_fn(|_|Vec::new());
+			let cursor_atlas_json: TextureAtlasJson =
+				serde_json::from_str(CURSOR_ATLAS_JSON).unwrap();
+			let mut animations = std::array::from_fn(|_| Vec::new());
 			let mut anim_vec: Vec<(AnimatedCursor, usize, Rect)> = cursor_atlas_json
 				.frames
 				.iter()
 				.map(|frame| {
-					let (group, num_ext) = frame
-						.filename
-						.rsplit_once('_')
-						.unwrap();
-					// frame_num is 1-based, not 0-based
+					let (group, num_ext) = frame.filename.rsplit_once('_').unwrap();
+					// frame_num is 1-based, not 0-based - like arrays in Lua
 					let frame_num: usize = num_ext
 						.strip_suffix(".png")
 						.unwrap()
@@ -351,19 +352,28 @@ fn main() {
 						"Blackjack Precision Select_page" => AnimatedCursor::BjPrecSelectPage,
 						// Spade morphs into standard text-select cursor
 						"Blackjack Text Select_page" => AnimatedCursor::BjTextSelectPage,
-						_ => unreachable!("Animation doesn't exist: {}", group)
+						_ => unreachable!("Animation doesn't exist: {}", group),
 					};
-					(name, frame_num, Rect::from_origin_size(
-						Point { x: frame.frame.x as f64, y: frame.frame.y as f64 },
-						Size { width: frame.frame.w as f64, height: frame.frame.h as f64 }
-					))
-				}).collect();
-			anim_vec.sort_by(|(_,frame_a,_), (_,frame_b,_)| frame_a.cmp(frame_b));
-			anim_vec
-				.iter()
-				.for_each(|(name, _, rect)| {
-					animations[*name as usize].push(*rect);
-				});
+					(
+						name,
+						frame_num,
+						Rect::from_origin_size(
+							Point {
+								x: frame.frame.x as f64,
+								y: frame.frame.y as f64,
+							},
+							Size {
+								width: frame.frame.w as f64,
+								height: frame.frame.h as f64,
+							},
+						),
+					)
+				})
+				.collect();
+			anim_vec.sort_by(|(_, frame_a, _), (_, frame_b, _)| frame_a.cmp(frame_b));
+			anim_vec.iter().for_each(|(name, _, rect)| {
+				animations[*name as usize].push(*rect);
+			});
 			animations
 		},
 		loading: images_from_gif_with_size(LOADING, Size::new(1567., 1561.)),
@@ -371,17 +381,17 @@ fn main() {
 			georgia: georgia.unwrap(),
 			georgia_bold: georgia_bold.unwrap(),
 			georgia_italic: georgia_italic.unwrap(),
-			times_new_roman: times_new_roman.unwrap()
-		}
+			times_new_roman: times_new_roman.unwrap(),
+		},
 	};
-	
+
 	log::info!("Running app");
 	event_loop.set_control_flow(if app.settings.vsync {
 		ControlFlow::Poll
 	} else {
 		ControlFlow::WaitUntil(next_frame_time)
 	});
-	app.start();
+	init_ui(&mut app);
 	event_loop.run_app(&mut app).unwrap();
 	log::info!("Exiting app");
 }

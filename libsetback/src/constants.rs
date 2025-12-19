@@ -2,13 +2,15 @@ use {
 	crate::ssp::Version,
 	std::{
 		net::{Ipv4Addr, SocketAddrV4},
-		time::Duration
-	}
+		time::Duration,
+	},
 };
 
 #[macro_export]
 macro_rules! website {
-	($path:expr) => {format!("{}{}", WEBSITE_URL, $path)};
+	($path:expr) => {
+		format!("{}{}", WEBSITE_URL, $path)
+	};
 }
 pub(crate) use website;
 
@@ -26,7 +28,7 @@ pub const SETBACK_VERSION: Version = {
 	let mut i = 0;
 	let mut buf_idx = LEN - 1;
 	while i < LEN {
-		let b = unsafe {*ptr.add(i)};
+		let b = unsafe { *ptr.add(i) };
 		match b {
 			b'.' => {
 				bufs_idx += 1;
@@ -37,7 +39,7 @@ pub const SETBACK_VERSION: Version = {
 				buf_lens[bufs_idx] += 1;
 				buf_idx -= 1;
 			}
-			_ => panic!("invalid character in version string")
+			_ => panic!("invalid character in version string"),
 		}
 		i += 1;
 	}
@@ -46,11 +48,22 @@ pub const SETBACK_VERSION: Version = {
 		let len = buf_lens[bufs_idx];
 		i = LEN - len;
 		loop {
-			if i >= LEN {break;}
+			if i >= LEN {
+				break;
+			}
 			let b = buffers[bufs_idx][i];
 			let num = match b {
-				b'0'=>0, b'1'=>1, b'2'=>2, b'3'=>3, b'4'=>4, b'5'=>5, b'6'=>6, b'7'=>7, b'8'=>8, b'9'=>9,
-				_ => panic!("invalid byte")
+				b'0' => 0,
+				b'1' => 1,
+				b'2' => 2,
+				b'3' => 3,
+				b'4' => 4,
+				b'5' => 5,
+				b'6' => 6,
+				b'7' => 7,
+				b'8' => 8,
+				b'9' => 9,
+				_ => panic!("invalid byte"),
 			};
 			let multiplier = 10u8.pow((i - (LEN - len)) as u32);
 			nums[bufs_idx] += num * multiplier;
@@ -80,16 +93,16 @@ pub const fn server(port: u16) -> SocketAddrV4 {
 		if cfg!(debug_assertions) {
 			Ipv4Addr::new(127, 0, 0, 1)
 		} else {
-			Ipv4Addr::new(127, 0, 0, 1)//TODO change this to actual socket once server is deployed
+			Ipv4Addr::new(127, 0, 0, 1) //TODO change this to actual socket once server is deployed
 		},
-		port
+		port,
 	)
 }
 
 pub const WEBSITE_URL: &str = if cfg!(debug_assertions) {
 	"http://127.0.0.1/"
 } else {
-	"https://127.0.0.1/"//TODO change this to actual URL once website is deployed
+	"https://127.0.0.1/" //TODO change this to actual URL once website is deployed
 };
 
 pub static URL_API_LOGIN: &str = "api/login";

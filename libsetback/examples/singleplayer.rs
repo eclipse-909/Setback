@@ -1,7 +1,7 @@
 use {
-	libsetback::{Card, GameEvent, SetupData, GameRuntime},
-	std::io::{stdin, stdout, Write},
-	tokio::sync::mpsc::Sender
+	libsetback::{Card, GameEvent, GameRuntime, SetupData},
+	std::io::{Write, stdin, stdout},
+	tokio::sync::mpsc::Sender,
 };
 
 #[tokio::main]

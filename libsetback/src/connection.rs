@@ -1,81 +1,110 @@
 use {
-	crate::{
-		constants::*,
-		items::*,
-		models::*,
-		setup_data::*,
-		ssp::*
-	},
+	crate::{constants::*, items::*, models::*, setup_data::*, ssp::*},
 	reqwest::Client,
 	tokio::{
 		io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
-		net::{
-			tcp::OwnedWriteHalf,
-			TcpStream
-		},
-		sync::mpsc::{unbounded_channel, UnboundedSender, UnboundedReceiver}
+		net::{TcpStream, tcp::OwnedWriteHalf},
+		sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
 	},
-	tokio_util::sync::CancellationToken
+	tokio_util::sync::CancellationToken,
 };
 
 #[derive(Debug, Clone)]
 pub enum ServerEvent {
 	InitConnStream(UnboundedSender<ServerEvent>),
-	Connect {username: String, password: String, api: Client},
+	Connect {
+		username: String,
+		password: String,
+		api: Client,
+	},
 	Disconnect,
 	ConnectedToServer,
 	FailedConnection(Error),
 	DisconnectedFromServer,
 	SendMsg(SendMsg),
 	SendErr(Error),
-	RecvMsg(Result<Ssp, Error>)
+	RecvMsg(Result<Ssp, Error>),
 }
 
 #[derive(Debug, Clone)]
 pub enum SendMsg {
-	CreateGame {password: Option<String>},
-	JoinGame {code: String, password: Option<String>},
-	SearchGames {filter: GameFilter},
+	CreateGame {
+		password: Option<String>,
+	},
+	JoinGame {
+		code: String,
+		password: Option<String>,
+	},
+	SearchGames {
+		filter: GameFilter,
+	},
 	///Host-only
-	GameMeta {setup_data: SetupData},
-	UpdateTeam {index: u8, team: u8},
-	UpdatePlayerType {index: u8, human: bool},
-	Ready {is_ready: bool, index: u8},
-	GameEvent {event: GameEvent},
+	GameMeta {
+		setup_data: SetupData,
+	},
+	UpdateTeam {
+		index: u8,
+		team: u8,
+	},
+	UpdatePlayerType {
+		index: u8,
+		human: bool,
+	},
+	Ready {
+		is_ready: bool,
+		index: u8,
+	},
+	GameEvent {
+		event: GameEvent,
+	},
 	///Host-only
 	AddPlayer,
 	///Host-only
-	RemovePlayer {index: u8},
-	RefreshToken {api: Client}
+	RemovePlayer {
+		index: u8,
+	},
+	RefreshToken {
+		api: Client,
+	},
 }
 
 pub trait Connection {
-	fn write(writer: &mut BufWriter<impl AsyncWriteExt + Unpin>, ssp: &Ssp) -> impl Future<Output=Result<(), Error>> {async move {
-		let bytes: Vec<u8> = bincode::encode_to_vec(ssp, bincode::config::standard()).unwrap();
-		//prefix with 4-byte length
-		writer
-			.write_u32_le(bytes.len() as u32)
-			.await
-			.map_err(|_| Error::NetworkError)?;
-		writer
-			.write_all(bytes.as_slice())
-			.await
-			.map_err(|_| Error::NetworkError)?;
-		writer
-			.flush()
-			.await
-			.map_err(|_| Error::NetworkError)
-	}}
-
-	fn read(reader: &mut BufReader<impl AsyncReadExt + Unpin>, buffer: &mut Vec<u8>) -> impl Future<Output=Result<Ssp, Error>> {async move {
-		//read the 4-byte length prefix
-		let len: u32 = reader.read_u32_le().await.map_err(|_| Error::BadRequest)?;
-		if len > buffer.len() as u32 {
-			buffer.resize(len as usize, 0);
+	fn write(
+		writer: &mut BufWriter<impl AsyncWriteExt + Unpin>,
+		ssp: &Ssp,
+	) -> impl Future<Output = Result<(), Error>> {
+		async move {
+			let bytes: Vec<u8> = bincode::encode_to_vec(ssp, bincode::config::standard()).unwrap();
+			//prefix with 4-byte length
+			writer
+				.write_u32_le(bytes.len() as u32)
+				.await
+				.map_err(|_| Error::NetworkError)?;
+			writer
+				.write_all(bytes.as_slice())
+				.await
+				.map_err(|_| Error::NetworkError)?;
+			writer.flush().await.map_err(|_| Error::NetworkError)
 		}
-		reader.read_exact(&mut buffer[..len as usize]).await.map_err(|_| Error::BadRequest)?;
-		Ok(Ssp::decode(&mut buffer[..len as usize]).unwrap())
-	}}
+	}
+
+	fn read(
+		reader: &mut BufReader<impl AsyncReadExt + Unpin>,
+		buffer: &mut Vec<u8>,
+	) -> impl Future<Output = Result<Ssp, Error>> {
+		async move {
+			//read the 4-byte length prefix
+			let len: u32 = reader.read_u32_le().await.map_err(|_| Error::BadRequest)?;
+			if len > buffer.len() as u32 {
+				buffer.resize(len as usize, 0);
+			}
+			reader
+				.read_exact(&mut buffer[..len as usize])
+				.await
+				.map_err(|_| Error::BadRequest)?;
+			Ok(Ssp::decode(&mut buffer[..len as usize]).unwrap())
+		}
+	}
 }
 
 pub trait SetbackConnection: Connection + Sized {
@@ -87,31 +116,48 @@ pub trait SetbackConnection: Connection + Sized {
 		username: String,
 		password: String,
 		api: &impl WebsiteConnection,
-		ssp_tx: UnboundedSender<ServerEvent>
-	) -> impl Future<Output=Result<Self, Error>>;
-	fn send_create_game(&mut self, password: Option<String>) -> impl Future<Output=Result<(), Error>>;
-	fn send_join_game(&mut self, code: String, password: Option<String>) -> impl Future<Output=Result<(), Error>>;
-	fn send_search_games(&mut self, filter: GameFilter) -> impl Future<Output=Result<(), Error>>;
+		ssp_tx: UnboundedSender<ServerEvent>,
+	) -> impl Future<Output = Result<Self, Error>>;
+	fn send_create_game(
+		&mut self,
+		password: Option<String>,
+	) -> impl Future<Output = Result<(), Error>>;
+	fn send_join_game(
+		&mut self,
+		code: String,
+		password: Option<String>,
+	) -> impl Future<Output = Result<(), Error>>;
+	fn send_search_games(&mut self, filter: GameFilter) -> impl Future<Output = Result<(), Error>>;
 	///Host-only
-	fn send_game_meta(&mut self, setup_data: SetupData) -> impl Future<Output=Result<(), Error>>;
-	fn send_update_team(&mut self, index: u8, team: u8) -> impl Future<Output=Result<(), Error>>;
-	fn send_update_player_type(&mut self, index: u8, human: bool) -> impl Future<Output=Result<(), Error>>;
-	fn send_ready(&mut self, is_ready: bool, index: u8) -> impl Future<Output=Result<(), Error>>;
-	fn send_game_event(&mut self, event: GameEvent) -> impl Future<Output=Result<(), Error>>;
+	fn send_game_meta(&mut self, setup_data: SetupData) -> impl Future<Output = Result<(), Error>>;
+	fn send_update_team(&mut self, index: u8, team: u8) -> impl Future<Output = Result<(), Error>>;
+	fn send_update_player_type(
+		&mut self,
+		index: u8,
+		human: bool,
+	) -> impl Future<Output = Result<(), Error>>;
+	fn send_ready(&mut self, is_ready: bool, index: u8) -> impl Future<Output = Result<(), Error>>;
+	fn send_game_event(&mut self, event: GameEvent) -> impl Future<Output = Result<(), Error>>;
 	///Host-only
-	fn send_add_player(&mut self) -> impl Future<Output=Result<(), Error>>;
+	fn send_add_player(&mut self) -> impl Future<Output = Result<(), Error>>;
 	///Host-only
-	fn send_remove_player(&mut self, index: u8) -> impl Future<Output=Result<(), Error>>;
-	fn refresh_token(&mut self, api: &impl WebsiteConnection) -> impl Future<Output=Result<(), Error>>;
+	fn send_remove_player(&mut self, index: u8) -> impl Future<Output = Result<(), Error>>;
+	fn refresh_token(
+		&mut self,
+		api: &impl WebsiteConnection,
+	) -> impl Future<Output = Result<(), Error>>;
 }
 
 pub trait WebsiteConnection {
 	fn new_api() -> Self;
 	fn as_client(&self) -> &Client;
-	fn login(&self, credentials: &LoginRequest) -> impl Future<Output=Result<LoginResponse, Error>>;
-	fn logout(&self, auth_token: &str) -> impl Future<Output=Result<(), Error>>;
-	fn id(&self, auth_token: &str) -> impl Future<Output=Result<u32, Error>>;
-	fn update(&self) -> impl Future<Output=Result<Version, Error>>;
+	fn login(
+		&self,
+		credentials: &LoginRequest,
+	) -> impl Future<Output = Result<LoginResponse, Error>>;
+	fn logout(&self, auth_token: &str) -> impl Future<Output = Result<(), Error>>;
+	fn id(&self, auth_token: &str) -> impl Future<Output = Result<u32, Error>>;
+	fn update(&self) -> impl Future<Output = Result<Version, Error>>;
 }
 
 ///Connection to the server, owned by the client.
@@ -121,7 +167,7 @@ pub struct ServerConnection {
 	pub auth_token: String,
 	pub refresh_token: String,
 	pub account_id: u32,
-	pub ready: bool
+	pub ready: bool,
 }
 
 impl SetbackConnection for ServerConnection {
@@ -129,13 +175,16 @@ impl SetbackConnection for ServerConnection {
 		username: String,
 		password: String,
 		api: &impl WebsiteConnection,
-		ssp_tx: UnboundedSender<ServerEvent>
+		ssp_tx: UnboundedSender<ServerEvent>,
 	) -> Result<Self, Error> {
 		//login and get account_id
-		let session = api.login(&LoginRequest{username, password}).await?;
+		let session = api.login(&LoginRequest { username, password }).await?;
 
 		//Connect to server
-		let (reader, writer) = TcpStream::connect(server(ACCEPT_PORT)).await.map_err(|_|Error::NotFound)?.into_split();
+		let (reader, writer) = TcpStream::connect(server(ACCEPT_PORT))
+			.await
+			.map_err(|_| Error::NotFound)?
+			.into_split();
 		let mut reader = BufReader::new(reader);
 		let cancellation_token: CancellationToken = CancellationToken::new();
 		let read_cancel_token: CancellationToken = cancellation_token.clone();
@@ -145,17 +194,24 @@ impl SetbackConnection for ServerConnection {
 			auth_token: session.auth_token.clone(),
 			refresh_token: session.refresh_token,
 			account_id: session.account_id,
-			ready: false
+			ready: false,
 		};
 
 		//authenticate, get client port, connect to client port
-		let auth_ssp = Ssp::new_with_src(Protocol::Authenticate(session.auth_token), session.account_id);
+		let auth_ssp = Ssp::new_with_src(
+			Protocol::Authenticate(session.auth_token),
+			session.account_id,
+		);
 		Self::write(&mut server_connection.tcp_writer, &auth_ssp).await?;
 		let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
-		let Protocol::Connect(client_port) = Self::read(&mut reader, &mut buffer).await?.protocol else {
+		let Protocol::Connect(client_port) = Self::read(&mut reader, &mut buffer).await?.protocol
+		else {
 			return Err(Error::BadRequest);
 		};
-		let (reader, writer) = TcpStream::connect(server(client_port)).await.map_err(|_|Error::NotFound)?.into_split();
+		let (reader, writer) = TcpStream::connect(server(client_port))
+			.await
+			.map_err(|_| Error::NotFound)?
+			.into_split();
 		let mut reader = BufReader::new(reader);
 		server_connection.tcp_writer = BufWriter::new(writer);
 		//reauthenticate
@@ -165,56 +221,102 @@ impl SetbackConnection for ServerConnection {
 		};
 
 		//listen for messages from server
-		tokio::spawn(async move {tokio::select! {
-			_ = async move {
-				loop {
-					ssp_tx.send(ServerEvent::RecvMsg(Self::read(&mut reader, &mut buffer).await)).unwrap();
-				}
-			} => {}
-			_ = read_cancel_token.cancelled() => {}
-		}});
+		tokio::spawn(async move {
+			tokio::select! {
+				_ = async move {
+					loop {
+						ssp_tx.send(ServerEvent::RecvMsg(Self::read(&mut reader, &mut buffer).await)).unwrap();
+					}
+				} => {}
+				_ = read_cancel_token.cancelled() => {}
+			}
+		});
 
 		Ok(server_connection)
 	}
 
 	async fn send_create_game(&mut self, password: Option<String>) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::CreateGame{password}, self.account_id)).await
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::CreateGame { password }, self.account_id),
+		)
+		.await
 	}
 
-	async fn send_join_game(&mut self, code: String, password: Option<String>) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::JoinGame{code, password}, self.account_id)).await
+	async fn send_join_game(
+		&mut self,
+		code: String,
+		password: Option<String>,
+	) -> Result<(), Error> {
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::JoinGame { code, password }, self.account_id),
+		)
+		.await
 	}
 
 	async fn send_search_games(&mut self, filter: GameFilter) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id)).await
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::SearchGames(filter), self.account_id),
+		)
+		.await
 	}
 
 	async fn send_game_meta(&mut self, setup_data: SetupData) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::SetupData(setup_data), self.account_id)).await
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::SetupData(setup_data), self.account_id),
+		)
+		.await
 	}
 
 	async fn send_update_team(&mut self, index: u8, team: u8) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::UpdatePlayerTeam{index, team}, self.account_id)).await
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::UpdatePlayerTeam { index, team }, self.account_id),
+		)
+		.await
 	}
 
 	async fn send_update_player_type(&mut self, index: u8, human: bool) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::UpdatePlayerType{index, human}, self.account_id)).await
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::UpdatePlayerType { index, human }, self.account_id),
+		)
+		.await
 	}
 
 	async fn send_ready(&mut self, is_ready: bool, index: u8) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::Ready{is_ready, index}, self.account_id)).await
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::Ready { is_ready, index }, self.account_id),
+		)
+		.await
 	}
 
 	async fn send_game_event(&mut self, event: GameEvent) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::GameEvent(event), self.account_id)).await
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::GameEvent(event), self.account_id),
+		)
+		.await
 	}
 
 	async fn send_add_player(&mut self) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::AddPlayer, self.account_id)).await
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::AddPlayer, self.account_id),
+		)
+		.await
 	}
 
 	async fn send_remove_player(&mut self, index: u8) -> Result<(), Error> {
-		Self::write(&mut self.tcp_writer, &Ssp::new_with_src(Protocol::RemovePlayer{index}, self.account_id)).await
+		Self::write(
+			&mut self.tcp_writer,
+			&Ssp::new_with_src(Protocol::RemovePlayer { index }, self.account_id),
+		)
+		.await
 	}
 
 	async fn refresh_token(&mut self, api: &impl WebsiteConnection) -> Result<(), Error> {
@@ -225,7 +327,9 @@ impl SetbackConnection for ServerConnection {
 			.as_client()
 			.post(website!(URL_API_REFRESH))
 			.bearer_auth(self.auth_token.clone())
-			.json(&RefreshRequest {refresh_token: self.refresh_token.clone()})
+			.json(&RefreshRequest {
+				refresh_token: self.refresh_token.clone(),
+			})
 			.send()
 			.await
 			.map_err(|_| Error::NetworkError)?
@@ -249,14 +353,14 @@ impl Drop for ServerConnection {
 
 impl std::fmt::Debug for ServerConnection {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    	f.debug_struct("ServerConnection")
-	        .field("tcp_writer", &"N/A")
-	        .field("cancellation_token", &"N/A")
-	        .field("auth_token", &self.auth_token)
-	        .field("refresh_token", &self.refresh_token)
-	        .field("account_id", &self.account_id)
-	        .field("ready", &self.ready)
-	        .finish()
+		f.debug_struct("ServerConnection")
+			.field("tcp_writer", &"N/A")
+			.field("cancellation_token", &"N/A")
+			.field("auth_token", &self.auth_token)
+			.field("refresh_token", &self.refresh_token)
+			.field("account_id", &self.account_id)
+			.field("ready", &self.ready)
+			.finish()
 	}
 }
 
@@ -266,20 +370,29 @@ pub struct ClientConnection {
 	pub ssp_rx: UnboundedReceiver<Result<Ssp, Error>>,
 	pub cancellation_token: CancellationToken,
 	pub account_id: u32,
-	pub ready: bool
+	pub ready: bool,
 }
 
 impl ClientConnection {
-	pub async fn accept(tcp_stream: TcpStream, client_port: u16, api: &Client) -> Result<(), Error> {
+	pub async fn accept(
+		tcp_stream: TcpStream,
+		client_port: u16,
+		api: &Client,
+	) -> Result<(), Error> {
 		let (reader, writer) = tcp_stream.into_split();
 		let mut reader = BufReader::new(reader);
 		let mut writer = BufWriter::new(writer);
 
 		let response = tokio::time::timeout(TIMEOUT, async move {
 			let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
-			let ssp: Ssp = Self::read(&mut reader, &mut buffer).await.map_err(|_| Error::ServerError)?;
+			let ssp = Self::read(&mut reader, &mut buffer)
+				.await
+				.map_err(|_| Error::ServerError)?;
 			if let Protocol::Authenticate(auth_token) = ssp.protocol {
-				let account_id: u32 = api.id(auth_token.as_str()).await.map_err(|_| Error::ServerError)?;
+				let account_id: u32 = api
+					.id(auth_token.as_str())
+					.await
+					.map_err(|_| Error::ServerError)?;
 				if account_id != ssp.src_id {
 					return Err(Error::Forbidden);
 				}
@@ -287,10 +400,12 @@ impl ClientConnection {
 			} else {
 				Err(Error::BadRequest)
 			}
-		}).await.map_err(|_| Error::Indeterminate)?;
+		})
+		.await
+		.map_err(|_| Error::Indeterminate)?;
 		match response {
 			Ok(ssp) => Self::write(&mut writer, &ssp).await,
-			Err(err) => Self::write(&mut writer, &Ssp::new(Protocol::Err(err))).await
+			Err(err) => Self::write(&mut writer, &Ssp::new(Protocol::Err(err))).await,
 		}
 	}
 
@@ -300,13 +415,24 @@ impl ClientConnection {
 		let cancellation_token: CancellationToken = CancellationToken::new();
 		let read_cancel_token: CancellationToken = cancellation_token.clone();
 		let (ssp_tx, ssp_rx) = unbounded_channel();
-		let mut client_connection: Self = Self {tcp_writer: BufWriter::new(writer), ssp_rx, cancellation_token, account_id: 0, ready: false};
+		let mut client_connection: Self = Self {
+			tcp_writer: BufWriter::new(writer),
+			ssp_rx,
+			cancellation_token,
+			account_id: 0,
+			ready: false,
+		};
 
 		let response = tokio::time::timeout(TIMEOUT, async move {
 			let mut buffer: Vec<u8> = Vec::with_capacity(PAGE_SIZE);
-			let ssp: Ssp = Self::read(&mut reader, &mut buffer).await.map_err(|_| Error::ServerError)?;
+			let ssp = Self::read(&mut reader, &mut buffer)
+				.await
+				.map_err(|_| Error::ServerError)?;
 			if let Protocol::Authenticate(auth_token) = ssp.protocol {
-				let account_id: u32 = api.id(auth_token.as_str()).await.map_err(|_| Error::ServerError)?;
+				let account_id: u32 = api
+					.id(auth_token.as_str())
+					.await
+					.map_err(|_| Error::ServerError)?;
 				if account_id != ssp.src_id {
 					return Err(Error::Forbidden);
 				}
@@ -314,24 +440,32 @@ impl ClientConnection {
 			} else {
 				Err(Error::BadRequest)
 			}
-		}).await.map_err(|_| Error::Indeterminate)?;
+		})
+		.await
+		.map_err(|_| Error::Indeterminate)?;
 		match response {
 			Ok((mut reader, mut buffer, ref ssp)) => {
 				Self::write(&mut client_connection.tcp_writer, ssp).await?;
 				//Spawn task to read messages from TcpStream and send them to the channel
-				tokio::spawn(async move {tokio::select! {
-					_ = async move {
-						loop {
-							ssp_tx.send(Self::read(&mut reader, &mut buffer).await).unwrap();
-						}
-					} => {}
-					_ = read_cancel_token.cancelled() => {}
-				}});
+				tokio::spawn(async move {
+					tokio::select! {
+						_ = async move {
+							loop {
+								ssp_tx.send(Self::read(&mut reader, &mut buffer).await).unwrap();
+							}
+						} => {}
+						_ = read_cancel_token.cancelled() => {}
+					}
+				});
 				//construct the client connection
 				Ok(client_connection)
 			}
 			Err(err) => {
-				Self::write(&mut client_connection.tcp_writer, &Ssp::new(Protocol::Err(err))).await?;
+				Self::write(
+					&mut client_connection.tcp_writer,
+					&Ssp::new(Protocol::Err(err)),
+				)
+				.await?;
 				Err(err)
 			}
 		}
@@ -350,29 +484,27 @@ impl Drop for ClientConnection {
 
 impl std::fmt::Debug for ClientConnection {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    	f.debug_struct("ClientConnection")
-		    .field("tcp_writer", &"N/A")
+		f.debug_struct("ClientConnection")
+			.field("tcp_writer", &"N/A")
 			.field("ssp_rx", &"N/A")
 			.field("cancellation_token", &"N/A")
-	        .field("account_id", &self.account_id)
-	        .field("ready", &self.ready)
-	        .finish()
+			.field("account_id", &self.account_id)
+			.field("ready", &self.ready)
+			.finish()
 	}
 }
 
 impl WebsiteConnection for Client {
 	fn new_api() -> Self {
-		Client::builder()
-			.cookie_store(true)
-			.build()
-			.unwrap()
+		Client::builder().cookie_store(true).build().unwrap()
 	}
 
-	fn as_client(&self) -> &Self { self }
+	fn as_client(&self) -> &Self {
+		self
+	}
 
 	async fn login(&self, credentials: &LoginRequest) -> Result<LoginResponse, Error> {
-		self
-			.post(website!(URL_API_LOGIN))
+		self.post(website!(URL_API_LOGIN))
 			.json(credentials)
 			.send()
 			.await
@@ -385,8 +517,7 @@ impl WebsiteConnection for Client {
 	}
 
 	async fn logout(&self, auth_token: &str) -> Result<(), Error> {
-		self
-			.get(website!(URL_API_LOGOUT))
+		self.get(website!(URL_API_LOGOUT))
 			.bearer_auth(auth_token)
 			.send()
 			.await
@@ -408,13 +539,11 @@ impl WebsiteConnection for Client {
 			.json::<IdResponse>()
 			.await
 			.map_err(|_| Error::BadRequest)?
-			.account_id
-		)
+			.account_id)
 	}
 
 	async fn update(&self) -> Result<Version, Error> {
-		self
-			.get(website!(URL_API_UPDATE))
+		self.get(website!(URL_API_UPDATE))
 			.send()
 			.await
 			.map_err(|_| Error::NetworkError)?

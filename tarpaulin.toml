@@ -2,8 +2,11 @@
 run-types = ["AllTargets"]
 all-features = true
 workspace = true
+force-clean = false
+skip-clean = true
+locked = true
 
 [report]
-output-dir = "tmp"
-out = ["Stdout"]
+output-dir = "docs"
+out = ["Stdout", "Html"]
 fail-under = 80
