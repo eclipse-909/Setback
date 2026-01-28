@@ -1,28 +1,4 @@
-use {once_cell::sync::Lazy, regex::Regex, vello::peniko::Color};
-
-macro_rules! setback_path {
-	($path:literal) => {
-		if cfg!(debug_assertions) {
-			concat!("setback/", $path)
-		} else {
-			$path
-		}
-	};
-	($path:expr) => {
-		if cfg!(debug_assertions) {
-			concat!("setback/", $path)
-		} else {
-			$path
-		}
-	};
-}
-
-//Files
-
-pub const LOG_DIR: &str = setback_path!("logs");
-pub const CRASH_LOG: &str = setback_path!("logs/crash.log");
-pub const SETTINGS_JSON: &str = setback_path!("settings.json");
-pub const USR_CRD: &str = setback_path!("usr.crd");
+use {once_cell::sync::Lazy, regex::Regex};
 
 //Images
 
@@ -111,29 +87,21 @@ pub const GAME_CODE_REGEX: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[a-zA-Z0-9]*
 
 // Styles
 
-pub const fn color_hex(hex: u32) -> Color {
-	Color::from_rgba8(
-		((hex & 0xFF_00_00_00) >> 24) as u8,
-		((hex & 0x00_FF_00_00) >> 16) as u8,
-		((hex & 0x00_00_FF_00) >> 8) as u8,
-		(hex & 0x00_00_00_FF) as u8,
-	)
-}
-pub const COLOR_PRIMARY_GREEN: Color = color_hex(0x0d5d2eff);
-pub const COLOR_SECONDARY_GREEN: Color = color_hex(0x1a7a3eff);
-pub const COLOR_ACCENT_GOLD: Color = color_hex(0xd4af37ff);
-pub const COLOR_LIGHT_GOLD: Color = color_hex(0xf4e87cff);
-pub const COLOR_DARK_GOLD: Color = color_hex(0xb8941fff);
-pub const COLOR_CREAM: Color = color_hex(0xf5f5dcff);
-pub const COLOR_DARK_BROWN: Color = color_hex(0x2c1810ff);
-pub const COLOR_MEDIUM_BROWN: Color = color_hex(0x4a2c1aff);
-pub const COLOR_LIGHT_BROWN: Color = color_hex(0x8b6f47ff);
-pub const COLOR_CARD_SHADOW: Color = color_hex(0x0000004d);
-pub const COLOR_TEXT_SHADOW: Color = color_hex(0x00000080);
-pub const COLOR_URL: Color = color_hex(0xadc2fcff);
-pub const COLOR_DISABLED_COLOR: Color = color_hex(0x666666ff);
-pub const COLOR_DISABLED_BG: Color = color_hex(0x333333ff);
-pub const COLOR_MODAL_OVERLAY: Color = color_hex(0x000000b3);
+pub const COLOR_PRIMARY_GREEN: u32 = 0x0d5d2eff;
+pub const COLOR_SECONDARY_GREEN: u32 = 0x1a7a3eff;
+pub const COLOR_ACCENT_GOLD: u32 = 0xd4af37ff;
+pub const COLOR_LIGHT_GOLD: u32 = 0xf4e87cff;
+pub const COLOR_DARK_GOLD: u32 = 0xb8941fff;
+pub const COLOR_CREAM: u32 = 0xf5f5dcff;
+pub const COLOR_DARK_BROWN: u32 = 0x2c1810ff;
+pub const COLOR_MEDIUM_BROWN: u32 = 0x4a2c1aff;
+pub const COLOR_LIGHT_BROWN: u32 = 0x8b6f47ff;
+pub const COLOR_CARD_SHADOW: u32 = 0x0000004d;
+pub const COLOR_TEXT_SHADOW: u32 = 0x00000080;
+pub const COLOR_URL: u32 = 0xadc2fcff;
+pub const COLOR_DISABLED_COLOR: u32 = 0x666666ff;
+pub const COLOR_DISABLED_BG: u32 = 0x333333ff;
+pub const COLOR_MODAL_OVERLAY: u32 = 0x000000b3;
 pub const BORDER_RADIUS: f32 = 12.;
 pub const CURSOR_FPS: f32 = 15.;
 pub const MOUSE_WHEEL_PIXELS_PER_LINE: f32 = 40.;

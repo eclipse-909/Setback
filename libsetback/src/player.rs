@@ -1,47 +1,93 @@
 use {
-	crate::{connection::*, constants::*, items::*},
-	bincode::{
-		BorrowDecode, Decode, Encode,
-		de::{BorrowDecoder, Decoder},
-		enc::Encoder,
-		error::{DecodeError, EncodeError},
-	},
+	crate::*,
+	serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant},
+	tokio::sync::mpsc::{Receiver, Sender},
+	tracing::info
 };
 
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Debug)]
+#[cfg(feature = "gpui")]
+pub struct GpuiEventEmitter;
+#[cfg(feature = "gpui")]
+impl gpui::EventEmitter<GameEvent> for GpuiEventEmitter {}
+
+#[cfg(feature = "gpui")]
+pub type GameEventEmitter = gpui::Entity<GpuiEventEmitter>;
+#[cfg(not(feature = "gpui"))]
+pub type GameEventEmitter = tokio::sync::mpsc::UnboundedSender<GameEvent>;
+
+pub fn get_username() -> Option<String> {
+	match std::fs::read_to_string(USR_CRD) {
+		Ok(username) => Some(username),
+		Err(err) => {
+			info!("Could not get username from usr.crd - error: {}", err);
+			None
+		}
+	}
+}
+
+pub fn get_credentials() -> Option<LoginRequest> {
+	let username = get_username()?;
+	match keyring::Entry::new(
+		KEYRING_SERVICE,
+		username.as_str()
+	).and_then(|entry| entry.get_password()) {
+		Ok(password) => {
+			info!("Retrieved credentials");
+			Some(LoginRequest {username, password})
+		}
+		Err(err) => {
+			info!("Could not get password from keyring - error: {}", err);
+			None
+		}
+	}
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Player {
 	pub player_type: PlayerType,
-	pub username: String,
-	pub hand: Vec<Card>,
+	pub hand: SmallVec<Card, CARDS_PER_PLAYER>,
 	pub team_id: u8,
 }
 
 impl Player {
-	pub fn new_singleplayer_self(team_id: u8) -> Self {
-		Self {
-			player_type: PlayerType::SingleplayerSelf,
-			//TODO load username from disk
-			username: String::from("Me"),
-			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
+	#[cfg(feature = "client")]
+	pub fn new_singleplayer_self(team_id: u8, game_event_emitter: GameEventEmitter) -> (Self, Sender<Option<GameEvent>>) {
+		let (tx, event_rx) = tokio::sync::mpsc::channel(1);
+		(Self {
+			player_type: PlayerType::SingleplayerSelf {
+				username: get_username().unwrap_or_default(),
+				game_event_emitter,
+				event_rx,
+			},
+			hand: SmallVec::new(),
 			team_id,
-		}
+		}, tx)
 	}
 
-	///Empty slot for a human player in multiplayer. This function should only be called by the server.
-	pub fn new_human_empty(team_id: u8) -> Self {
+	///Empty slot for a human player in multiplayer.
+	// TOOD: #[cfg(not(feature = "client"))]
+	pub const fn new_human_empty(team_id: u8) -> Self {
 		Self {
 			player_type: PlayerType::HumanEmpty,
-			username: String::from("Waiting for player to connect..."),
-			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
+			hand: SmallVec::new(),
 			team_id,
 		}
 	}
 
-	pub fn new_ai(team_id: u8) -> Self {
+	// TOOD: #[cfg(not(feature = "client"))]
+	pub const fn new_host_connected(conn: ClientConnection, team_id: u8) -> Self {
 		Self {
-			player_type: PlayerType::AI,
-			username: String::from("Bot"),
-			hand: Vec::with_capacity(CARDS_PER_PLAYER as usize),
+			player_type: PlayerType::HumanConnection {conn},
+			hand: SmallVec::new(),
+			team_id,
+		}
+	}
+
+	pub const fn new_ai(team_id: u8) -> Self {
+		Self {
+			player_type: PlayerType::Ai,
+			hand: SmallVec::new(),
 			team_id,
 		}
 	}
@@ -49,109 +95,81 @@ impl Player {
 	pub fn can_follow(&self, lead: Suit) -> bool {
 		self.hand.iter().any(|card| card.suit == lead)
 	}
+
+	pub const fn username(&self) -> &str {
+		match &self.player_type {
+			PlayerType::SingleplayerSelf { username, .. } => username.as_str(),
+			PlayerType::HumanPlayer { username, .. } => username.as_str(),
+			PlayerType::HumanConnection { conn: ClientConnection { username, .. } } => username.as_str(),
+			PlayerType::HumanEmpty => "Waiting for player...",
+			PlayerType::Ai => "CPU"
+		}
+	}
 }
 
-#[derive(Debug)]
+#[repr(u8)]
+#[derive(Deserialize, Debug)]
 pub enum PlayerType {
-	///Yourself in singleplayer.
-	SingleplayerSelf,
-	///A slot for a human player in multiplayer that doesn't have a connection yet. This is only used by the server.
-	HumanEmpty,
-	///A connected player in multiplayer. This is only used by the server.
-	HumanConnection(ClientConnection),
-	///The account id and ready status of a connected player in multiplayer.
-	///The server will convert a HumanConnection to a MultiplayerHuman when serializing and sending it to clients.
-	///The client doesn't store this, they just take the account id and ready status from the HumanConnection and update the UI accordingly.
-	MultiplayerHuman {
-		account_id: u32,
-		ready: bool,
-	},
-	AI,
+	/// Yourself in singleplayer.
+	/// ## SAFETY
+	/// It is undefined behavior to serialize this variant.
+	#[serde(skip_deserializing)]
+	#[cfg(feature = "client")]
+	SingleplayerSelf {
+		/// Username may be empty if the username could not be read from the file.
+		/// In that case, just don't display it.
+		username: String,
+		game_event_emitter: GameEventEmitter,
+		event_rx: Receiver<Option<GameEvent>>,
+	} = 0,
+	/// A slot for a human player in multiplayer that doesn't have a connection yet.
+	// TODO: #[cfg(not(feature = "client"))]
+	HumanEmpty = 1,
+	/// A connected player in multiplayer.
+	/// This gets serialized into HumanPlayer because the [ClientConnection] struct is not serializable.
+	#[serde(skip_deserializing)]
+	// TODO: #[cfg(not(feature = "client"))]
+	HumanConnection { conn: ClientConnection } = 2,
+	/// Same as HumanConnection
+	HumanPlayer { username: String, ready: bool } = 3,
+	Ai = 4,
 }
 
-impl PlayerType {
-	pub fn set(&mut self, other: Self) {
-		if let Self::HumanConnection(connection) = self
-			&& let Self::MultiplayerHuman { account_id, ready } = other
-		{
-			connection.account_id = account_id;
-			connection.ready = ready;
-			return;
-		}
-		*self = other;
-	}
-}
-
-impl Clone for PlayerType {
-	fn clone(&self) -> Self {
+impl Serialize for PlayerType {
+	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		const PLAYER_TYPE: &str = "PlayerType";
 		match self {
-			Self::SingleplayerSelf => Self::SingleplayerSelf,
-			Self::HumanEmpty => Self::HumanEmpty,
-			//HumanConnection is cloned as MultiplayerHuman
-			Self::HumanConnection(connection) => Self::MultiplayerHuman {
-				account_id: connection.account_id,
-				ready: connection.ready,
-			},
-			Self::MultiplayerHuman { account_id, ready } => Self::MultiplayerHuman {
-				account_id: *account_id,
-				ready: *ready,
-			},
-			Self::AI => Self::AI,
-		}
-	}
-}
-
-impl Encode for PlayerType {
-	fn encode<E: Encoder>(&self, encoder: &mut E) -> Result<(), EncodeError> {
-		match self {
-			Self::SingleplayerSelf => Encode::encode(&0, encoder),
-			Self::HumanEmpty => Encode::encode(&1, encoder),
-			Self::HumanConnection(connection) => {
-				//HumanConnection is encoded as MultiplayerHuman
-				Encode::encode(&3, encoder)?;
-				Encode::encode(&connection.account_id, encoder)?;
-				Encode::encode(&connection.ready, encoder)
+			PlayerType::HumanEmpty => Serializer::serialize_unit_variant(
+				serializer,
+				PLAYER_TYPE,
+				1,
+				"HumanEmpty",
+			),
+			PlayerType::HumanConnection { conn: ClientConnection { username, ready, ..} }
+			| PlayerType::HumanPlayer { username, ready } => {
+				let mut state = Serializer::serialize_struct_variant(
+					serializer,
+					PLAYER_TYPE,
+					3,
+					"HumanPlayer",
+					2
+				)?;
+				SerializeStructVariant::serialize_field(&mut state, "username", username)?;
+				SerializeStructVariant::serialize_field(&mut state, "ready", ready)?;
+				state.end()
 			}
-			Self::MultiplayerHuman { account_id, ready } => {
-				Encode::encode(&3, encoder)?;
-				Encode::encode(&account_id, encoder)?;
-				Encode::encode(&ready, encoder)
+			PlayerType::Ai => Serializer::serialize_unit_variant(
+				serializer,
+				PLAYER_TYPE,
+				4,
+				"AI",
+			),
+			_ => {
+				#[cfg(debug_assertions)]
+				unreachable!("Variant should not be serialized: {:?}", self);
+				#[cfg(not(debug_assertions))]
+				unsafe {std::hint::unreachable_unchecked();}
 			}
-			Self::AI => Encode::encode(&4, encoder),
-		}
-	}
-}
-
-impl<Context> Decode<Context> for PlayerType {
-	fn decode<D: Decoder>(decoder: &mut D) -> Result<Self, DecodeError> {
-		let player_type: u8 = Decode::decode(decoder)?;
-		match player_type {
-			0 => Ok(Self::SingleplayerSelf),
-			1 => unreachable!("HumanConnection is encoded as MultiplayerHuman"),
-			2 => Ok(Self::HumanEmpty),
-			3 => Ok(Self::MultiplayerHuman {
-				account_id: Decode::decode(decoder)?,
-				ready: Decode::decode(decoder)?,
-			}),
-			4 => Ok(Self::AI),
-			_ => unreachable!("Invalid player type: {}", player_type),
-		}
-	}
-}
-
-impl<'de, Context> BorrowDecode<'de, Context> for PlayerType {
-	fn borrow_decode<D: BorrowDecoder<'de>>(decoder: &mut D) -> Result<Self, DecodeError> {
-		let player_type: u8 = Decode::decode(decoder)?;
-		match player_type {
-			0 => Ok(Self::SingleplayerSelf),
-			1 => unreachable!("HumanConnection is encoded as MultiplayerHuman"),
-			2 => Ok(Self::HumanEmpty),
-			3 => Ok(Self::MultiplayerHuman {
-				account_id: BorrowDecode::borrow_decode(decoder)?,
-				ready: BorrowDecode::borrow_decode(decoder)?,
-			}),
-			4 => Ok(Self::AI),
-			_ => unreachable!("Invalid player type: {}", player_type),
 		}
 	}
 }

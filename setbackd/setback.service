@@ -1,0 +1,24 @@
+[Unit]
+Description=Setback daemon
+Requires=setback.socket
+After=network.target
+
+[Service]
+Type=notify
+User=setback
+Group=setback
+ExecStart=/usr/bin/setbackd
+RuntimeDirectory=setback
+RuntimeDirectoryMode=0660
+NoNewPrivileges=true
+Restart=always
+# setbackd should gracefully shutdown very quickly after receiving SIGTERM.
+# The forked setback_server processes may need to live for a while to
+# allow players to finish their game during a shutdown without interruption.
+# They will receive SIGTERM immediately to stop accepting connections and begin
+# shutting down, and give them 6 hours to finish before a SIGKILL is sent.
+TimeoutStopSec=21600	# 6 hours
+NotifyAccess=main
+
+[Install]
+WantedBy=multi-user.target

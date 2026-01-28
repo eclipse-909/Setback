@@ -1,0 +1,13 @@
+[Unit]
+Description=Setback website and REST API
+After=network.target
+
+[Service]
+Type=simple
+User=setback
+Group=setback
+ExecStart=/usr/bin/setback_website
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

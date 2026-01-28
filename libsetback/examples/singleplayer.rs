@@ -1,12 +1,12 @@
 use {
-	libsetback::{Card, GameEvent, GameRuntime, SetupData},
+	libsetback::{Card, GameSetup, GameEvent, GameRuntime},
 	std::io::{Write, stdin, stdout},
 	tokio::sync::mpsc::Sender,
 };
 
 #[tokio::main]
 async fn main() {
-	let setup: SetupData = SetupData::new_singleplayer();
+	let setup: GameSetup = GameSetup::new_singleplayer();
 	let mut game_runtime: GameRuntime = setup.start_game();
 	tokio::select! {
 		_ = async {

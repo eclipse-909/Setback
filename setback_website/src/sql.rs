@@ -1,13 +1,7 @@
 use {
 	chrono::NaiveDate,
-	sqlx::{Error, MySql, Pool, Sqlite, mysql::MySqlPool, sqlite::SqlitePool},
+	sqlx::{Error, Pool, MySql, mysql::MySqlPool},
 };
-
-#[cfg(debug_assertions)]
-pub type Database = SqliteDatabase;
-
-#[cfg(not(debug_assertions))]
-pub type Database = MySqlDatabase;
 
 pub enum SqlError {
 	SqlXError(Error),

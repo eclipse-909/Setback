@@ -1,27 +1,58 @@
 use {
-	crate::{constants::*, game::*, setup_data::*, ssp::*},
-	bincode::{Decode, Encode},
-	rand::{Rng, prelude::ThreadRng, rng},
-	reqwest::StatusCode,
+	crate::{constants::*, setup::*, SmallVec},
+	serde::{Deserialize, Serialize},
 	std::{
-		array::IntoIter,
 		fmt::{Display, Formatter},
 		sync::{Arc, RwLock},
 	},
-	tokio::{
-		sync::{
-			mpsc::{Sender, UnboundedReceiver},
-			watch,
-		},
-		task::JoinHandle,
-	},
+	tokio::sync::mpsc::{Sender, UnboundedReceiver},
 	tokio_util::sync::CancellationToken,
 };
 
-#[derive(Encode, Decode, Clone, Copy, PartialEq, Debug)]
+#[repr(u8)]
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, PartialOrd, Debug)]
+pub enum Bid {
+	Pass = 0,
+	Two = 2,
+	Three = 3,
+	Four = 4,
+	Override = 5,
+}
+
+impl Bid {
+	pub const fn from(value: u8) -> Self {
+		match value {
+			2 => Bid::Two,
+			3 => Bid::Three,
+			4 => Bid::Four,
+			5 => Bid::Override,
+			_ => Bid::Pass,
+		}
+	}
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Debug)]
 pub struct Card {
 	pub suit: Suit,
 	pub number: u8,
+}
+
+impl Card {
+	pub const fn new_deck() -> SmallVec<Self, DECK_SIZE> {
+		const {
+			let mut deck = SmallVec::new();
+			let mut number = 2;
+			while number <= ACE {
+				deck.push(Card { suit: Suit::Hearts, number });
+				deck.push(Card { suit: Suit::Clubs, number });
+				deck.push(Card { suit: Suit::Diamonds, number });
+				deck.push(Card { suit: Suit::Spades, number });
+				number += 1;
+			}
+			assert!(deck.len() == DECK_SIZE as u8);
+			deck
+		}
+	}
 }
 
 impl Display for Card {
@@ -51,7 +82,8 @@ impl Display for Card {
 	}
 }
 
-#[derive(Encode, Decode, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[repr(u8)]
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Suit {
 	Hearts,
 	Clubs,
@@ -59,13 +91,7 @@ pub enum Suit {
 	Spades,
 }
 
-impl Suit {
-	pub fn iter() -> IntoIter<Self, 4> {
-		[Self::Hearts, Self::Clubs, Self::Diamonds, Self::Spades].into_iter()
-	}
-}
-
-#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq)]
 pub struct GameFilter {
 	pub std_team_mode: bool,
 	pub win_by_2: bool,
@@ -73,12 +99,16 @@ pub struct GameFilter {
 	pub dealer_override: bool,
 	pub max_score_cmp: Comparison,
 	pub max_score_value: i8,
+	pub min_players_cmp: Comparison,
+	pub min_players_value: u8,
 	pub max_players_cmp: Comparison,
 	pub max_players_value: u8,
 }
 
-#[derive(Encode, Decode, Debug, Clone, PartialEq, Eq)]
+#[repr(u8)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Comparison {
+	None,
 	Equal,
 	LessOrEqual,
 	GreaterOrEqual,
@@ -88,8 +118,21 @@ pub enum Comparison {
 }
 
 impl Comparison {
-	pub fn compare<T: PartialOrd>(&self, a: T, b: T) -> bool {
+	pub const fn compare_i8(&self, a: i8, b: i8) -> bool {
 		match self {
+			Comparison::None => true,
+			Comparison::Equal => a == b,
+			Comparison::LessOrEqual => a <= b,
+			Comparison::GreaterOrEqual => a >= b,
+			Comparison::Less => a < b,
+			Comparison::Greater => a > b,
+			Comparison::NotEqual => a != b,
+		}
+	}
+
+	pub const fn compare_u8(&self, a: u8, b: u8) -> bool {
+		match self {
+			Comparison::None => true,
 			Comparison::Equal => a == b,
 			Comparison::LessOrEqual => a <= b,
 			Comparison::GreaterOrEqual => a >= b,
@@ -100,180 +143,68 @@ impl Comparison {
 	}
 }
 
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct Team {
 	//the cards the team collects after winning a turn
-	pub pile: Vec<Card>,
+	pub pile: SmallVec<Card, PILE_SIZE>,
 	//score of the game
 	pub score: i8,
 }
 
-impl Default for Team {
-	fn default() -> Self {
+impl Team {
+	pub const fn new() -> Self {
 		Self {
-			pile: Vec::with_capacity((MAX_PLAYERS * CARDS_PER_PLAYER) as usize),
+			pile: SmallVec::new(),
 			score: 0,
 		}
 	}
 }
 
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RoundScores {
 	pub high_team_id: u8,
 	pub low_team_id: u8,
 	pub jack_team_id: Option<u8>,
 	pub game_team_id: Option<u8>,
-	pub team_game_scores: Vec<u8>,
-	pub team_scores: Vec<i8>,
+	pub team_game_scores: SmallVec<u8, MAX_PLAYERS>,
+	pub team_scores: SmallVec<i8, MAX_PLAYERS>,
 }
 
-///Events that can be sent from the game to the player.
-///The game will emit these events in singleplayer.
-///In multiplayer, the TCP stream will receive [ssp] messages from the server, which may contain these events.
-#[derive(Encode, Decode, Debug, Clone)]
+/// Events that can be sent from the game to the player.
+/// The game will emit these events in singleplayer.
+/// In multiplayer, the TCP stream will receive [ssp] messages from the server, which may contain these events.
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum GameEvent {
 	///Index player bid the amount
-	PlayerBid { index: u8, amount: u8 },
+	PlayerBid { index: u8, amount: Bid },
 	///Index player played the card
 	PlayerPlayedCard { index: u8, card: Card },
-	///It is now index player's turn. This should be sent to every player except the one whose turn it is.
-	PlayerTurn { index: u8 },
 	///It is now index player's turn to bid. This should only be sent to the player whose turn it is.
-	PromptBid { index: u8, hand: Vec<Card> },
+	PromptBid,
 	///It is now index player's turn to play a card. This should only be sent to the player whose turn it is.
-	PromptCard { index: u8, hand: Vec<Card> },
-	///Signals that cards are being dealt.
-	DealCards,
+	PromptCard,
+	///Deal the hand to the player.
+	DealCards { hand: SmallVec<Card, CARDS_PER_PLAYER> },
 	///The round is over, and the scores of the round are given for each team
 	RoundScores(RoundScores),
 	///The game is over, and the scores of the round are given for each team
-	GameOver(Vec<i8>),
-	///The game has encountered an error
-	GameError(Error),
+	GameOver(SmallVec<i8, MAX_PLAYERS>),
 }
 
-pub enum TurnResult {
-	NextTurn,
-	///A re-deal is required after this one
-	ReDeal,
-	///A re-deal is required for this one too
-	EndRound(RoundScores),
-	///Round scores and team scores for whole game
-	GameOver(RoundScores, Vec<i8>),
-}
-
-#[derive(Encode, Decode, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct PublicGame {
 	pub join_code: u32,
-	pub setup_data: SetupData,
-}
-
-//TODO
-// clean up unused errors
-// rename poorly-named errors
-// add http status errors that can be returned from the api
-#[derive(Encode, Decode, Debug, Clone, Copy)]
-pub enum Error {
-	BadRequest,
-	Unauthorized,
-	Forbidden,
-	NotFound,
-	TimedOut,
-	ServerError,
-	NetworkError,
-	Indeterminate,
-	BadVersion(Version),
-	UnexpectedProtocol,
-	Disconnected,
-	GamesAtCapacity,
-	GameAtCapacity,
-	GameNotFound,
-	ClientNotFound,
-	InvalidBid,
-	InvalidCard,
-	OutOfTurn,
-}
-
-impl std::error::Error for Error {}
-impl Display for Error {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let str;
-		write!(
-			f,
-			"{}",
-			match self {
-				Error::BadRequest => "Bad request",
-				Error::Unauthorized => "Invalid username or password",
-				Error::Forbidden => "You do not have permission to perform this action",
-				Error::NotFound => "Could not find resource",
-				Error::TimedOut => "Request timed out",
-				Error::ServerError => "Internal server error",
-				Error::NetworkError => "Could not connect to server",
-				Error::Indeterminate => "Unexpected error - cause unknown",
-				Error::BadVersion(version) => {
-					str = format!(
-						"Incompatible version - latest version: {version} - please update the game"
-					);
-					str.as_str()
-				}
-				Error::UnexpectedProtocol => "Unexpected protocol",
-				Error::Disconnected => "Not connected to server",
-				Error::GamesAtCapacity =>
-					"Cannot create game right now - server is at capacity - try again later",
-				Error::GameAtCapacity => "Cannot join - game has maximum number of players",
-				Error::GameNotFound => "Game not found - invalid game code",
-				Error::ClientNotFound => "Client not found",
-				Error::InvalidBid => "Illegal bid",
-				Error::InvalidCard => "Illegal card",
-				Error::OutOfTurn => "It is not your turn",
-			}
-		)
-	}
-}
-
-impl From<StatusCode> for Error {
-	fn from(value: StatusCode) -> Self {
-		match value.as_u16() {
-			400 => Error::BadRequest,
-			401 => Error::Unauthorized,
-			403 => Error::Forbidden,
-			404 => Error::NotFound,
-			408 => Error::TimedOut,
-			500 => Error::ServerError,
-			_ => Error::Indeterminate,
-		}
-	}
-}
-
-///Spawns an async tasks that terminates if the terminator receives a message
-pub async fn fire_and_forget<F>(terminator: watch::Receiver<()>, future: F) -> JoinHandle<()>
-where
-	F: Future + Send + 'static,
-	F::Output: Send + 'static,
-{
-	tokio::spawn(spawn_async(terminator, future))
-}
-
-///Spawns an async tasks that terminates if the terminator receives a message
-pub async fn spawn_async<F>(mut terminator: watch::Receiver<()>, future: F)
-where
-	F: Future + Send + 'static,
-	F::Output: Send + 'static,
-{
-	tokio::select! {
-		_ = future => {},
-		_ = terminator.changed() => {}
-	}
+	pub setup_data: GameSetup,
 }
 
 ///A struct to handle communication between the game and the players.
 ///
 ///[GameBuilder::start_game] moves the game into the function and starts the event loop.
 pub struct GameRuntime {
-	pub game: Arc<RwLock<Game>>,
+	pub game: Arc<RwLock<GameSetup>>,
 	pub cancel_token: CancellationToken,
 	pub event_emitter: UnboundedReceiver<GameEvent>,
-	pub prompt_senders: Vec<(Sender<u8>, Sender<Card>)>,
+	pub prompt_senders: Vec<(Sender<Bid>, Sender<Card>)>,
 }
 
 impl Drop for GameRuntime {
@@ -282,23 +213,13 @@ impl Drop for GameRuntime {
 	}
 }
 
-pub fn shuffle(deck: &mut [Card]) {
-	let mut rng: ThreadRng = rng();
-	for _ in 0..7 {
-		for i in (1..deck.len()).rev() {
-			let j: usize = rng.random_range(0..=i);
-			deck.swap(i, j);
-		}
-	}
-}
-
 ///returns (high, low, jack, game)
 #[inline(always)]
 pub fn calc_points(pile: &[Card], trump: Suit) -> (u8, u8, bool, u8) {
-	let mut highest: u8 = 2;
-	let mut lowest: u8 = ACE;
-	let mut jack: bool = false;
-	let mut game: u8 = 0;
+	let mut highest = 2;
+	let mut lowest = ACE;
+	let mut jack = false;
+	let mut game = 0;
 	for card in pile.iter() {
 		match card.number {
 			10 => {

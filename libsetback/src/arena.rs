@@ -1,8 +1,11 @@
-use std::{
-	alloc::{AllocError, Allocator, Layout, System},
-	cell::Cell,
-	marker::PhantomData,
-	ptr::{self, NonNull},
+use {
+	std::{
+		alloc::{AllocError, Allocator, Layout, System},
+		cell::Cell,
+		marker::PhantomData,
+		ptr::{self, NonNull},
+	},
+	tracing::debug,
 };
 
 const PAGE_SIZE: usize = 4096;
@@ -112,7 +115,7 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 				//Create a new segment and make that the tail
 				//Double the size of the entire arena
 				layout_size += self.cap;
-				log::info!("Increasing arena size to {}", layout_size + self.cap);
+				debug!("Increasing arena size to {}", layout_size + self.cap);
 				let new_page_ptr = ArenaPage::new_with_capacity(layout_size);
 				unsafe {
 					tail.read().next = Some(new_page_ptr);
@@ -148,7 +151,7 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 			new_layout.size() >= old_layout.size(),
 			"`new_layout.size()` must be greater than or equal to `old_layout.size()`"
 		);
-		log::info!("Arena is growing to {} bytes", new_layout.size());
+		debug!("Arena is growing to {} bytes", new_layout.size());
 		let new_ptr: NonNull<[u8]> = self.allocate(new_layout)?;
 		unsafe {
 			ptr::copy_nonoverlapping(ptr.as_ptr(), new_ptr.cast().as_ptr(), old_layout.size());
@@ -232,5 +235,101 @@ impl ArenaPage {
 			})
 		};
 		new_page_ptr
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use {
+		crate::Arena,
+		std::sync::atomic::{AtomicU8, Ordering},
+	};
+
+	#[test]
+	fn test_compile_error() {
+		trybuild::TestCases::new().compile_fail("tests/comp_err/*.rs");
+	}
+
+	#[test]
+	fn test_default() {
+		let arena = Arena::new();
+		let one = arena.alloc(1);
+		let two = Box::new_in(2, arena.allocator());
+		assert_eq!(*one + *two, 3);
+	}
+
+	#[test]
+	fn test_many_allocations() {
+		const ARR1_LEN: usize = 500;
+		const ARR2_LEN: usize = 20;
+		const ARR3_LEN: usize = 1024;
+		let arena = Arena::new();
+		let arr1 = arena.alloc([0; ARR1_LEN]);
+		let arr2 = arena.alloc([0; ARR2_LEN]);
+		let arr3 = arena.alloc([0; ARR3_LEN]);
+		for (i, v) in arr1.iter_mut().enumerate() {
+			*v = i;
+		}
+		for (i, v) in arr2.iter_mut().enumerate() {
+			*v = i;
+		}
+		for (i, v) in arr3.iter_mut().enumerate() {
+			*v = i;
+		}
+		for (i, v) in arr1.iter().enumerate() {
+			assert_eq!(*v, i);
+		}
+		for (i, v) in arr2.iter().enumerate() {
+			assert_eq!(*v, i)
+		}
+		for (i, v) in arr3.iter().enumerate() {
+			assert_eq!(*v, i)
+		}
+		drop(arena);
+	}
+
+	#[test]
+	fn test_vec_in_arena() {
+		let arena = Arena::new();
+		let mut vec1 = Vec::new_in(arena.allocator());
+		let mut vec2 = Vec::new_in(arena.allocator());
+		let mut vec3 = Vec::new_in(arena.allocator());
+		for i in 0..32 {
+			vec1.push(i);
+		}
+		for i in 0..32 {
+			vec2.push(i);
+		}
+		for i in 0..32 {
+			vec3.push(i);
+		}
+		vec1.shrink_to_fit();
+		vec2.shrink_to_fit();
+		vec3.shrink_to_fit();
+		for i in 0..32 {
+			assert_eq!(vec1[i], i);
+			assert_eq!(vec2[i], i);
+			assert_eq!(vec3[i], i);
+		}
+	}
+
+	static DROP_COUNT: AtomicU8 = AtomicU8::new(0);
+	struct DropStruct(usize);
+	impl Drop for DropStruct {
+		fn drop(&mut self) {
+			DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+		}
+	}
+
+	#[test]
+	fn test_dropping() {
+		let arena: Arena = Arena::new();
+		let vec_ref = arena.alloc(DropStruct(0));
+		vec_ref.0 = 1;
+		let mut vec_box = Box::new_in(DropStruct(0), arena.allocator());
+		vec_box.0 = 1;
+		drop(vec_box);
+		drop(arena);
+		assert_eq!(DROP_COUNT.load(Ordering::Relaxed), 2);
 	}
 }

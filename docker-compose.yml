@@ -1,0 +1,26 @@
+# Docker Compose config for locally running a MySql DB for debug builds.
+# Not used for production.
+
+services:
+  db:
+    image: mysql:latest
+    restart: always
+    env_file:
+      - setback_website/.env.debug
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+  gui:
+    image: phpmyadmin:latest
+    restart: always
+    ports:
+      - 8081:80
+
+volumes:
+  mysql_data:

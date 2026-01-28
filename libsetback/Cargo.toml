@@ -4,13 +4,21 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bincode.workspace = true
-log.workspace = true
+bytes.workspace = true
+futures.workspace = true
+gpui = { workspace = true, optional = true }
+keyring.workspace = true
+postcard.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 trybuild.workspace = true
+
+[features]
+client = [] # ~client -> server
+gpui = ["client", "dep:gpui"]
