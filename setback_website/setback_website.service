@@ -7,7 +7,10 @@ Type=simple
 User=setback
 Group=setback
 ExecStart=/usr/bin/setback_website
-Restart=on-failure
+RuntimeDirectory=setback/website
+RuntimeDirectoryMode=0600
+NoNewPrivileges=true
+Restart=always
 
 [Install]
 WantedBy=multi-user.target

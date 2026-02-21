@@ -45,10 +45,10 @@ pub enum GameState {
 	EndRound,
 }
 
-#[cfg(feature = "client")]
-pub type LoopRet = ();
-#[cfg(not(feature = "client"))]
-pub type LoopRet = SmallVec<ClientConnection, MAX_PLAYERS>;
+pub struct GameLoopHandle {
+	pub cancel_token: CancellationToken,
+	pub task: JoinHandle<SmallVec<ClientConnection, MAX_PLAYERS>>,
+}
 
 impl GameLoop {
 	#[cfg(not(feature = "gpui"))]
@@ -78,13 +78,13 @@ impl GameLoop {
 	}
 
 	#[cfg(not(feature = "client"))]
-	fn spawn_server(mut self) -> (CancellationToken, JoinHandle<SmallVec<ClientConnection, MAX_PLAYERS>>) {
+	fn spawn_server(mut self) -> GameLoopHandle {
 		let cancel_token = CancellationToken::new();
 		let cancel_token_clone = cancel_token.clone();
-		(cancel_token_clone, tokio::spawn(async move {
+		GameLoopHandle {cancel_token, task: tokio::spawn(async move {
 			tokio::select! {
 				_ = self.start() => {}
-				_ = cancel_token.cancelled() => {}
+				_ = cancel_token_clone.cancelled() => {}
 			}
 			self.setup
 				.players
@@ -94,7 +94,7 @@ impl GameLoop {
 					_ => None,
 				})
 				.collect()
-		}))
+		})}
 	}
 
 	async fn start(&mut self, #[cfg(feature = "gpui")] app: &mut gpui::AsyncApp) {
@@ -286,24 +286,23 @@ impl GameLoop {
 			Error::Unknown => {},
 			Error::NetworkError => {},
 			Error::BadRequest => {},
-			Error::BadVersion(version) => {},
+			Error::BadVersion => {},
 			Error::BadProtocol => {},
 			Error::Unauthenticated => {},
-			Error::Unauthorized => {},
 			Error::TimedOut => {},
 			Error::ServerError => {},
 			Error::ServerDown => {},
-			Error::NotFound => {},
 			Error::Disconnected => {},
 			Error::GamesAtCapacity => {},
 			Error::GameAtCapacity => {},
 			Error::GameNotFound => {},
 			Error::BadBid => {},
 			Error::BadCard => {},
-			Error::OutOfTurn => {},
 			Error::IndexOutOfBounds => {},
 			Error::BadPlayerIndex => {},
 			Error::BadTeamNumber => {},
+			Error::BadEncoding => todo!(),
+			Error::DevError => todo!(),
 		}
 	}
 

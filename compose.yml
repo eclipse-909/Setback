@@ -1,8 +1,10 @@
-# Docker Compose config for locally running a MySql DB for debug builds.
+# Compose config for locally running backend setback services.
 # Not used for production.
 
+name: setback-services
+
 services:
-  db:
+  mysql:
     image: mysql:latest
     restart: always
     env_file:
@@ -16,7 +18,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
-  gui:
+  dbgui:
     image: phpmyadmin:latest
     restart: always
     ports:

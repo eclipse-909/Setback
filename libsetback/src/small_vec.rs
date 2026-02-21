@@ -124,6 +124,13 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		}
 	}
 
+	pub const fn pop(&mut self) -> T {
+		self.len -= 1;
+		unsafe {
+			(*self.arr.as_ptr().add(self.len as usize)).assume_init_read()
+		}
+	}
+
 	/// Removes and returns the last N elements from self.
 	/// ## Safety
 	/// It is undefined behavior if N > self.len() in release mode

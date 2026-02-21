@@ -5,16 +5,20 @@ edition = "2024"
 
 [dependencies]
 bytes.workspace = true
-futures.workspace = true
+dirs.workspace = true
 gpui = { workspace = true, optional = true }
 keyring.workspace = true
 postcard.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
+scc.workspace = true
 serde.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
+webpki-roots.workspace = true
 
 [dev-dependencies]
 trybuild.workspace = true

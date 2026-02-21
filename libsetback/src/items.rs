@@ -9,6 +9,88 @@ use {
 	tokio_util::sync::CancellationToken,
 };
 
+/// Versions should try to follow SemVer and are considered compatible if the majors are the same
+#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+pub struct Version {
+	pub major: u8,
+	pub minor: u8,
+	pub patch: u8,
+}
+
+impl Display for Version {
+	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+		write!(f, "Version {}.{}.{}", self.major, self.minor, self.patch)
+	}
+}
+
+impl Version {
+	pub const fn is_compatible(&self, other: Self) -> bool {
+		self.major == other.major
+	}
+
+	pub fn to_string(&self) -> String {
+		format!("{}.{}.{}", self.major, self.minor, self.patch)
+	}
+}
+
+/// This needs to be a macro rather than a const fn because `env!("CARGO_PKG_VERSION")` expands at compile time,
+/// and would always refer to libsetback when we might want it to refer to dependent packages.
+#[macro_export]
+macro_rules! pkg_version {
+    () => {
+        const {
+			// Thanks Rust for not having 1st class support for compile time code execution.
+			// Now I have to manually parse the string because str methods aren't const.
+
+			const VERSION_STR: &str = env!("CARGO_PKG_VERSION");
+			const LEN: usize = VERSION_STR.len();
+			let mut buffers = [[0; LEN]; 3];
+			let mut buf_lens = [0; 3];
+			let mut nums = [0; 3];
+			let mut bufs_idx = 0;
+			let ptr = VERSION_STR.as_ptr();
+			let mut i = 0;
+			let mut buf_idx = LEN - 1;
+			while i < LEN {
+				let b = unsafe { *ptr.add(i) };
+				match b {
+					b'.' => {
+						bufs_idx += 1;
+						buf_idx = LEN - 1;
+					}
+					b'0'..=b'9' => {
+						buffers[bufs_idx][buf_idx] = b;
+						buf_lens[bufs_idx] += 1;
+						buf_idx -= 1;
+					}
+					_ => panic!("invalid character in version string"),
+				}
+				i += 1;
+			}
+			bufs_idx = 0;
+			while bufs_idx < 3 {
+				let len = buf_lens[bufs_idx];
+				i = LEN - len;
+				loop {
+					if i >= LEN {
+						break;
+					}
+					let b = buffers[bufs_idx][i];
+					let num = match b {
+						b @ b'0'..=b'9' => b - b'0',
+						_ => panic!("invalid byte"),
+					};
+					let multiplier = 10u8.pow((i - (LEN - len)) as u32);
+					nums[bufs_idx] += num * multiplier;
+					i += 1;
+				}
+				bufs_idx += 1;
+			}
+			Self { major: nums[0], minor: nums[1], patch: nums[2] }
+		}
+    };
+}
+
 #[repr(u8)]
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, PartialOrd, Debug)]
 pub enum Bid {

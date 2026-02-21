@@ -2,7 +2,6 @@ use {
 	crate::*,
 	serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant},
 	tokio::sync::mpsc::{Receiver, Sender},
-	tracing::info
 };
 
 #[derive(Debug)]
@@ -16,33 +15,6 @@ pub type GameEventEmitter = gpui::Entity<GpuiEventEmitter>;
 #[cfg(not(feature = "gpui"))]
 pub type GameEventEmitter = tokio::sync::mpsc::UnboundedSender<GameEvent>;
 
-pub fn get_username() -> Option<String> {
-	match std::fs::read_to_string(USR_CRD) {
-		Ok(username) => Some(username),
-		Err(err) => {
-			info!("Could not get username from usr.crd - error: {}", err);
-			None
-		}
-	}
-}
-
-pub fn get_credentials() -> Option<LoginRequest> {
-	let username = get_username()?;
-	match keyring::Entry::new(
-		KEYRING_SERVICE,
-		username.as_str()
-	).and_then(|entry| entry.get_password()) {
-		Ok(password) => {
-			info!("Retrieved credentials");
-			Some(LoginRequest {username, password})
-		}
-		Err(err) => {
-			info!("Could not get password from keyring - error: {}", err);
-			None
-		}
-	}
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Player {
 	pub player_type: PlayerType,
@@ -52,11 +24,11 @@ pub struct Player {
 
 impl Player {
 	#[cfg(feature = "client")]
-	pub fn new_singleplayer_self(team_id: u8, game_event_emitter: GameEventEmitter) -> (Self, Sender<Option<GameEvent>>) {
+	pub fn new_singleplayer_self(team_id: u8, username: String, game_event_emitter: GameEventEmitter) -> (Self, Sender<Option<GameEvent>>) {
 		let (tx, event_rx) = tokio::sync::mpsc::channel(1);
 		(Self {
 			player_type: PlayerType::SingleplayerSelf {
-				username: get_username().unwrap_or_default(),
+				username,
 				game_event_emitter,
 				event_rx,
 			},
@@ -114,7 +86,7 @@ pub enum PlayerType {
 	/// ## SAFETY
 	/// It is undefined behavior to serialize this variant.
 	#[serde(skip_deserializing)]
-	#[cfg(feature = "client")]
+	// #[cfg(feature = "client")]
 	SingleplayerSelf {
 		/// Username may be empty if the username could not be read from the file.
 		/// In that case, just don't display it.

@@ -1,5 +1,11 @@
 use {once_cell::sync::Lazy, regex::Regex};
 
+//Files
+
+pub static mut CONFIG_DIR: PathBuf = PathBuf::new();
+pub static mut DATA_DIR: PathBuf = PathBuf::new();
+pub static mut LOG_DIR: PathBuf = PathBuf::new();
+
 //Images
 
 pub const BOT_ICON: &[u8] = include_bytes!("../assets/images/botIcon.png");

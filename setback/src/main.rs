@@ -19,14 +19,15 @@ use {
 		App, Application, Bounds, Context, SharedString, TitlebarOptions, Window, WindowBounds,
 		WindowOptions, div, prelude::*, px, rgb, size,
 	},
-	libsetback::{Arena, LOG_DIR},
+	libsetback::{Arena, CONFIG_DIR, DATA_DIR, LOG_DIR},
 	std::{
 		collections::HashSet,
 		fs::{self, File},
 		io::{BufWriter, Write},
-		path::Path,
+		path::{Path, PathBuf},
 		sync::{Arc, OnceLock},
 		time::{Duration, Instant},
+		env,
 	},
 	tokio::runtime::Builder,
 	tracing_appender::{
@@ -47,6 +48,53 @@ use {
 };
 
 fn main() {
+	/* Use per-platform FHS for all paths
+	 * Linux:
+	 * - binaries: /usr/local/bin/
+	 * - settings: $XDG_CONFIG_HOME/setback/
+	 * - data:     $XDG_DATA_HOME/setback/
+	 * - logs:     $XDG_STATE_HOME/log/setback/
+	 *
+	 * Windows:
+	 * - binaries: C:\Program Files\setback\
+	 * - settings: %LOCALAPPDATA%\setback\config\
+	 * - data:     %LOCALAPPDATA%\setback\data\
+	 * - logs:     %LOCALAPPDATA%\setback\logs\
+	 *
+	 * MacOS:
+	 * - binaries: /Applications/
+	 * - settings: $HOME/Library/Preferences/setback/
+	 * - data:     $HOME/Library/Application Support/setback/
+	 * - logs:     $HOME/Library/Logs/setback/
+	*/
+	unsafe {
+		if cfg!(target_os = "linux") {
+			CONFIG_DIR = [env::var("XDG_CONFIG_HOME").unwrap().as_str(), "setback"].iter().collect();
+			DATA_DIR = [env::var("XDG_DATA_HOME").unwrap().as_str(), "setback"].iter().collect();
+			LOG_DIR = [env::var("XDG_STATE_HOME").unwrap().as_str(), "log/setback"].iter().collect();
+		} else if cfg!(target_os = "windows") {
+			let localappdata = env::var("LOCALAPPDATA").unwrap();
+			CONFIG_DIR = [localappdata.as_str(), "setback/config"].iter().collect();
+			DATA_DIR = [localappdata.as_str(), "setback/data"].iter().collect();
+			LOG_DIR = [localappdata.as_str(), "setback/logs"].iter().collect();
+		} else if cfg!(target_os = "macos") {
+			let home = env::var("HOME").unwrap();
+			CONFIG_DIR = [home.as_str(), "Library/Preferences/setback"].iter().collect();
+			DATA_DIR = [home.as_str(), "Library/Application Support/setback"].iter().collect();
+			LOG_DIR = [home.as_str(), "Library/Logs/setback"].iter().collect();
+		} else {panic!("OS not supported")}
+		fs::create_dir_all(CONFIG_DIR).unwrap();
+		fs::create_dir_all(DATA_DIR).unwrap();
+		fs::create_dir_all(LOG_DIR).unwrap();
+	}
+
+	// check for uninstall
+	let mut args = std::env::args();
+	_ = args.next();
+	if let Some(arg1) = args.next() && arg1 == "--uninstall" {
+		todo!("Uninstall setback from system");
+	}
+
 	// set up crash log
 	unsafe {
 		std::env::set_var("RUST_BACKTRACE", "full");

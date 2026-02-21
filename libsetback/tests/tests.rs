@@ -14,7 +14,7 @@ impl WebsiteConnection for MockApi {
 	async fn login(&self, _credentials: &LoginRequest) -> Result<LoginResponse, Error> {
 		Ok(LoginResponse {
 			auth_token: String::from(TEST_AUTH_TOKEN),
-			refresh_token: String::from(TEST_AUTH_TOKEN),
+			renew_token: String::from(TEST_AUTH_TOKEN),
 			account_id: 1,
 		})
 	}

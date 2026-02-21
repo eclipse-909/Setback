@@ -4,11 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bytes.workspace = true
+futures.workspace = true
 libc.workspace = true
 libsetback.workspace = true
+postcard.workspace = true
 reqwest.workspace = true
 systemd.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

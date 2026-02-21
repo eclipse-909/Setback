@@ -1,7 +1,6 @@
 use {
 	crate::*,
 	serde::{Deserialize, Serialize},
-	std::fmt::{Display, Formatter},
 };
 
 ///Setback Server Protocol
@@ -9,6 +8,10 @@ use {
 pub struct Ssp {
 	/// Must be the same major and minor version to be compatible.
 	pub version: Version,
+	/// The account id or game code that produced this message.
+	/// Only the server uses this internally.
+	#[serde(skip)]
+	pub src_id: u32,
 	/// Contains encrypted data to uniquely identify the user and prove their identity.
 	pub auth_token: String,
 	/// Chaining is how the program knows which responses go to which requests.
@@ -20,7 +23,8 @@ pub struct Ssp {
 impl Ssp {
 	pub const fn new(payload: Payload, chain_id: ChainId) -> Self {
 		Self {
-			version: SETBACK_VERSION,
+			version: SSP_VERSION,
+			src_id: 0,
 			auth_token: String::new(),
 			chain_id,
 			payload,
@@ -28,31 +32,12 @@ impl Ssp {
 	}
 	pub const fn new_with_token(payload: Payload, chain_id: ChainId, auth_token: String) -> Self {
 		Self {
-			version: SETBACK_VERSION,
+			version: SSP_VERSION,
+			src_id: 0,
 			auth_token,
 			chain_id,
 			payload,
 		}
-	}
-}
-
-///(major, minor, patch)
-#[derive(Deserialize, Serialize, PartialEq, Debug, Clone, Copy)]
-pub struct Version {
-	pub major: u8,
-	pub minor: u8,
-	pub patch: u8,
-}
-
-impl Display for Version {
-	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-		write!(f, "Version {}.{}.{}", self.major, self.minor, self.patch)
-	}
-}
-
-impl Version {
-	pub const fn is_compatible(&self) -> bool {
-		self.major == SETBACK_VERSION.major && self.minor == SETBACK_VERSION.minor
 	}
 }
 
@@ -91,23 +76,25 @@ pub enum Payload {
 	/// Client sends its account id as src_id and sends the auth token it got from logging into the website.
 	/// Server responds with Connect which carries the port number the client should reconnect to.
 	Authenticate { auth_token: String },
-	/// Client ---RefreshAuth--> Server<br>
-	/// Client <--RefreshAuth--- Server<br>
+	/// Client ---RenewAuth--> Server<br>
+	/// Client <--RenewAuth--- Server<br>
 	/// Request and response<br><br>
-	/// Client sends refresh token to server to get a new auth token.
+	/// Client sends renew token to server to get a new auth token.
 	/// Server responds with auth token if successful.
-	RefreshAuth { token: String },
+	RenewAuth { token: String },
 	/// Client ---Authenticate--> Server<br>
 	/// Client <--Connect--- Server<br>
 	/// Response only<br><br>
 	/// Client must send Authenticate immediately after attempting to connect to the server.
 	/// Client sends its account id as src_id and sends the auth token it got from logging into the website.
 	/// Server responds with this which carries the port number the client should reconnect to.
+	/// Port 0 indicates reconnection is not necessary.
 	Connect { port: u16 },
 	/// Client <--Disconnect--- Server<br>
 	/// Spontaneous<br><br>
 	/// Informs you when another player disconnects and provides the index of that player.
-	Disconnect { player_idx: u8 },
+	/// The server internally uses Error::Disconnected to track when players disconnect.
+	Disconnected { player_idx: u8 },
 	/// Client ---Any--> Server<br>
 	/// Client <--Ack--- Server<br>
 	/// Response only<br><br>
@@ -131,10 +118,7 @@ pub enum Payload {
 	/// Client <--Game--- Server<br>
 	/// Request only<br><br>
 	/// Client requests to join game. An empty string password implies a public game. Anything else is a private game.
-	JoinGame {
-		code: String,
-		password: String,
-	},
+	JoinGame { code: u32, password: String },
 	/// Client ---CreateGame--> Server<br>
 	/// Client <--Game--- Server<br>
 	/// Response only<br><br>

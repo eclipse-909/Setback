@@ -1,12 +1,13 @@
 mod api;
 mod constants;
-mod controllers;
+mod controller;
 mod db;
 mod error;
 mod jwt;
 mod middleware;
 mod session;
 mod sql;
+mod models;
 
 use {
 	axum::{Extension, Router, routing::get_service},

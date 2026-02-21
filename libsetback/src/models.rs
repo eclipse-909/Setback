@@ -11,7 +11,7 @@ pub struct LoginRequest {
 #[derive(Deserialize)]
 pub struct LoginResponse {
 	pub auth_token: String,
-	pub refresh_token: String,
+	pub renew_token: String,
 	pub username: String,
 }
 
@@ -19,16 +19,17 @@ pub struct LoginResponse {
 #[derive(Deserialize)]
 pub struct UsernameResponse {
 	pub username: String,
+	pub account_id: u32,
 }
 
-/// POST /api/refresh
+/// POST /api/renew
 #[derive(Serialize)]
-pub struct RefreshRequest {
-	pub refresh_token: String,
+pub struct RenewRequest {
+	pub renew_token: String,
 }
 
-/// POST /api/refresh
+/// POST /api/renew
 #[derive(Deserialize)]
-pub struct RefreshResponse {
+pub struct RenewResponse {
 	pub auth_token: String,
 }

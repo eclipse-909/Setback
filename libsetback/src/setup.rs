@@ -38,8 +38,8 @@ impl GameSetup {
 	}
 
 	#[cfg(feature = "client")]
-	pub fn new_singleplayer(game_event_emitter: GameEventEmitter) -> (Self, Sender<Option<GameEvent>>) {
-		let (sp_self, tx) = Player::new_singleplayer_self(0, game_event_emitter);
+	pub fn new_singleplayer(username: String, game_event_emitter: GameEventEmitter) -> (Self, Sender<Option<GameEvent>>) {
+		let (sp_self, tx) = Player::new_singleplayer_self(0, username, game_event_emitter);
 		let mut setup_data = Self::new();
 		setup_data.players.push(sp_self);
 		for _ in 0..MAX_PLAYERS-1 {
