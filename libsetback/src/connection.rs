@@ -1,66 +1,62 @@
 use {
-	crate::{*, stream::MemPool, ssp::*},
+	crate::{ssp::*, *},
+	futures::{SinkExt, StreamExt},
 	reqwest::Client,
 	rustls::pki_types::ServerName,
-	scc::{HashMap, hash_map::Entry},
 	std::{
-		net::SocketAddr,
-		sync::Arc
+		collections::HashMap,
+		sync::Arc,
 	},
 	tokio::{
-		io::{AsyncReadExt, AsyncWriteExt},
+		io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
 		net::TcpStream,
-		runtime::Handle,
-		sync::{
-			RwLock, mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel}
-		},
-		task::JoinHandle
+		sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
 	},
 	tokio_rustls::{
 		TlsConnector,
 		client::TlsStream,
 		rustls::{ClientConfig, RootCertStore}
 	},
-	tokio_util::sync::CancellationToken
+	tokio_serde::{Framed, formats::Bincode},
+	tokio_util::{
+		sync::CancellationToken,
+		codec::{FramedWrite, FramedRead, LengthDelimitedCodec}
+	},
+	tracing::{info, warn}
+};
+#[cfg(not(feature = "client"))]
+use {
+	scc::hash_map::Entry,
+	std::{
+		net::SocketAddr,
+		time::Duration,
+	},
 };
 
 pub fn setback_api() -> Option<Client> { Client::builder().cookie_store(true).build().ok() }
 
 type ChainMap = HashMap<u32, UnboundedSender<Ssp>>;
-type SspWriter<W: AsyncWriteExt + Unpin> = stream::Writer<W>;
-type SspReader<R: AsyncReadExt + Unpin> = stream::Reader<R>;
+
+type SspWriter<W: AsyncWriteExt + Unpin> =
+	Framed<FramedWrite<WriteHalf<W>, LengthDelimitedCodec>, (), Ssp, Bincode<(), Ssp>>;
+type SspReader<R: AsyncReadExt + Unpin> =
+	Framed<FramedRead<ReadHalf<R>, LengthDelimitedCodec>, Ssp, (), Bincode<Ssp, ()>>;
+
 // The client needs a TlsStream to go through nginx
 type TlsWriter = SspWriter<TlsStream<TcpStream>>;
 type TlsReader = SspReader<TlsStream<TcpStream>>;
+
 // The server just uses a regular TcpStream with nginx handling encryption
 type TcpWriter = SspWriter<TcpStream>;
 type TcpReader = SspReader<TcpStream>;
 
-trait SspStream {
-	fn chain_map(&self) -> &ChainMap;
-	async fn write(&mut self, chain_id: ChainId, protocol: Payload) -> Result<(), Error>;
-
-	/// Starts a message chain where the chain id is passed into all messages
-	/// and the receiver is used to await responses from the server.
-	async fn start_chain(&self) -> (ChainId, UnboundedReceiver<Ssp>) {
-		//get new key
-		let mut next_key: u32 = 0;
-		//TODO: find a better way to make a unique key.
-		// This loop will probably never run more than a few times, but still.
-		let (tx, rx) = unbounded_channel();
-		loop {
-			if let Entry::Vacant(e) = self.chain_map().entry_async(next_key).await {
-				//create new channel
-				e.insert_entry(tx);
-				return (ChainId::ExpectResponse(next_key), rx);
-			}
-			next_key += 1;
-		}
-	}
-
-	async fn remove_chain(&self, id: u32) -> Option<UnboundedSender<Ssp>> {
-		self.chain_map().remove_async(&id).await.map(|o|o.1)
-	}
+fn new_length_delimited_codec() -> LengthDelimitedCodec {
+	type FrameLength = u16;
+	LengthDelimitedCodec::builder()
+		.max_frame_length(FrameLength::MAX as usize)
+		.length_field_type::<FrameLength>()
+		.length_field_length(size_of::<FrameLength>())
+		.new_codec()
 }
 
 /// Connection to the server, owned by the client.
@@ -71,23 +67,13 @@ trait SspStream {
 /// The runtime will be entered and exited for each async operation defined here.
 pub struct SetbackClient {
 	writer: TlsWriter,
-	mem_pool: Arc<MemPool>,
-	rt: Handle,
 	/// cancels the read loop
-	cancellation_token: CancellationToken,
+	cancel_token: CancellationToken,
 	chain_map: ChainMap,
 	api: Client,
 	auth_token: String,
 	renew_token: String,
 	ready: bool,
-}
-
-impl SspStream for SetbackClient {
-	fn chain_map(&self) -> &ChainMap { &self.chain_map }
-	async fn write(&mut self, chain_id: ChainId, protocol: Payload) -> Result<(), Error> {
-		let auth_token = self.auth_token.clone();
-		self.writer.send(&Ssp::new_with_token(protocol, chain_id, auth_token), &self.mem_pool).await
-	}
 }
 
 impl SetbackClient {
@@ -99,9 +85,9 @@ impl SetbackClient {
 	///
 	/// If you send a message to the server that expects a response, you can just call the async function that sends the message,
 	/// and awaiting that function will return the response from the server if all goes well.
-	/// ## PANICS
+	/// ## Panics
 	/// If not in tokio runtime
-	pub async fn new(credentials: LoginRequest, mem_pool: Arc<MemPool>) -> Result<(Self, UnboundedReceiver<Result<Ssp, Error>>), Error> {
+	pub async fn new(credentials: LoginRequest) -> Result<(Self, UnboundedReceiver<Result<Ssp, Error>>), Error> {
 		//login
 		let api = setback_api().unwrap();
 		let session = api
@@ -134,16 +120,14 @@ impl SetbackClient {
 		// });
 
 		//Connect to server
-		let (reader, writer) = Self::make_tls_stream(SETBACKD_PORT).await?;
-		let cancellation_token = CancellationToken::new();
-		let read_cancel_token = cancellation_token.clone();
+		let (mut reader, writer) = Self::make_tls_stream(SETBACKD_PORT).await?;
+		let cancel_token = CancellationToken::new();
+		let cancel_token_clone = cancel_token.clone();
 		let chain_map = ChainMap::default();
 		let chain_map_clone = chain_map.clone();
 		let mut client = Self {
 			writer,
-			mem_pool: mem_pool.clone(),
-			rt: tokio::runtime::Handle::current(),
-			cancellation_token,
+			cancel_token,
 			chain_map,
 			api,
 			auth_token: session.auth_token.clone(),
@@ -152,13 +136,11 @@ impl SetbackClient {
 		};
 
 		// Authenticate to get client port
+
 		// No need to use chains yet because this handshake is required before arbitrary communication
-		let auth_ssp = Ssp::new(
-			Payload::Authenticate { auth_token: session.auth_token },
-			ChainId::ExpectResponse(0),
-		);
-		client.writer.send(&auth_ssp, &mem_pool).await?;
-		let auth_res: Ssp = reader.recv(&mem_pool).await?;
+		let auth_payload = Payload::Authenticate { auth_token: session.auth_token };
+		client.write(ChainId::ExpectResponse(0), auth_payload.clone()).await?;
+		let auth_res = reader.next().await.ok_or(Error::Disconnected)??;
 		if !matches!(auth_res.chain_id, ChainId::EndOfChain(0)) {
 			return Err(Error::ServerError);
 		};
@@ -167,79 +149,87 @@ impl SetbackClient {
 		};
 
 		// Then disconnect and reconnect to client port
-		let (mut reader, writer) = Self::make_tls_stream(port).await?;
+		client.shutdown().await;
+		let (mut reader, mut writer) = Self::make_tls_stream(port).await?;
 
 		// Reauthenticate - still don't need chaining
-		writer.send(&auth_ssp, &mem_pool).await?;
+		client.writer = writer;
+		client.write(ChainId::ExpectResponse(0), auth_payload.clone()).await?;
 		if !matches!(auth_res.chain_id, ChainId::EndOfChain(0)) {
 			return Err(Error::ServerError);
 		};
-		if !matches!(reader.recv::<Ssp>(&mem_pool).await?.payload, Payload::Connect {..}) {
+		if !matches!(reader.next().await.ok_or(Error::Disconnected)??.payload, Payload::Connect {..}) {
 			return Err(Error::ServerError);
 		}
 
 		// Listen for messages from server
 		let (ssp_tx, ssp_rx) = unbounded_channel();
-		tokio::spawn(async move {
-			tokio::select! {
-				_ = Self::recv_ssps(reader, chain_map_clone, ssp_tx, mem_pool) => {}
-				_ = read_cancel_token.cancelled() => {}
-			}
-		});
+		tokio::spawn(Self::recv_ssps(reader, chain_map_clone, ssp_tx));
 
 		Ok((client, ssp_rx))
 	}
 
-	async fn recv_ssps(mut reader: TlsReader, chain_map: ChainMap, ssp_tx: UnboundedSender<Result<Ssp, Error>>, mem_pool: Arc<MemPool>) {
+	async fn recv_ssps(
+		mut reader: TlsReader,
+		mut chain_map: ChainMap,
+		ssp_tx: UnboundedSender<Result<Ssp, Error>>,
+	) {
 		loop {
-			match reader.recv(&mem_pool).await {
+			match reader.next().await {
 				// Route to transmitter via chaining...
-				Ok(message @ Ssp {
-					chain_id: ChainId::ExpectResponse(chain_id)
-					| ChainId::EndOfChain(chain_id),
-					..
-				}) => {
+				Some(Ok(message)) if message.chain_id != ChainId::None => {
 					match message.chain_id {
-						ChainId::ExpectResponse(_) => {
-							if let Some(chain_tx) = chain_map.get_async(&chain_id).await {
+						ChainId::ExpectResponse(id) => {
+							if let Some(chain_tx) = chain_map.get(&id) {
 								chain_tx.send(message).unwrap();
 							}
 							// if the transmitter isn't in the hash map,
 							// the request probably timed out,
 							// and it was removed from the hash map
 						}
-						ChainId::EndOfChain(_) => {
-							if let Some((_, chain_tx)) = chain_map.remove_async(&chain_id).await {
+						ChainId::EndOfChain(id) => {
+							if let Some(chain_tx) = chain_map.remove(&id) {
 								chain_tx.send(message).unwrap();
 							}
 							// if the transmitter isn't in the hash map,
 							// the request probably timed out,
 							// and it was removed from the hash map
 						}
-						_ => unsafe {std::hint::unreachable_unchecked()},
+						_ => unreachable_unchecked!(),
 					}
 				}
 				// ... or send to default transmitter
-				result => ssp_tx.send(result).unwrap(),
+				Some(result) => ssp_tx.send(result.map_err(Error::from)).unwrap(),
+				// disconnected
+				None => return,
 			}
 		}
 	}
 
 	async fn make_tls_stream(port: u16) -> Result<(TlsReader, TlsWriter), Error> {
-		// Don't hover over or inspect webpki_roots::TLS_SERVER_ROOTS.
-		// It's huge and will lag your IDE.
 		let mut root_cert_store = RootCertStore::empty();
 		root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+		// Don't hover over or inspect       ^^^^^^^^^^^^^^^^
+		// webpki_roots::TLS_SERVER_ROOTS. It's huge and will lag your IDE.
 		let config = ClientConfig::builder()
 			.with_root_certificates(root_cert_store)
 			.with_no_client_auth();
 		let connector = TlsConnector::from(Arc::new(config));
-		let dnsname = ServerName::try_from(DNS_NAME).unwrap();
+		let dns_name = ServerName::try_from(DNS_NAME).unwrap();
 		let tcp_stream = TcpStream::connect(server(port))
 			.await
 			.map_err(|_| Error::ServerDown)?;
-		let tls_stream = connector.connect(dnsname, tcp_stream).await?;
-		Ok(stream::new_stream(tls_stream))
+		let (r, w) = tokio::io::split(connector.connect(dns_name, tcp_stream).await?);
+		let codec = new_length_delimited_codec();
+		Ok((
+			Framed::new(FramedRead::new(r, codec.clone()), Bincode::default()),
+			Framed::new(FramedWrite::new(w, codec.clone()), Bincode::default()),
+		))
+	}
+	
+	pub async fn shutdown(&mut self) {
+		self.cancel_token.cancel();
+		_ = self.writer.get_mut().get_mut().shutdown().await;
 	}
 
 	pub async fn renew_token(&mut self) -> Result<(), Error> {
@@ -279,86 +269,100 @@ impl SetbackClient {
 		Ok(())
 	}
 
-	async fn send_expect_ack(&mut self, protocol: Payload) -> Result<(), Error> {
-		let (chain_id, mut rx) = self.start_chain().await;
-		self.write(chain_id, protocol).await?;
-		match tokio::time::timeout(NETWORK_TIMEOUT, rx.recv()).await {
-			Ok(Some(res)) => {
-				debug_assert!(matches!(
-					res.chain_id,
-					ChainId::EndOfChain(i) if i == chain_id.id_unwrap()
-				));
-				match res.payload {
-					Payload::Ack => Ok(()),
-					Payload::Err(err) => Err(err),
-					_ => Err(Error::ServerError),
-				}
+	/// Chain_id must not be ChainId::None. Removes the chain id from the chain map if Err is returned.
+	async fn write(&mut self, chain_id: ChainId, payload: Payload) -> Result<(), Error> {
+		self.writer.send(Ssp::new_with_token(payload, chain_id, self.auth_token.clone())).await.map_err(|e| {
+			self.chain_map.remove(&chain_id.get_id());
+			warn!("Failed to write Ssp to tcp socket. Error: {e}");
+			Error::from(e)
+		})
+	}
+
+	/// Starts a message chain where the chain id is passed into all messages
+	/// and the receiver is used to await responses from the server.
+	fn start_chain(&mut self) -> (ChainId, UnboundedReceiver<Ssp>) {
+		//get new key
+		let mut next_key = 0;
+		//TODO: find a better way to make a unique key.
+		// This loop will probably never run more than a few times, but still.
+		let (tx, rx) = unbounded_channel();
+		loop {
+			if let std::collections::hash_map::Entry::Vacant(e) = self.chain_map.entry(next_key) {
+				//create new channel
+				e.insert_entry(tx);
+				return (ChainId::ExpectResponse(next_key), rx);
 			}
-			Ok(None) => Err(Error::Disconnected),
-			Err(_) => {
-				self.remove_chain(chain_id.id_unwrap());
-				Err(Error::TimedOut)
-			}
+			next_key += 1;
 		}
 	}
 
-	async fn send_expect_game_setup(&mut self, protocol: Payload) -> Result<GameSetup, Error> {
-		let (chain_id, mut rx) = self.start_chain().await;
-		self.write(chain_id, protocol).await?;
-		match tokio::time::timeout(NETWORK_TIMEOUT, rx.recv()).await {
-			Ok(Some(res)) => {
-				debug_assert!(matches!(
-					res.chain_id,
-					ChainId::EndOfChain(i) if i == chain_id.id_unwrap()
-				));
-				match res.payload {
-					Payload::Game(game) => Ok(game),
-					Payload::Err(err) => Err(err),
-					_ => Err(Error::ServerError),
-				}
-			}
-			Ok(None) => Err(Error::Disconnected),
-			Err(_) => {
-				self.remove_chain(chain_id.id_unwrap());
-				Err(Error::TimedOut)
-			}
+	async fn send_recv(&mut self, payload: Payload) -> Result<Payload, Error> {
+		let (chain_id, mut rx) = self.start_chain();
+		self.write(chain_id, payload).await?;
+		let ssp = rx.recv().await.ok_or({
+			self.chain_map.remove(&chain_id.get_id());
+			Error::Disconnected
+		})?;
+		debug_assert!(matches!(
+			ssp.chain_id,
+			ChainId::EndOfChain(i) if i == chain_id.get_id()
+		));
+		match ssp.payload {
+			Payload::Err(err) => Err(err),
+			_ => Ok(ssp.payload),
 		}
-	}
-
-	pub async fn send_create_game(&mut self, password: String) -> Result<GameSetup, Error> {
-		self.send_expect_game_setup(Payload::CreateGame { password }).await
-	}
-
-	pub async fn send_join_game(&mut self, code: u32, password: String) -> Result<GameSetup, Error> {
-		self.send_expect_game_setup(Payload::JoinGame { code, password }).await
 	}
 
 	pub async fn send_search_games(&mut self, filter: GameFilter) -> Result<Vec<PublicGame>, Error> {
-		let (chain_id, mut rx) = self.start_chain().await;
-		self.write(chain_id, Payload::SearchGames(filter)).await?;
-		match tokio::time::timeout(NETWORK_TIMEOUT, rx.recv()).await {
-			Ok(Some(res)) => {
-				debug_assert!(matches!(
-					res.chain_id,
-					ChainId::EndOfChain(i) if i == chain_id.id_unwrap()
-				));
-				match res.payload {
-					Payload::PublicGames(games) => Ok(games),
-					Payload::Err(err) => Err(err),
-					_ => Err(Error::ServerError),
-				}
+		match self.send_recv(Payload::SearchGames(filter)).await? {
+			Payload::PublicGames(games) => Ok(games),
+			Payload::Err(err) => Err(err),
+			_ => Err(Error::ServerError),
+		}
+	}
+
+	pub async fn send_renew_token(&mut self) -> Result<(), Error> {
+		match self.send_recv(Payload::RenewAuth { token: self.renew_token.clone() }).await? {
+			Payload::RenewAuth {token} => {
+				self.auth_token = token;
+				Ok(())
 			}
-			Ok(None) => Err(Error::Disconnected),
-			Err(_) => {
-				self.remove_chain(chain_id.id_unwrap());
-				Err(Error::TimedOut)
-			}
+			Payload::Err(err) => Err(err),
+			_ => Err(Error::ServerError),
+		}
+	}
+
+	async fn send_expect_game_setup(&mut self, payload: Payload) -> Result<Box<SetupState>, Error> {
+		match self.send_recv(payload).await? {
+			Payload::Game(game) => Ok(game),
+			Payload::Err(err) => Err(err),
+			_ => Err(Error::ServerError),
+		}
+	}
+
+	pub async fn send_create_game(&mut self, password: String) -> Result<Box<SetupState>, Error> {
+		self.send_expect_game_setup(Payload::CreateGame { password }).await
+	}
+
+	pub async fn send_join_game(&mut self, code: u32, password: String) -> Result<Box<SetupState>, Error> {
+		self.send_expect_game_setup(Payload::JoinGame { code, password }).await
+	}
+
+	pub async fn send_rejoin_game(&mut self, code: u32, password: String) -> Result<Box<SetupState>, Error> {
+		self.send_expect_game_setup(Payload::RejoinGame { code, password }).await
+	}
+
+	async fn send_expect_ack(&mut self, payload: Payload) -> Result<(), Error> {
+		match self.send_recv(payload).await? {
+			Payload::Ack => Ok(()),
+			Payload::Err(err) => Err(err),
+			_ => Err(Error::ServerError),
 		}
 	}
 
 	/// Host-only
-	pub async fn send_game_setup(&mut self, setup_data: GameSetup) -> Result<(), Error> {
-		self.send_expect_ack(Payload::Game(setup_data)).await
+	pub async fn send_game_setup(&mut self, setup_data: SetupState) -> Result<(), Error> {
+		self.send_expect_ack(Payload::Game(Box::new(setup_data))).await
 	}
 
 	pub async fn send_update_team(&mut self, player_idx: u8, team: u8) -> Result<(), Error> {
@@ -397,37 +401,11 @@ impl SetbackClient {
 	pub async fn send_reinsert_player(&mut self, player_idx: u8, new_player_idx: u8) -> Result<(), Error> {
 		self.send_expect_ack(Payload::ReinsertPlayer { player_idx, new_player_idx }).await
 	}
-
-	pub async fn send_renew_token(&mut self) -> Result<(), Error> {
-		let (chain_id, mut rx) = self.start_chain().await;
-		self.write(chain_id, Payload::RenewAuth {token: self.renew_token.clone()}).await?;
-		match tokio::time::timeout(NETWORK_TIMEOUT, rx.recv()).await {
-			Ok(Some(res)) => {
-				debug_assert!(matches!(
-					res.chain_id,
-					ChainId::EndOfChain(i) if i == chain_id.id_unwrap()
-				));
-				match res.payload {
-					Payload::RenewAuth {token} => {
-						self.auth_token = token;
-						Ok(())
-					},
-					Payload::Err(err) => Err(err),
-					_ => Err(Error::ServerError),
-				}
-			}
-			Ok(None) => Err(Error::Disconnected),
-			Err(_) => {
-				self.remove_chain(chain_id.id_unwrap());
-				Err(Error::TimedOut)
-			}
-		}
-	}
 }
 
 impl Drop for SetbackClient {
 	fn drop(&mut self) {
-		self.cancellation_token.cancel();
+		self.cancel_token.cancel();
 	}
 }
 
@@ -440,37 +418,28 @@ impl std::fmt::Debug for SetbackClient {
 }
 
 /// Connection to the client, owned by the server.
-// TODO: #[cfg(not(feature = "client"))]
+#[cfg(not(feature = "client"))]
 pub struct ClientConnection {
 	writer: TcpWriter,
-	reader_handle: JoinHandle<TcpReader>,
-	mem_pool: Arc<MemPool>,
-	/// cancels the read loop
-	cancellation_token: CancellationToken,
-	chain_map: ChainMap,
-	pub account_id: u32,
-	auth_token: Arc<RwLock<String>>,
-	pub username: String,
-	pub ready: bool,
-	pub host: bool,
-}
-
-impl SspStream for ClientConnection {
-	fn chain_map(&self) -> &ChainMap { &self.chain_map }
-	async fn write(&mut self, chain_id: ChainId, protocol: Payload) -> Result<(), Error> {
-		let auth_token = self.auth_token.read().await.clone();
-		self.writer.send(&Ssp::new_with_token(protocol, chain_id, auth_token), &self.mem_pool).await
-	}
-}
-
-struct AuthRes {
 	reader: TcpReader,
+	auth_token: String,
+	pub(crate) account_id: u32,
+	pub(crate) username: String,
+	pub(crate) ready: bool,
+	pub(crate) host: bool,
+	pub(crate) timeout_strikes: u8,
+}
+
+#[cfg(not(feature = "client"))]
+struct AuthRes {
 	writer: TcpWriter,
+	reader: TcpReader,
 	auth_token: String,
 	username: String,
 	account_id: u32,
 }
 
+#[cfg(not(feature = "client"))]
 impl ClientConnection {
 	/// This is used when someone first tries to connect to setbackd.
 	/// Their token will be validated and a port number will be sent back if validated.
@@ -481,150 +450,239 @@ impl ClientConnection {
 		api: Client,
 		server_port: u16,
 		client_addr: SocketAddr,
-		mem_pool: &MemPool,
 	) -> Result<AuthRes, Error> {
-		let (mut reader, mut writer) = stream::new_stream(tcp_stream);
+		let (r, w) = tokio::io::split(tcp_stream);
+		let codec = new_length_delimited_codec();
+		let mut reader = Framed::new(
+			FramedRead::new(r, codec.clone()),
+			Bincode::default()
+		);
+		let mut writer = Framed::new(
+			FramedWrite::new(w, codec.clone()),
+			Bincode::default()
+		);
 
 		//TODO:
 		// Use client_addr for security features like IP bans
-
-		let (protocol, auth_token, username, account_id) = tokio::time::timeout(NETWORK_TIMEOUT, async {
-			// get message
-			let ssp: Ssp = match reader.recv(mem_pool).await {
-				Ok(ssp) => ssp,
-				Err(err) => return (Payload::Err(err), String::new(), String::new(), 0)
-			};
+		
+		let res = async {
+			// we can allow more time for authentication since this isn't delaying anything important
+			let ssp: Ssp = tokio::time::timeout(Duration::from_secs(8), async {
+				// get message
+				match reader.next().await {
+					Some(Ok(ssp)) => Ok(ssp),
+					Some(Err(err)) => Err(Error::from(err)),
+					None => Err(Error::Disconnected),
+				}
+			}).await.map_err(|_| Error::TimedOut)??;
+			
 			// validate version
 			if !ssp.version.is_compatible(SSP_VERSION) {
-				return (Payload::Err(Error::BadVersion), String::new(), String::new(), 0);
+				return Err(Error::BadVersion);
 			}
 			// get auth token
 			let Payload::Authenticate {auth_token} = ssp.payload else {
-				return (Payload::Err(Error::BadProtocol), String::new(), String::new(), 0);
+				return Err(Error::BadProtocol);
 			};
 			// validate token and get username
-			match Self::get_username(api, auth_token.as_str()).await {
-				Ok(UsernameResponse {username, account_id}) => (Payload::Connect {port: server_port}, auth_token, username, account_id),
-				Err(err) => (Payload::Err(err), String::new(), String::new(), 0),
-			}
-		}).await.unwrap_or((Payload::Err(Error::TimedOut), String::new(), String::new(), 0));
+			let UsernameResponse {username, account_id} = Self::get_username(api, auth_token.as_str()).await?;
+			writer.send(Ssp::new(Payload::Connect {port: server_port}, ChainId::EndOfChain(0))).await.map_err(Error::from)?;
+			Ok((auth_token, username, account_id))
+		}.await;
 
-		// respond to client
-		let ssp = Ssp::new(protocol, ChainId::EndOfChain(0));
-		writer.send(&ssp, mem_pool).await?;
-		match ssp.payload {
-			Payload::Err(err) => Err(err),
-			Payload::Connect {..} => Ok(AuthRes {reader, writer, auth_token, username, account_id}),
-			_ => unsafe {std::hint::unreachable_unchecked()}
+		match res {
+			Ok((auth_token, username, account_id)) => Ok(AuthRes {writer, reader, auth_token, username, account_id}),
+			Err(err) => {
+				writer.send(Ssp::new(Payload::Err(err), ChainId::EndOfChain(0))).await.map_err(Error::from)?;
+				Err(err)
+			}
 		}
 	}
 
 	/// The client has already been authenticated and is reconnecting to the server on the port they previously recieved.
-	/// This function reauthenticates the client
+	/// This function reauthenticates the client.
 	pub async fn new(
 		tcp_stream: TcpStream,
 		api: Client,
 		client_addr: SocketAddr,
-		mem_pool: Arc<MemPool>,
-		state: Arc<State>,
-	) -> Result<Self, Error> {
+	) -> Option<Self> {
 		let AuthRes {
 			reader,
 			writer,
 			auth_token,
 			username,
 			account_id
-		} = Self::authenticate(tcp_stream, api, 0, client_addr, &mem_pool).await?;
-		let auth_token = Arc::new(RwLock::new(auth_token));
-		let cancellation_token: CancellationToken = CancellationToken::new();
-		let read_cancel_token: CancellationToken = cancellation_token.clone();
+		} = Self::authenticate(tcp_stream, api, 0, client_addr)
+			.await
+			.inspect_err(|e| info!("Authentication failed for client - Error: {e}"))
+			.ok()?;
 
-		let client_connection = Self {
+		Some(Self {
 			writer,
-			reader_handle: Self::spawn_reader(
-				reader,
-				auth_token.clone(),
-				account_id,
-				mem_pool.clone(),
-				state,
-				read_cancel_token
-			),
-			mem_pool,
-			cancellation_token,
-			chain_map: Default::default(),
-			account_id,
+			reader,
 			auth_token,
+			account_id,
 			username,
 			ready: false,
 			host: false,
-		};
-
-		Ok(client_connection)
-	}
-
-	fn spawn_reader(
-		mut reader: TcpReader,
-		auth_token: Arc<RwLock<String>>,
-		account_id: u32,
-		mem_pool: Arc<MemPool>,
-		state: Arc<State>,
-		cancel_token: CancellationToken,
-	) -> JoinHandle<TcpReader> {
-		tokio::spawn(async move {
-			tokio::select! {
-				_ = Self::handle_messages(&mut reader, auth_token.as_ref(), account_id, &mem_pool, state) => {}
-				_ = cancel_token.cancelled() => {}
-			}
-			reader
+			timeout_strikes: 0,
 		})
 	}
 
-	/// Cancels the current reader loop task, spawns a new one, and returns the old one.
-	fn replace_reader(&mut self, reader: TcpReader, state: Arc<State>) -> JoinHandle<TcpReader> {
-		let reader_loop = Self::spawn_reader(
-			reader,
-			self.auth_token.clone(),
-			self.account_id,
-			self.mem_pool.clone(),
-			state,
-			self.cancellation_token.clone(),
-		);
-		std::mem::replace(&mut self.reader_handle, reader_loop)
+	/// Called after client connects to server. Not used when client is in a game.
+	pub fn spawn_read_loop_for_server(mut self, state: Arc<State>) {
+		tokio::spawn(async move {
+			let cancel_token = CancellationToken::new();
+			let cancel_token_clone = cancel_token.clone();
+			match state.client_store.entry_async(self.account_id).await {
+				Entry::Vacant(e) => {_ = e.insert_entry(cancel_token);}
+				Entry::Occupied(_) => {
+					_ = self.send_err(Error::AlreadyConnected).await;
+					return;
+				}
+			}
+			let account_id = self.account_id;
+			tokio::select! {
+				_ = self.handle_messages_for_server(state.clone()) => {}
+				_ = cancel_token_clone.cancelled() => {}
+			}
+			_ = state.client_store.remove_async(&account_id).await;
+		});
+	}
+
+	#[inline(always)]
+	async fn handle_messages_for_server(mut self, state: Arc<State>) {
+		loop {
+			let (chain_id, res) = self.read().await;
+			if matches!(res, Err(Error::Disconnected)) { return; }
+			let ssp = match res {
+				Ok(ssp) => ssp,
+				Err(err) => {
+					self.write(chain_id, Payload::Err(err)).await;
+					continue;
+				}
+			};
+			let ChainId::ExpectResponse(chain_id) = chain_id else {
+				self.send_err(Error::BadRequest).await;
+				continue;
+			};
+			let res = match ssp.payload {
+				_ => todo!()
+			};
+			_ = self.write(ChainId::EndOfChain(chain_id), res).await;
+		}
 	}
 
 	/// Wraps [read] and validates the auth token and version.
 	/// This should always be used in the server instead of [read] for security.
-	/// [Protocol::Err] is used if invalid.
-	async fn read(reader: &mut TcpReader, auth_token: &RwLock<String>, src_id: u32, mem_pool: &MemPool) -> Ssp {
-		let mut ssp: Ssp = match reader.recv(mem_pool).await {
-			Ok(ssp) => ssp,
-			Err(err) => return Ssp::new(Payload::Err(err), ChainId::None)
+	/// The chain id is the chain id from the received ssp.
+	/// It's returned here just in case auth or version checking fails and you need to respond.
+	async fn read(&mut self) -> (ChainId, Result<Ssp, Error>) {
+		let mut ssp = match self.reader.next().await {
+			Some(Ok(ssp)) => ssp,
+			Some(Err(err)) => return (ChainId::None, Err(Error::from(err))),
+			None => return (ChainId::None, Err(Error::Disconnected)),
 		};
-
+		let chain_id = match ssp.chain_id {
+			ChainId::ExpectResponse(id) => ChainId::EndOfChain(id),
+			_ => ChainId::None
+		};
 		// This method of validating the auth token every time a message is received is not very secure,
 		// but it's much faster than making a request to the api every time.
-		if ssp.auth_token != *auth_token.read().await {
-			return Ssp::new(Payload::Err(Error::Unauthenticated), ssp.chain_id);
+		if ssp.auth_token != self.auth_token {
+			return (chain_id, Err(Error::Unauthenticated));
 		}
 		if !ssp.version.is_compatible(SSP_VERSION) {
-			return Ssp::new(Payload::Err(Error::BadVersion), ssp.chain_id);
+			return (chain_id, Err(Error::BadVersion));
 		}
-		ssp.src_id = src_id;
-		ssp
+		ssp.src_id = self.account_id;
+		(chain_id, Ok(ssp))
 	}
 
-	async fn handle_messages(
-		reader: &mut TcpReader,
-		auth_token: &RwLock<String>,
-		account_id: u32,
-		mem_pool: &MemPool,
-		state: Arc<State>, // TODO how do we differentiate between being in the server vs in a game?
-	) -> ! {
-		loop {
-			match Self::read(reader, auth_token, account_id, mem_pool).await.payload {
-				_ => todo!()
-			}
+	/// Use ChainId::None when sending a new message. The client will assign their own id if they respond.
+	///
+	/// Use the id provided by the client when responding.
+	async fn write(&mut self, chain_id: ChainId, payload: Payload) -> Result<(), Error> {
+		self.writer
+			.send(Ssp::new(payload, chain_id))
+			.await
+			.map_err(|e| {
+				warn!("Failed to write data to stream. Error: {e}");
+				Error::from(e)
+			})
+	}
+
+	/// Only use this when a client is in a game.
+	/// This does not respond to the client; the client is still expecting a response.
+	pub async fn send_prompt_bid(&mut self, chain_id: &mut u32) -> Result<Bid, Error> {
+		self.write(ChainId::ExpectResponse(*chain_id), Payload::GameEvent(GameEvent::PromptBid)).await?;
+		let (id, res) = self.read().await;
+		let ChainId::ExpectResponse(i) = id else {
+			return Err(Error::BadRequest);
+		};
+		if *chain_id != 0 && i != *chain_id {
+			return Err(Error::BadRequest);
 		}
+		*chain_id = i;
+		match res?.payload {
+			Payload::GameEvent(GameEvent::PlayerBid {bid, ..}) => Ok(bid),
+			Payload::Err(e) => Err(e),
+			_ => Err(Error::BadProtocol),
+		}
+	}
+
+	/// Only use this when a client is in a game.
+	/// This does not respond to the client; the client is still expecting a response.
+	pub async fn send_prompt_card(&mut self, chain_id: &mut u32) -> Result<Card, Error> {
+		self.write(ChainId::ExpectResponse(*chain_id), Payload::GameEvent(GameEvent::PromptCard)).await?;
+		let (id, res) = self.read().await;
+		let ChainId::ExpectResponse(i) = id else {
+			return Err(Error::BadRequest);
+		};
+		if *chain_id != 0 && i != *chain_id {
+			return Err(Error::BadRequest);
+		}
+		*chain_id = i;
+		match res?.payload {
+			Payload::GameEvent(GameEvent::PlayerPlayedCard {card, ..}) => Ok(card),
+			Payload::Err(e) => Err(e),
+			_ => Err(Error::BadProtocol),
+		}
+	}
+
+	/// Only use this when a client is in a game.
+	/// This does not respond to the client; the client is not expecting a response.
+	/// This function does retries if there is an error.
+	pub async fn send_expect_ack(&mut self, chain_id: u32, payload: Payload, timeout_secs: u64) -> Result<(), Error> {
+		let timeout_res = tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+			loop {
+				if let Err(err) = self.write(ChainId::ExpectResponse(chain_id), payload.clone()).await {
+					warn!("Failed to send message to client. Error: {err}");
+					continue;
+				}
+				let (id, res) = self.read().await;
+				let err = if let ChainId::EndOfChain(i) = id && chain_id != 0 && i == chain_id {
+					match res?.payload {
+						Payload::Ack => return Ok(()),
+						Payload::Err(e) => e,
+						_ => Error::BadProtocol,
+					}
+				} else {
+					Error::BadRequest
+				};
+				warn!("Error receiving message from client. Error: {err}");
+			}
+		}).await;
+		match timeout_res {
+			Ok(Ok(())) => Ok(()),
+			Ok(Err(err)) => Err(err),
+			Err(_) => Err(Error::TimedOut),
+		}
+	}
+
+	/// This is not responding to a specific client message and the client isn't responding to it.
+	pub async fn send_err(&mut self, err: Error) -> Result<(), Error> {
+		self.write(ChainId::None, Payload::Err(err)).await
 	}
 
 	async fn get_username(api: Client, auth_token: &str) -> Result<UsernameResponse, Error> {
@@ -657,55 +715,27 @@ impl ClientConnection {
 		)
 	}
 
-	pub async fn send_game_event(&mut self, event: GameEvent) -> Result<Option<GameEvent>, Error> {
-		let (chain_id, mut rx) = self.start_chain().await;
-		self.write(chain_id, Payload::GameEvent(event)).await?;
-		#[cfg(debug_assertions)]
-		let mut res_chain_id = None;
-		let res = match rx.recv().await {
-			Some(res) => {
-				#[cfg(debug_assertions)] {
-					res_chain_id = Some(res.chain_id);
-				}
-				match res.payload {
-					Payload::GameEvent(event) => Ok(Some(event)),
-					Payload::Ack => Ok(None),
-					Payload::Err(err) => Err(err),
-					_ => Err(Error::BadProtocol),
-				}
-			}
-			None => Err(Error::Disconnected),
-		};
-		#[cfg(debug_assertions)]
-		if let Some(res_chain_id) = res_chain_id {
-			assert_eq!(res_chain_id, chain_id);
-		}
-		self.write(
-			ChainId::EndOfChain(chain_id.id_unwrap()),
-			match res {
-				Ok(Some(_)) => Payload::Ack,
-				Ok(None) => return Ok(None),
-				Err(err) => Payload::Err(err),
-			}
-		).await?;
-		res
+	async fn report_player(api: Client, auth_token: &str, report: &ReportPlayerRequest) -> Result<(), Error> {
+		api.post(URL_API_REPORT_PLAYER)
+			.bearer_auth(auth_token)
+			.json(report)
+			.send()
+			.await
+			.map_err(|_| Error::NetworkError)?
+			.error_for_status()
+			.map_err(Error::from)?;
+		Ok(())
 	}
 
-	pub async fn send_err(&mut self, err: Error) -> Result<Option<Ssp>, Error> {
-		todo!()
+	pub fn as_human_player(&self) -> PlayerType {
+		PlayerType::HumanPlayer { username: self.username.clone(), ready: self.ready }
 	}
 }
 
-impl Drop for ClientConnection {
-	fn drop(&mut self) {
-		self.cancellation_token.cancel();
-	}
-}
-
+#[cfg(not(feature = "client"))]
 impl std::fmt::Debug for ClientConnection {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("ClientConnection")
-			.field("auth_token", &self.auth_token)
 			.field("username", &self.username)
 			.field("ready", &self.ready)
 			.field("host", &self.host)

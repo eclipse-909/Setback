@@ -1,10 +1,4 @@
-mod constants;
-
 use {
-	crate::{
-		constants::*,
-		state::*,
-	},
 	libsetback::{*, sdp::*, stream::MemPool},
 	reqwest::Client,
 	scc::{HashMap, hash_map::Entry},
@@ -21,6 +15,8 @@ use {
 	tokio_util::sync::CancellationToken,
 	tracing::{error, info}
 };
+
+const BIN_VERION: Version = pkg_version!();
 
 fn main() {
 	// Setup logger, runtime, SIGTERM handler, API connection, and unix socket to setbackd
@@ -64,13 +60,13 @@ fn main() {
 		let cancel_token = master_cancel_token.clone();
 		tokio::spawn(async move {
 			tokio::select! {
-				_ = listen_unix_socket(sock, port) => unsafe {std::hint::unreachable_unchecked()},
+				_ = listen_unix_socket(sock, port) => unreachable_unchecked!("Unix socket listener should never return"),
 				_ = cancel_token.cancelled() => {}
 			}
 		});
 
 		tokio::select! {
-			_ = listen_tcp_socket(tcp_stream, api, state.clone()) => unsafe {std::hint::unreachable_unchecked()},
+			_ = listen_tcp_socket(tcp_stream, api, state.clone()) => unreachable_unchecked!("TCP socket listener should never return"),
 			_ = master_cancel_token.cancelled() => {}
 		}
 	});
@@ -127,29 +123,16 @@ async fn listen_unix_socket(sock: UnixDatagram, port: u16) -> ! {
 	}
 }
 
-async fn listen_tcp_socket(stream: TcpListener, api: Client, state: Arc<State>) -> ! {
-	let mem_pool: FreeList::new();
+async fn listen_tcp_socket(listener: TcpListener, api: Client, state: Arc<State>) -> ! {
+	let mem_pool = FreeList::new();
 	loop {
-		match stream.accept().await {
+		match listener.accept().await {
 			Ok((stream, addr)) => {
 				// Under normal usage, the client will have authenticated with setbackd prior to connecting here.
 				// Since this port is open and accepting connections, we must assume that anyone can directly connect here.
-				tokio::spawn(async {
-					let client = match ClientConnection::new(stream, api, addr, mem_pool.clone(), state.clone()).await {
-						Ok(c) => c,
-						Err(e) => {
-							info!("Client failed to connect. Error: {e}");
-							return;
-						}
-					};
-					match state.client_store.entry_async(client.account_id).await {
-						Entry::Vacant(e) => {_ = e.insert_entry(client);}
-						Entry::Occupied(e) => {
-							client.send_err(Error::AlreadyConnected).await;
-							todo!("send Error::AlreadyConnected message to client and disconnect");
-						}
-					}
-				});
+				if let Some(client) = ClientConnection::new(stream, api.clone(), addr, mem_pool.clone()).await {
+					client.spawn_read_loop_for_server(state.clone());
+				}
 			}
 			Err(e) => warn!("Could not accept client. Error: {e}")
 		}

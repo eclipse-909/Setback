@@ -95,12 +95,12 @@ fn main() {
 		// Then it's mostly I/O operations with recoverable errors
 		tokio::spawn(async {
 			tokio::select! {
-				_ = listen_tcp_socket(stream, api, &latest_server_tcp_port) => unsafe {std::hint::unreachable_unchecked()},
+				_ = listen_tcp_socket(stream, api, &latest_server_tcp_port) => unreachable_unchecked!("TCP socket listener should never return"),
 				_ = sigterm0.recv() => {}
 			}
 		});
 		tokio::select! {
-			_ = listen_unix_socket(&sock, buf, &latest_server_tcp_port) => unsafe {std::hint::unreachable_unchecked()},
+			_ = listen_unix_socket(&sock, buf, &latest_server_tcp_port) => unreachable_unchecked!("Unix socket listener should never return"),
 			_ = sigterm1.recv() => {}
 		}
 	});

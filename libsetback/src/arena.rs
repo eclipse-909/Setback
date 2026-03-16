@@ -1,9 +1,11 @@
 use {
 	std::{
-		alloc::{AllocError, Allocator, Layout, System},
-		cell::Cell,
+		alloc::{AllocError, Allocator, Layout},
+		cell::{Cell, UnsafeCell},
 		marker::PhantomData,
+		ops::Deref,
 		ptr::{self, NonNull},
+		mem::MaybeUninit,
 	},
 	tracing::debug,
 };
@@ -22,7 +24,13 @@ impl<'arena> Arena<'arena> {
 	#[allow(clippy::new_without_default)]
 	pub const fn new() -> Self {
 		Self {
-			allocator: ArenaAlloc::new(),
+			allocator: ArenaAlloc {
+				_phantom: PhantomData,
+				head: UnsafeCell::new(None),
+				tail: UnsafeCell::new(None),
+				offset: Cell::new(0),
+				cap: 0,
+			}
 		}
 	}
 
@@ -30,7 +38,13 @@ impl<'arena> Arena<'arena> {
 	#[inline(always)]
 	pub fn new_with_capacity(bytes: usize) -> Self {
 		Self {
-			allocator: ArenaAlloc::new_with_capacity(bytes),
+			allocator: ArenaAlloc {
+				_phantom: PhantomData,
+				head: UnsafeCell::new(None),
+				tail: UnsafeCell::new(Some(new_mem_chunk(bytes))),
+				offset: Cell::new(0),
+				cap: bytes,
+			}
 		}
 	}
 
@@ -40,107 +54,111 @@ impl<'arena> Arena<'arena> {
 	/// Panics if the underlying heap allocation fails (if your system runs out of memory or something similar).
 	#[allow(clippy::mut_from_ref)]
 	pub fn alloc<T: Sized>(&self, object: T) -> &mut T {
+		// SAFETY:
+		// memory is initialized with object
 		unsafe {
 			let mut p = self.allocator.allocate(Layout::new::<T>()).unwrap().cast();
 			p.write(object);
 			p.as_mut()
 		}
 	}
+}
 
-	/// Clears the arena, calling drop on all items allocated with it.
+impl<'arena> Deref for Arena<'arena> {
+	type Target = ArenaAlloc<'arena>;
 	#[inline(always)]
-	pub fn clear(&mut self) {
-		_ = std::mem::replace(&mut self.allocator, ArenaAlloc::new());
-	}
-
-	/// Clears the arena, calling drop on all items allocated with it.
-	/// Gives the arena a new capacity of at least the given amount.
-	#[inline]
-	pub fn clear_with_capacity(&mut self, bytes: usize) {
-		_ = std::mem::replace(&mut self.allocator, ArenaAlloc::new_with_capacity(bytes));
-	}
-
-	///Returns a reference to the allocator used by the arena. This way you can use the arena for other things, like with [Vec::new_in].
-	#[inline(always)]
-	pub const fn allocator(&self) -> &ArenaAlloc<'arena> {
-		&self.allocator
-	}
+	fn deref(&self) -> &Self::Target { &self.allocator }
 }
 
 /// The allocator used for [Arena]. This struct is wrapped by [Arena] to hide implementation details and unnecessary functions.
 pub struct ArenaAlloc<'arena> {
-	head: Cell<Option<NonNull<ArenaPage>>>,
-	tail: Cell<Option<NonNull<ArenaPage>>>,
+	/// Make sure this is the first field so the lifetime ends before the memory is deallocated when the arena is dropped.
+	_phantom: PhantomData<&'arena mut ()>,
+	head: UnsafeCell<Option<Box<ArenaNode>>>,
+	/// The memory tail points to is not part of the linked list owned by head
+	tail: UnsafeCell<Option<Box<[MaybeUninit<u8>]>>>,
+	/// Index within the tail segment to the first unused byte. Offset = 0 is guaranteed to be aligned in memory.
 	offset: Cell<usize>,
+	/// Total capacity of the arena
 	cap: usize,
-	_phantom: PhantomData<&'arena ()>,
 }
 
-impl ArenaAlloc<'_> {
-	#[inline(always)]
-	const fn new() -> Self {
-		Self {
-			head: Cell::new(None),
-			tail: Cell::new(None),
-			offset: Cell::new(0),
-			cap: 0,
-			_phantom: PhantomData,
-		}
-	}
-	#[inline]
-	fn new_with_capacity(cap: usize) -> Self {
-		let head = Cell::new(Some(ArenaPage::new_with_capacity(cap)));
-		Self {
-			head: head.clone(),
-			tail: head,
-			offset: Cell::new(0),
-			cap,
-			_phantom: PhantomData,
-		}
-	}
-}
-
+// SAFETY:
+// yes
 unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 	fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
-		let mut layout_size: usize = layout.size();
-		let tail = if self.head.get().is_none() {
-			//first segment in the linked list
-			let new_page_ptr = ArenaPage::new_with_capacity(layout_size);
-			self.tail.set(Some(new_page_ptr));
-			self.head.set(Some(new_page_ptr));
-			new_page_ptr
-		} else {
-			let tail = self.tail.get().unwrap();
-			if self.offset.get() + layout_size >= unsafe { tail.read().mem_ptr.len() } {
-				//Create a new segment and make that the tail
-				//Double the size of the entire arena
-				layout_size += self.cap;
-				debug!("Increasing arena size to {}", layout_size + self.cap);
-				let new_page_ptr = ArenaPage::new_with_capacity(layout_size);
-				unsafe {
-					tail.read().next = Some(new_page_ptr);
+		// Get the layout alignment to insert padding before the actual location of the object
+		let remainder = self.offset.get() % layout.align();
+		if remainder != 0 {
+			self.offset.set(self.offset.get() + (layout.align() - remainder));
+		}
+
+		// SAFETY:
+		// We aren't accessing self.tail anywhere else
+		match unsafe {self.tail.as_mut_unchecked()} {
+			Some(tail) => {
+				// If the space needed for this allocation is greater than the amount of memory we have...
+				if self.offset.get() + layout.size() > tail.len() {
+					// ...create a new segment
+					// Double the size of the entire arena
+					let chunk_size = layout.size() + self.cap;
+					debug!("Increasing arena size to {}", chunk_size + self.cap);
+					let new_tail = new_mem_chunk(chunk_size);
+					let old_tail = std::mem::replace(tail, new_tail);
+					let node = Box::new(ArenaNode {
+						mem_ptr: old_tail,
+						next: None,
+					});
+					// SAFETY:
+					// We aren't accessing self.head anywhere else
+					match unsafe {self.head.as_mut_unchecked()} {
+						Some(head) => {
+							let mut curr = head;
+							loop {
+								match &mut curr.next {
+									Some(next) => curr = next,
+									next => {
+										*next = Some(node);
+										break;
+									}
+								}
+							}
+						}
+						head => *head = Some(node),
+					}
+					self.offset.set(0);
 				}
-				self.tail.set(Some(new_page_ptr));
-				self.offset.set(0);
-				new_page_ptr
-			} else {
-				tail
 			}
+			tail => {
+				// first segment in the linked list
+				*tail = Some(new_mem_chunk(layout.size()));
+			}
+		}
+		// Allocate the memory in the tail segment by adding the size to the index
+		// SAFETY:
+		// this is probably safe idk, I can't be bothered to keep writing safety comments
+		let new_alloc_ptr = unsafe {
+			NonNull::slice_from_raw_parts(
+				NonNull::new_unchecked(
+					self.tail
+						.as_mut_unchecked() // what the fuck is going on here
+						.as_mut()
+						.unwrap_unchecked()
+						.as_mut_ptr()
+						.add(self.offset.get())
+				).cast(),
+				layout.size()
+			)
 		};
-		//Allocate the memory in the tail segment by adding the size to the index
-		let ret_ptr: NonNull<[u8]> = NonNull::slice_from_raw_parts(
-			unsafe { tail.read().mem_ptr.as_non_null_ptr().add(self.offset.get()) },
-			layout_size,
-		);
-		self.offset.set(self.offset.get() + layout_size);
-		Ok(ret_ptr)
+		self.offset.set(self.offset.get() + layout.size());
+		Ok(new_alloc_ptr)
 	}
 
-	///Memory cannot be deallocated individually from an arena. This function does nothing.
+	/// Memory cannot be deallocated individually from an arena. This function does nothing.
 	#[inline(always)]
 	unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
 
-	///Same as [Allocator::grow] but no memory is deallocated here.
+	/// Same as [Allocator::grow] but no memory is deallocated here.
 	unsafe fn grow(
 		&self,
 		ptr: NonNull<u8>,
@@ -152,14 +170,16 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 			"`new_layout.size()` must be greater than or equal to `old_layout.size()`"
 		);
 		debug!("Arena is growing to {} bytes", new_layout.size());
-		let new_ptr: NonNull<[u8]> = self.allocate(new_layout)?;
+		let new_ptr = self.allocate(new_layout)?;
+		// SAFETY:
+		// see debug assertion above
 		unsafe {
 			ptr::copy_nonoverlapping(ptr.as_ptr(), new_ptr.cast().as_ptr(), old_layout.size());
 		}
 		Ok(new_ptr)
 	}
 
-	///Same as [Allocator::grow_zeroed] but no memory is deallocated here.
+	/// Same as [Allocator::grow_zeroed] but no memory is deallocated here.
 	unsafe fn grow_zeroed(
 		&self,
 		ptr: NonNull<u8>,
@@ -170,16 +190,18 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 			new_layout.size() >= old_layout.size(),
 			"`new_layout.size()` must be greater than or equal to `old_layout.size()`"
 		);
-		let new_ptr: NonNull<[u8]> = self.allocate_zeroed(new_layout)?;
+		let new_ptr = self.allocate_zeroed(new_layout)?;
+		// SAFETY:
+		// see debug assertion above
 		unsafe {
 			ptr::copy_nonoverlapping(ptr.as_ptr(), new_ptr.cast().as_ptr(), old_layout.size());
 		}
 		Ok(new_ptr)
 	}
 
-	///Shrinking is not supported in Arenas because individual objects are not deallocated.
-	///Instead, this function asserts that the [new_layout]'s size is less than or equal to that of [old_layout].
-	///Then it returns [ptr] cast as a slice pointer with the size of [old_layout].
+	/// Shrinking is not supported in Arenas because individual objects are not deallocated.
+	/// Instead, this function asserts that the [new_layout]'s size is less than or equal to that of [old_layout].
+	/// Then it returns [ptr] cast as a slice pointer with the size of [old_layout].
 	unsafe fn shrink(
 		&self,
 		ptr: NonNull<u8>,
@@ -194,54 +216,23 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 	}
 }
 
-impl<'arena> Drop for ArenaAlloc<'arena> {
-	fn drop(&mut self) {
-		let mut current = self.head.get();
-		while let Some(curr) = current {
-			unsafe {
-				let next = curr.read().next;
-				//deallocate the memory
-				System.deallocate(
-					curr.read().mem_ptr.as_non_null_ptr(),
-					Layout::from_size_align(curr.read().mem_ptr.len(), 1).unwrap(),
-				);
-				//deallocate the page
-				System.deallocate(curr.cast(), Layout::new::<ArenaPage>());
-				current = next;
-			}
-		}
-	}
+struct ArenaNode {
+	/// Fat pointer to the heap-allocated memory.
+	#[allow(unused)]
+	mem_ptr: Box<[MaybeUninit<u8>]>,
+	/// The next node in the linked-list.
+	next: Option<Box<Self>>,
 }
 
-struct ArenaPage {
-	///Fat pointer to the heap-allocated memory.
-	mem_ptr: NonNull<[u8]>,
-	///The next page in the linked-list.
-	next: Option<NonNull<Self>>,
-}
-impl ArenaPage {
-	fn new_with_capacity(cap: usize) -> NonNull<Self> {
-		//allocate the page itself
-		let new_page_ptr: NonNull<Self> = System.allocate(Layout::new::<Self>()).unwrap().cast();
-		unsafe {
-			new_page_ptr.write(Self {
-				//allocate memory for the page
-				mem_ptr: System
-					.allocate(
-						Layout::from_size_align((cap / PAGE_SIZE + 1) * PAGE_SIZE, 1).unwrap(),
-					)
-					.unwrap(),
-				next: None,
-			})
-		};
-		new_page_ptr
-	}
+#[inline(always)]
+fn new_mem_chunk(cap: usize) -> Box<[MaybeUninit<u8>]> {
+	Box::new_uninit_slice((cap / PAGE_SIZE + 1) * PAGE_SIZE)
 }
 
 #[cfg(test)]
 mod tests {
 	use {
-		crate::Arena,
+		super::Arena,
 		std::sync::atomic::{AtomicU8, Ordering},
 	};
 
@@ -254,7 +245,7 @@ mod tests {
 	fn test_default() {
 		let arena = Arena::new();
 		let one = arena.alloc(1);
-		let two = Box::new_in(2, arena.allocator());
+		let two = Box::new_in(2, &*arena);
 		assert_eq!(*one + *two, 3);
 	}
 
@@ -291,9 +282,9 @@ mod tests {
 	#[test]
 	fn test_vec_in_arena() {
 		let arena = Arena::new();
-		let mut vec1 = Vec::new_in(arena.allocator());
-		let mut vec2 = Vec::new_in(arena.allocator());
-		let mut vec3 = Vec::new_in(arena.allocator());
+		let mut vec1 = Vec::new_in(&*arena);
+		let mut vec2 = Vec::new_in(&*arena);
+		let mut vec3 = Vec::new_in(&*arena);
 		for i in 0..32 {
 			vec1.push(i);
 		}
@@ -323,13 +314,29 @@ mod tests {
 
 	#[test]
 	fn test_dropping() {
-		let arena: Arena = Arena::new();
-		let vec_ref = arena.alloc(DropStruct(0));
-		vec_ref.0 = 1;
-		let mut vec_box = Box::new_in(DropStruct(0), arena.allocator());
-		vec_box.0 = 1;
-		drop(vec_box);
+		let arena = Arena::new();
+		let drop_ref = arena.alloc(DropStruct(0));
+		drop_ref.0 = 1;
+		let mut drop_box = Box::new_in(DropStruct(0), &*arena);
+		drop_box.0 = 1;
+		drop(drop_box);
 		drop(arena);
 		assert_eq!(DROP_COUNT.load(Ordering::Relaxed), 2);
+	}
+
+	#[test]
+	fn test_alignment() {
+		let arena = Arena::new();
+		let bool0: *const _ = arena.alloc(true);
+		let bool1: *const _ = arena.alloc(false);
+		let int0: *const _ = arena.alloc(4u32);
+		let bool2: *const _ = arena.alloc(true);
+		// SAFETY:
+		// The add function doesn't even say what is unsafe about it.
+		unsafe {
+			assert_eq!(bool0.add(1), bool1);
+			assert_eq!(bool1.add(3), int0.cast());
+			assert_eq!(int0.add(4).cast(), bool2);
+		}
 	}
 }

@@ -1,25 +1,9 @@
 use {
+	crate::util::Deferred,
 	libsetback::SetbackClient,
 	serde::{Deserialize, Serialize},
 	tokio::runtime::{Builder, Runtime},
 };
-
-pub struct Global {
-	pub rt: Runtime,
-}
-
-impl gpui::Global for Global {}
-
-impl Default for Global {
-	fn default() -> Self {
-		Self {
-			rt: Builder::new_multi_thread()
-				.enable_all()
-				.build()
-				.expect("Failed to create tokio runtime"),
-		}
-	}
-}
 
 #[derive(Default)]
 pub enum Scene {

@@ -7,7 +7,7 @@ use {
 };
 
 #[repr(u8)]
-#[derive(Deserialize, Serialize, Debug, Clone, Copy)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
 pub enum Error {
 	Unknown,
 	NetworkError,
@@ -81,4 +81,28 @@ impl From<std::io::Error> for Error {
 			_ => Error::NetworkError
 		}
 	}
+}
+
+/// With debug_assertions this expands to `panic!()`.
+///
+/// Without debug_assertions this expands to `unsafe {std::hint::unreachable_unchecked()}`.
+///
+/// ## Safety
+/// Without debug_assertions, this will cause undefined behavior if this statement is reached.
+#[cfg(debug_assertions)]
+#[macro_export]
+macro_rules! unreachable_unchecked {
+	($($arg:tt)*) => {panic!($($arg)*)};
+}
+
+/// With debug_assertions this expands to `unreachable!()`.
+///
+/// Without debug_assertions this expands to `unsafe {std::hint::unreachable_unchecked()}`.
+///
+/// ## Safety
+/// Without debug_assertions, this will cause undefined behavior if this statement is reached.
+#[cfg(not(debug_assertions))]
+#[macro_export]
+macro_rules! unreachable_unchecked {
+	($($arg:tt)*) => {unsafe {std::hint::unreachable_unchecked()}};
 }

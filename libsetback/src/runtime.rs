@@ -1,478 +1,227 @@
 use {
 	crate::*,
-	rand::{Rng, rng, seq::SliceRandom},
+	rand::seq::{SliceRandom, IndexedRandom},
 	serde::{Deserialize, Serialize},
-	std::{collections::HashMap, time::Duration},
-	tokio_util::sync::CancellationToken
+	tokio_util::sync::CancellationToken,
+	tracing::{warn, error},
+};
+#[cfg(feature = "client")]
+use tokio::sync::watch;
+#[cfg(not(feature = "client"))]
+use {
+	tokio::{
+		task::JoinHandle,
+		sync::mpsc,
+	},
+	std::time::Duration,
+	crate::ssp::*,
 };
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct GameLoop {
-	pub setup: GameSetup,
-	pub state: GameState,
-	pub teams: SmallVec<Team, MAX_PLAYERS>,
-	pub deck: SmallVec<Card, DECK_SIZE>,
-	pub pile: SmallVec<Card, PILE_SIZE>,
-	pub trump: Suit,
-	pub lead: Suit,
-	///The index of the player who owns the pile. Played the highest_card.
-	pub owner_idx: u8,
-	///the card that was played to take ownership of the pile. Played by the pile_owner
-	pub highest_card: Card,
-	///index of the player who won the bid. Made the highes_bid.
-	pub highest_bidder_idx: u8,
-	///the highest bid so far
-	pub highest_bid: Bid,
-	///the index of the player whose turn it is
-	pub turn_idx: u8,
-	///0..6 excluding the bidding round
-	pub round_num: u8,
-	///the index of the player who led this turn
-	pub lead_idx: u8,
-	pub dealer_idx: u8,
-	///A sequence is 6 rounds
-	pub sequence_num: u8,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GameState {
+	pub(crate) setup: SetupState,
+	pub(crate) teams: SmallVec<Team, MAX_PLAYERS>,
+	pub(crate) deck: SmallVec<Card, DECK_SIZE>,
+	pub(crate) pile: SmallVec<Card, MAX_PLAYERS>,
+	pub(crate) trump: Suit,
+	pub(crate) lead: Suit,
+	/// The index of the player who owns the pile. Played the highest_card.
+	pub(crate) owner_idx: u8,
+	/// The card that was played to take ownership of the pile. Played by the pile_owner
+	pub(crate) highest_card: Card,
+	/// Index of the player who won the bid. Made the highes_bid.
+	pub(crate) highest_bidder_idx: u8,
+	/// The highest bid so far
+	pub(crate) highest_bid: Bid,
+	/// The index of the player whose turn it is
+	pub(crate) turn_idx: u8,
+	/// This turn is when everyone plays their turn. This will be 0..6 excluding the bidding turn.
+	pub(crate) turn_num: u8,
+	pub(crate) dealer_idx: u8,
+	/// A round is 6 turns; when all cards have been played
+	pub(crate) round_num: u8,
 }
 
-/// This enum isn't strictly necessary, but it makes the code a little more readable and reduces if statements.
-#[repr(u8)]
-#[derive(Serialize, Deserialize, Debug)]
-pub enum GameState {
-	DealingCards,
-	Bidding,
-	Playing,
-	EndTurn,
-	EndRound,
-}
-
+#[cfg(not(feature = "client"))]
 pub struct GameLoopHandle {
 	pub cancel_token: CancellationToken,
+	pub rejoin_tx: mpsc::Sender<ClientConnection>,
 	pub task: JoinHandle<SmallVec<ClientConnection, MAX_PLAYERS>>,
 }
 
-impl GameLoop {
-	#[cfg(not(feature = "gpui"))]
-	fn spawn_singleplayer(mut self) -> CancellationToken {
+#[repr(u8)]
+#[derive(PartialEq, Clone, Copy)]
+enum GameLoopState {
+	DealCards,
+	Bidding,
+	Playing,
+	RoundOver,
+	GameOver,
+}
+
+impl GameState {
+	/// Returns a cancel token, event subscriber, and prompt responder
+	#[cfg(all(not(feature = "gpui"), feature = "client"))]
+	pub fn spawn_singleplayer(self) -> (CancellationToken, watch::Receiver<GameEvent>, watch::Sender<GameEvent>) {
 		let cancel_token = CancellationToken::new();
 		let cancel_token_clone = cancel_token.clone();
+		// SAFETY:
+		// we have exclusive access to self
+		let human_idx = unsafe { self.human_idx() };
+		let (event_emitter, mut event_subscriber) = watch::channel(GameEvent::Init {idx: human_idx});
+		event_subscriber.mark_changed();
+		let (prompt_responder, response_rx) = watch::channel(GameEvent::Init {idx: human_idx});
 		tokio::spawn(async move {
 			tokio::select! {
-				_ = self.start() => {}
+				_ = self.run_event_loop(human_idx, cancel_token.clone(), GameEventEmitter(event_emitter), response_rx) => {}
 				_ = cancel_token.cancelled() => {}
 			}
+			
 		});
-		cancel_token_clone
+		(cancel_token_clone, event_subscriber, prompt_responder)
 	}
-
+	
+	/// Returns a cancel token and prompt responder
 	#[cfg(feature = "gpui")]
-	fn spawn_singleplayer(mut self, app: gpui::AsyncApp) -> CancellationToken {
+	pub fn spawn_singleplayer(
+		self,
+		gpui_event_emitter: gpui::Entity<GpuiEventEmitter>,
+		app: gpui::AsyncApp
+	) -> (CancellationToken, watch::Sender<GameEvent>) {
 		let cancel_token = CancellationToken::new();
 		let cancel_token_clone = cancel_token.clone();
-		app.spawn(async move |app| {
+		// SAFETY:
+		// we have exclusive access to self
+		let human_idx = unsafe { self.human_idx() };
+		let (prompt_responder, response_rx) = watch::channel(GameEvent::Init {idx: human_idx});
+		app.spawn(async move |cx| {
+			let mut event_emitter = GameEventEmitter(gpui_event_emitter, cx.clone());
+			event_emitter.send(GameEvent::Init {idx: human_idx});
 			tokio::select! {
-				_ = self.start(app) => {}
+				_ = self.run_event_loop(human_idx, cancel_token.clone(), event_emitter, response_rx) => {}
 				_ = cancel_token.cancelled() => {}
 			}
-		});
-		cancel_token_clone
+		}).detach();
+		(cancel_token_clone, prompt_responder)
 	}
-
-	#[cfg(not(feature = "client"))]
-	fn spawn_server(mut self) -> GameLoopHandle {
-		let cancel_token = CancellationToken::new();
-		let cancel_token_clone = cancel_token.clone();
-		GameLoopHandle {cancel_token, task: tokio::spawn(async move {
-			tokio::select! {
-				_ = self.start() => {}
-				_ = cancel_token_clone.cancelled() => {}
-			}
-			self.setup
-				.players
-				.into_iter()
-				.filter_map(|p| match p.player_type {
-					PlayerType::HumanConnection {conn} => Some(conn),
-					_ => None,
-				})
-				.collect()
-		})}
+	
+	/// ## Safety
+	/// No mutable pointers to player type must exist.
+	#[cfg(all(feature = "client", not(feature = "test-dep")))]
+	unsafe fn human_idx(&self) -> u8 {
+		self
+			.setup
+			.players
+			.iter()
+			.position(|p| matches!(
+				// SAFETY:
+				// No mutable pointers to player type must exist.
+				unsafe {&*p.player_type.get()},
+				PlayerType::SingleplayerSelf {..})
+			)
+			.unwrap() as u8
 	}
-
-	async fn start(&mut self, #[cfg(feature = "gpui")] app: &mut gpui::AsyncApp) {
+	
+	/// ## Safety
+	/// Not actually unsafe
+	#[cfg(all(feature = "client", feature = "test-dep"))]
+	unsafe fn human_idx(&self) -> u8 {
+		// there is no human player in tests
+		u8::MAX
+	}
+	
+	#[cfg(feature = "client")]
+	async fn run_event_loop(mut self, human_idx: u8, cancel_token: CancellationToken, mut event_emitter: GameEventEmitter, mut response_rx: watch::Receiver<GameEvent>) {
+		let mut loop_state = GameLoopState::DealCards;
 		loop {
-			// Tip: `continue` is used to not increment the turn index
-			match self.state {
-				GameState::DealingCards => {
-					//reset round-specific data
-					self.turn_idx = self.dealer_idx;
-					self.highest_card = Card {
-						suit: Suit::Hearts,
-						number: 0,
-					};
-					self.highest_bid = Bid::Pass;
-
-					//collect cards and shuffle
-					self.deck.append(&mut self.pile);
-					for player in self.setup.players.iter_mut() {
-						self.deck.append(&mut player.hand);
-					}
-					for team in self.teams.iter_mut() {
-						self.deck.append(&mut team.pile);
-					}
-					self.deck.as_slice_mut().shuffle(&mut rand::rng());
-
-					//deal cards
-					for player in self.setup.players.iter_mut() {
-						player.hand = self.deck.split();
-					}
-					debug_assert_eq!(self.deck.len(), DECK_SIZE as u8 - (self.setup.players.len() * CARDS_PER_PLAYER as u8));
-					for i in ..self.setup.players.len() {
-						_ = self.send_game_event(
-							i as u8,
-							GameEvent::DealCards {hand: self.setup.players[i].hand.clone()},
-							#[cfg(feature = "gpui")] app
-						).await;
-					}
-					self.state = GameState::Bidding;
+			// Tip: `continue` can be used to not increment the turn index.
+			match loop_state {
+				GameLoopState::DealCards => {
+					self.deal_cards();
+					event_emitter.send(GameEvent::DealCards { hand: self.setup.players[human_idx].hand.clone(), idx: self.turn_idx });
+					loop_state = GameLoopState::Bidding;
+					// no continue because it is currently the dealer's turn and we want the next player to start bidding.
 				}
-				GameState::Bidding => {
-					// let amount = 'amount: {
-					// 	for _ in 0..RETRY_ATTEMPTS {
-					// 		if let Some(GameEvent::PlayerBid { amount, .. }) = self.send_game_event(
-					// 			self.turn_idx,
-					// 			GameEvent::PromptBid,
-					// 			#[cfg(feature = "gpui")] app
-					// 		).await {
-					// 			break 'amount amount;
-					// 		}
-					// 	}
-					// 	Bid::Pass
-					// };
-					// let Some(GameEvent::PlayerBid { amount, .. }) = self.send_game_event(
-					// 	self.turn_idx,
-					// 	GameEvent::PromptBid,
-					// 	#[cfg(feature = "gpui")] app
-					// ).await else {
-					// 	#[cfg(debug_assertions)]
-					// 	unreachable!("This function must return a bid response");
-					// 	#[cfg(not(debug_assertions))]
-					// 	std::hint::unreachable_unchecked();
-					// };
-
-					if self.turn_idx == self.dealer_idx {
-						if self.highest_bid == Bid::Pass {
-							self.state = GameState::StartRound;
-						} else {
-							self.state = GameState::Playing;
-							self.turn_idx = self.highest_bidder_idx;
-							self.lead_idx = self.highest_bidder_idx;
+				GameLoopState::Bidding => {
+					let mut bid_err = None;
+					let bid = if self.turn_idx == human_idx {
+						loop {
+							event_emitter.send(GameEvent::PromptBid(bid_err));
+							response_rx.changed().await.unwrap();
+							let GameEvent::PlayerBid { bid, .. } = *response_rx.borrow_and_update() else { continue; };
+							if self.validate_bid(bid) {
+								break bid
+							}
+							bid_err = Some(Error::BadBid);
 						}
+					} else {
+						self.ai_bid()
+					};
+					// It feels redundant to let the player know what they just bid,
+					// but this tells the player that their bid was valid.
+					event_emitter.send(GameEvent::PlayerBid { idx: self.turn_idx, bid });
+					if self.player_bid(bid, &mut loop_state) {
 						continue;
 					}
 				}
-				GameState::Playing => {}
-				GameState::EndTurn => {}
-				GameState::EndRound => {}
-			}
-			self.turn_idx += 1;
-			if self.turn_idx >= self.setup.players.len() {
-				self.turn_idx = 0;
-			}
-		}
-	}
-
-	async fn send_all(
-		&mut self,
-		event: GameEvent,
-		#[cfg(feature = "gpui")] app: &mut gpui::AsyncApp
-	) -> SmallVec<Option<GameEvent>, MAX_PLAYERS> {
-		let mut vec = SmallVec::new();
-		for p in 0..self.setup.players.len() {
-			vec.push(self.send_game_event(p, event.clone(), #[cfg(feature = "gpui")] app).await);
-		}
-		vec
-	}
-
-	/// Send to everyone but the player at the index.
-	/// The returning vector will contain None at that index.
-	async fn send_all_but(
-		&mut self,
-		player_idx: u8,
-		event: GameEvent,
-		#[cfg(feature = "gpui")] app: &mut gpui::AsyncApp
-	) -> SmallVec<Option<GameEvent>, MAX_PLAYERS> {
-		let mut vec = SmallVec::new();
-		for p in 0..player_idx {
-			vec.push(self.send_game_event(p, event.clone(), #[cfg(feature = "gpui")] app).await);
-		}
-		vec.push(None);
-		for p in player_idx+1..self.setup.players.len() {
-			vec.push(self.send_game_event(p, event.clone(), #[cfg(feature = "gpui")] app).await);
-		}
-		vec
-	}
-
-	async fn send_game_event(
-		&mut self,
-		player_idx: u8,
-		event: GameEvent,
-		#[cfg(feature = "gpui")] app: &mut gpui::AsyncApp,
-	) -> Option<GameEvent> {
-		match self.setup.players[player_idx].player_type {
-			// TODO: #[cfg(not(feature = "client"))]
-			PlayerType::HumanConnection {ref mut conn} => {
-				match conn.send_game_event(event).await {
-					Ok(res) => res,
-					Err(err) => {
-						todo!("Handle error from sending or receiving message")
+				GameLoopState::Playing => {
+					let mut card_err = None;
+					let card = if self.turn_idx == human_idx {
+						loop {
+							event_emitter.send(GameEvent::PromptCard(card_err));
+							response_rx.changed().await.unwrap();
+							let GameEvent::PlayerPlayedCard { card, .. } = *response_rx.borrow_and_update() else { continue; };
+							if self.validate_card(card) {
+								break card
+							}
+							card_err = Some(Error::BadCard);
+						}
+					} else {
+						self.ai_play_card()
+					};
+					// It feels redundant to let the player know which card they played,
+					// but this tells the player that their card was valid.
+					event_emitter.send(GameEvent::PlayerPlayedCard { idx: self.turn_idx, card });
+					if let Some(round_scores) = self.player_played_card(card) {
+						event_emitter.send(GameEvent::RoundScores(round_scores));
+						loop_state = GameLoopState::RoundOver;
+						continue;
 					}
 				}
-			}
-			#[cfg(feature = "client")]
-			PlayerType::SingleplayerSelf {
-				ref game_event_emitter,
-				ref mut event_rx,
-				..
-			} => {
-				#[cfg(feature = "gpui")]
-				game_event_emitter.update(app, |_,cx| cx.emit(event));
-				#[cfg(not(feature = "gpui"))]
-				game_event_emitter.send(event).await.unwrap();
-
-				event_rx.recv().await.unwrap()
-			}
-			PlayerType::Ai => {
-				match event {
-					GameEvent::PromptBid => {
-						todo!("AI bid");
-						Some(GameEvent::PlayerBid {index: 0, amount: Bid::Pass})
+				GameLoopState::RoundOver => {
+					if self.team_won() {
+						loop_state = GameLoopState::GameOver;
+					} else {
+						loop_state = GameLoopState::DealCards;
 					}
-					GameEvent::PromptCard => {
-						todo!("AI play card");
-						Some(GameEvent::PlayerPlayedCard {index: 0, card: Card {suit: Suit::Hearts, number: ACE}})
-					}
-					_ => None // AI doesn't care about other events
+					continue;
+				}
+				GameLoopState::GameOver => {
+					event_emitter.send(GameEvent::GameOver);
+					cancel_token.cancel();
+					return;
 				}
 			}
-			_ => None // cannot emit events to non-players
+			self.turn_idx = self.next_turn();
 		}
 	}
-
-	async fn retry<T>(&mut self, future: impl Future<Output=Option<T>>) -> Option<T> {
-		for _ in RETRY_ATTEMPTS {
-			if let Some(t) = future.await {return Some(t);}
-		}
-		None
-	}
-
-	async fn timeout<T>(&mut self, default: T, future: impl Future<Output=T>) -> T {
-		if self.setup.turn_time == 0 {
-			return future.await;
-		}
-		match tokio::time::timeout(Duration::from_secs(self.setup.turn_time as u64), future).await {
-			Ok(t) => t,
-			Err(_) => default,
+	
+	fn next_turn(&self) -> u8 {
+		let turn_idx = self.turn_idx + 1;
+		if turn_idx >= self.setup.players.len() {
+			0
+		} else {
+			turn_idx
 		}
 	}
-
-	async fn handle_err(err: Error, player: &mut Player) -> Option<GameEvent> {
-		let PlayerType::HumanConnection {conn} = &mut player.player_type else {
-			#[cfg(debug_assertions)]
-			unreachable!("This error handling is only for human players");
-			#[cfg(not(debug_assertions))]
-			std::hint::unreachable_unchecked();
-		};
-		todo!("if err is recoverable, retry one more time, otherwise just kick the client and replace with AI");
-		match err {
-			Error::Unknown => {},
-			Error::NetworkError => {},
-			Error::BadRequest => {},
-			Error::BadVersion => {},
-			Error::BadProtocol => {},
-			Error::Unauthenticated => {},
-			Error::TimedOut => {},
-			Error::ServerError => {},
-			Error::ServerDown => {},
-			Error::Disconnected => {},
-			Error::GamesAtCapacity => {},
-			Error::GameAtCapacity => {},
-			Error::GameNotFound => {},
-			Error::BadBid => {},
-			Error::BadCard => {},
-			Error::IndexOutOfBounds => {},
-			Error::BadPlayerIndex => {},
-			Error::BadTeamNumber => {},
-			Error::BadEncoding => todo!(),
-			Error::DevError => todo!(),
-		}
-	}
-
-	///Jumps to the next player's turn and increments turn and round data.
-	///If Ok, the TurnResult represents what action the caller needs to take immediately after.
-	///If Err, the caller needs to handle it, usually be terminating the game.
-	pub fn next_turn(&mut self) -> TurnAction {
-		if self.turn_num == 1 && self.pile.empty() {
-			self.turn_idx = self.highest_bidder_idx;
-			return TurnAction::NextTurn;
-		}
-		if self.turn_num == 0 && self.turn_idx == self.dealer_idx {
-			return if self.highest_bid == Bid::Pass {
-				//re-deal
-				TurnAction::ReDeal
-			} else {
-				//carry on to the first turn
-				self.turn_num = 1;
-				self.turn_idx = self.highest_bidder_idx;
-				TurnAction::NextTurn
-			};
-		}
-		self.turn_idx += 1;
-		if self.turn_idx >= self.setup.players.len() {
-			//loop the iteration
-			self.turn_idx = 0;
-		}
-		if self.pile.len() == self.setup.players.len() {
-			//when the turn is over
-			//give pile to owning team
-			self.teams[self.setup.players[self.owner_idx].team_id]
-				.pile
-				.append(&mut self.pile);
-			self.turn_idx = self.owner_idx;
-			self.turn_num += 1;
-			if self.turn_num == 7 {
-				//if the round has ended
-				let scores = match self.end_round() {
-					Ok(s) => s,
-					Err(e) => return TurnAction::Err(e),
-				};
-				//see if someone won
-				let mut highest_score = 0;
-				let mut second_highest_score = 0;
-				for team in self.teams.iter() {
-					if team.score >= highest_score {
-						second_highest_score = highest_score;
-						highest_score = team.score;
-					}
-				}
-				// lossless cast to i16
-				if highest_score as i16 >= self.setup.max_score as i16
-					&& (highest_score > second_highest_score + 1
-					|| (!self.setup.win_by_2 && highest_score > second_highest_score))
-				{
-					return TurnAction::GameOver(
-						scores,
-						self.teams.iter().map(|team| team.score).collect(),
-					);
-				}
-				return TurnAction::EndRound(scores);
-			}
-		}
-		TurnAction::NextTurn
-	}
-
-	///Caller must deal cards for next round after this function is called.
-	///Use RoundScores to notify players the results of the round.
-	pub fn end_round(&mut self) -> Result<RoundScores, Error> {
-		//calculate scores
-		let mut highest: u8 = 2;
-		let mut highest_index: u8 = 0;
-		let mut lowest: u8 = ACE;
-		let mut lowest_index: u8 = 0;
-		let mut jack_index: Option<u8> = None;
-		let mut game: u8 = 0;
-		let mut game_runner_up: u8 = 0;
-		let mut game_index: Option<u8> = None;
-		let mut team_game_scores: Vec<u8> = Vec::with_capacity(MAX_PLAYERS as usize);
-		for (team_index, team) in self.teams.iter().enumerate() {
-			let (h, l, j, g) = calc_points(&team.pile, self.trump);
-			if h > highest {
-				highest = h;
-				highest_index = team_index as u8;
-			}
-			if l < lowest {
-				lowest = l;
-				lowest_index = team_index as u8;
-			}
-			if j {
-				jack_index = Some(team_index as u8);
-			}
-			if g >= game {
-				game_runner_up = game;
-				game = g;
-				game_index = Some(team_index as u8);
-			}
-			team_game_scores.push(g);
-		}
-		if game == game_runner_up {
-			game_index = None;
-		}
-		let mut round_scores: HashMap<u8, i8> = HashMap::with_capacity(4);
-		round_scores
-			.entry(highest_index)
-			.and_modify(|score| {
-				*score += 1;
-			})
-			.or_insert(1);
-		round_scores
-			.entry(lowest_index)
-			.and_modify(|score| {
-				*score += 1;
-			})
-			.or_insert(1);
-		if let Some(index) = jack_index {
-			round_scores
-				.entry(index)
-				.and_modify(|score| {
-					*score += 1;
-				})
-				.or_insert(1);
-		}
-		if let Some(index) = game_index {
-			round_scores
-				.entry(index)
-				.and_modify(|score| {
-					*score += 1;
-				})
-				.or_insert(1);
-		}
-		round_scores
-			.entry(self.setup.players[self.highest_bidder_idx].team_id)
-			.and_modify(|bidder_score| {
-				if *bidder_score < self.highest_bid as i8 {
-					*bidder_score = -(self.highest_bid as i8);
-				}
-			})
-			.or_insert(-(self.highest_bid as i8));
-		for (team_id, score) in round_scores {
-			self.teams[team_id].score += score;
-		}
-		let mut team_scores = SmallVec::new();
-		for team in self.teams.iter() {
-			team_scores.push(team.score);
-		}
-		self.dealer_idx += 1;
-		if self.dealer_idx >= self.setup.players.len() as u8 {
-			self.dealer_idx = 0;
-		}
-		self.sequence_num += 1;
-		Ok(RoundScores {
-			high_team_id: highest_index,
-			low_team_id: lowest_index,
-			jack_team_id: jack_index,
-			game_team_id: game_index,
-			team_game_scores,
-			team_scores,
-		})
-	}
-
-	pub fn deal_cards(&mut self) {
-		//reset game data
+	
+	fn deal_cards(&mut self) {
+		// reset round-specific data
+		self.turn_idx = self.dealer_idx;
+		self.highest_card = Card::zero();
 		self.highest_bid = Bid::Pass;
-		self.round_num = 0;
-		self.turn_idx = self.dealer_idx + 1;
-		if self.turn_idx >= self.setup.players.len() {
-			self.turn_idx = 0;
-		}
-		//collect cards and shuffle
+		
+		// collect cards and shuffle
 		self.deck.append(&mut self.pile);
 		for player in self.setup.players.iter_mut() {
 			self.deck.append(&mut player.hand);
@@ -480,89 +229,24 @@ impl GameLoop {
 		for team in self.teams.iter_mut() {
 			self.deck.append(&mut team.pile);
 		}
-		shuffle(self.deck.as_slice_mut());
-		//deal cards
-		const ROUNDS: usize = 2;
-		for _ in 0..ROUNDS {
-			for player in self.setup.players.iter_mut() {
-				for card in self.deck.drain(0..(CARDS_PER_PLAYER / ROUNDS)) {
-					player.hand.push(card);
-				}
-			}
+		self.deck.as_slice_mut().shuffle(&mut rand::rng());
+		
+		// deal cards
+		for player in self.setup.players.iter_mut() {
+			player.hand = self.deck.split();
 		}
+		debug_assert_eq!(self.deck.len(), DECK_SIZE as u8 - (self.setup.players.len() * CARDS_PER_PLAYER as u8));
 	}
-
-	///Which ever player's turn it currently is, this checks if that player is an AI.
-	pub fn is_ai_turn(&self) -> bool {
-		matches!(
-			self.setup.players[self.turn_idx].player_type,
-			PlayerType::Ai
-		)
-	}
-
-	///Validates the bid and updates game state. Returns early if the bid was invalid. Call [Self::next_turn] after this.
-	pub fn validate_bid(&mut self, bid: Bid) -> bool {
-		if bid == Bid::Pass {
-			return true;
-		}
-		if (bid == Bid::Override && !self.setup.dealer_override) || bid <= self.highest_bid {
-			return false;
-		}
-		self.highest_bidder_idx = self.turn_idx;
-		self.highest_bid = bid;
-		if bid == Bid::Four {
-			self.round_num = 1;
-		}
-		true
-	}
-
-	///Returns early if the card played is invalid. Call [Self::next_turn] after this.
-	pub fn validate_card(&mut self, card: Card) -> bool {
-		let player = &mut self.setup.players[self.turn_idx];
-		let Some(card_idx) = player.hand.iter().position(|c| *c == card) else {
-			return false;
-		};
-		//update game state
-		if self.pile.len() == 0 {
-			//the first card played of the turn
-			self.owner_idx = self.turn_idx;
-			self.lead_idx = self.turn_idx;
-			self.highest_card = card;
-			self.lead = card.suit;
-			if self.round_num == 1 {
-				//first card played of the round
-				self.trump = card.suit;
-			}
-		} else {
-			//verify legality of card
-			if card.suit != self.trump && card.suit != self.lead && player.can_follow(self.lead) {
-				return false;
-			}
-			//calculate if new owner and update game data
-			if (card.suit == self.highest_card.suit && card.number > self.highest_card.number)
-				|| (self.highest_card.suit != self.trump && card.suit == self.trump)
-			{
-				self.highest_card = card;
-				self.owner_idx = self.turn_idx;
-			}
-		}
-		//put card on pile
-		self.pile.push(player.hand.remove(card_idx as u8));
-		true
-	}
-
-	///Algorithm for deciding how the AI should bid
+	
+	/// Algorithm for deciding how the AI should bid
+	/// Right now this is just an arbitrary mapping,
+	/// and will eventually be replaced with a better AI
 	fn ai_eval_bid(&self) -> (Suit, u8) {
 		let player = &self.setup.players[self.turn_idx];
-		let mut suit_points = HashMap::with_capacity(4);
-		for suit in Suit::iter() {
-			suit_points.insert(suit, 0);
-		}
+		// [Hearts, Clubs, Diamonds, Spades]
+		let mut suit_points = [0u8; 4];
 		for card in player.hand.iter() {
-			let Some(points) = suit_points.get_mut(&card.suit) else {
-				continue;
-			};
-			*points += match card.number {
+			suit_points[card.suit as usize] += match card.number {
 				2 => 10,
 				3 => {
 					if self.setup.players.len() == MAX_PLAYERS as u8 {
@@ -576,75 +260,76 @@ impl GameLoop {
 				6 => 5,
 				7 => 10,
 				8 => 12,
-				9 => 20, //9 through A can't add up to more than 255
+				9 => 20, // 9 through A must not add up to more than 255
 				10 => 25,
 				JACK => 40,
 				QUEEN => 35,
 				KING => 45,
-				ACE => 90, //A should be more than any 2 other things combined
-				_ => 0,
+				ACE => 90, // A should be more than any 2 other things combined
+				n => unreachable_unchecked!("card number should not exist: {n}"),
 			}
 		}
-		let (suit, num) = suit_points
-			.iter()
+		let (index, score) = suit_points
+			.into_iter()
+			.enumerate()
 			.max_by(|(_, num1), (_, num2)| num1.cmp(num2))
 			.unwrap();
-		(*suit, *num)
+		// SAFETY:
+		// Suit is repr(u8) and the array length is the same as the number of suits.
+		(unsafe { std::mem::transmute::<u8, Suit>(index as u8) }, score)
 	}
-
-	///Uses a card-scoring system, the turn order, and the game score to determine the bid
-	pub fn ai_bid(&mut self) -> u8 {
+	
+	/// Uses a card-scoring system, the turn order, and the game score to determine the bid
+	fn ai_bid(&self) -> Bid {
 		let (_, points) = self.ai_eval_bid();
 		let mut bid = match points {
-			..=44 => 0,     //pass
-			45..=99 => 1,   //minimum play out of desperation
-			100..=139 => 2, //A + one more good card
-			140..=179 => 3, //A + face card or two + maybe one more
-			180.. => 4,     //A + K + J + one more good card
+			..=44 => 0,     // pass
+			45..=99 => 1,   // minimum play out of desperation
+			100..=139 => 2, // A + one more good card
+			140..=179 => 3, // A + face card or two + maybe one more
+			180..=219 => 4, // A + K + J + one more good card
+			220.. if self.setup.dealer_override => 5,  // A + K + Q + J + one more good card
+			220.. => 4, // A + K + Q + J + one more good card
 		};
-		//if you are one of the first to bid, maybe bid higher either to force an opponent to outbid when they shouldn't
-		//or to prevent opponents from bidding to try to be the highest bidder
-		if bid != 0 && bid != 4 && ((90..=99).contains(&bid) || (125..=139).contains(&bid)) {
-			for i in 0..self.setup.players.len() - 5 {
-				let mut index = self.turn_idx + i;
-				if index >= self.setup.players.len() {
-					index -= self.setup.players.len();
-				}
-				if index == self.turn_idx {
-					bid += 1;
-					break;
-				}
-			}
+		// if you are one of the first to bid, maybe bid higher either to force an opponent to outbid when they shouldn't
+		// or to prevent opponents from bidding to try to be the highest bidder
+		if bid != 0
+			&& bid < 4
+			&& ((90..=99).contains(&points) || (125..=139).contains(&points))
+			&& (self.turn_idx as i8 - self.dealer_idx as i8).unsigned_abs() < 5
+		{
+			bid += 1;
 		}
-		//if opponents are about to win, make risky bids
+		// if opponents are about to win, make risky bids
 		if let Some((index, lead_team)) = self
 			.teams
 			.iter()
 			.enumerate()
 			.max_by(|(_, team1), (_, team2)| team1.score.cmp(&team2.score))
 		{
-			let player: &Player = &self.setup.players[self.turn_idx];
+			let player = &self.setup.players[self.turn_idx];
 			if player.team_id != index as u8
-				&& lead_team.score >= self.setup.max_score - 4
-				&& self.teams[player.team_id].score < self.setup.max_score - 4
+				&& lead_team.score as i16 >= self.setup.max_score as i16 - 4
+				&& self.setup.max_score as i16 - 4 > self.teams[player.team_id].score as i16
 				&& bid != 4
 			{
 				bid += 1;
 			}
 		}
-		if bid <= 1 || bid <= self.highest_bidder_idx {
+		if bid <= self.highest_bidder_idx {
 			bid = 0;
 		}
-		bid
+		Bid::from(bid)
 	}
-
+	
 	///Plays the highest card if this player had the highest bid.
 	///Currently picks a random valid card until a proper AI is implemented.
-	pub fn ai_play_card(&mut self) -> Card {
+	fn ai_play_card(&self) -> Card {
 		let player = &self.setup.players[self.turn_idx];
 		//Highest bidder starts the round, and the leading card is a unique calculation
-		if self.round_num == 1 && self.pile.len() == 0 {
-			let (suit, _) = self.ai_eval_bid(); //Suit of highest bid should not have changed, so we will just recalculate it instead of storing it
+		if self.turn_num == 0 && self.turn_idx == self.highest_bidder_idx {
+			//Suit of highest bid should not have changed, so we will just recalculate it instead of storing it
+			let (suit, _) = self.ai_eval_bid();
 			let highest = *player
 				.hand
 				.iter()
@@ -653,7 +338,7 @@ impl GameLoop {
 				.unwrap();
 			return highest;
 		}
-		let playable_card = if !self.pile.len() == 0 && player.can_follow(self.lead) {
+		let playable_cards = if !self.pile.is_empty() && player.can_follow(self.lead) {
 			player
 				.hand
 				.iter()
@@ -663,13 +348,13 @@ impl GameLoop {
 		} else {
 			player.hand.clone()
 		};
-
+	
 		//For now I'm gonna get a random card
-		let mut rng = rng();
-		let index = rng.random_range(0..playable_card.len());
-
+		*playable_cards.as_slice().choose(&mut rand::rng()).unwrap()
+		
+	
 		//TODO make AI to choose card to play
-
+	
 		/*
 		Factors:
 			legal cards in hand
@@ -684,12 +369,815 @@ impl GameLoop {
 			who's following trump suit
 			if the pile contains A, J, and/or 2 (or 3 if 2 hasn't been played yet)
 			how many game points are in the pile
-
+	
 		Heuristics:
 			if AI can follow, only allow follow suit or trump suit, else allow all cards
 		*/
-
-		let card = playable_card[index];
-		card
 	}
+	
+	/// Returns true if valid, false if invalid
+	fn validate_bid(&self, bid: Bid) -> bool {
+		(bid != Bid::Override || self.setup.dealer_override) && (bid == Bid::Pass || bid > self.highest_bid)
+	}
+	
+	/// Returns true if valid, false if invalid
+	fn validate_card(&self, card: Card) -> bool {
+		let has_card = self.setup.players[self.turn_idx].hand.iter().any(|c| *c == card);
+		let can_follow = self.setup.players[self.turn_idx].can_follow(self.lead);
+		let is_lead = card.suit == self.lead;
+		let is_trump = card.suit == self.trump;
+		has_card && (is_trump || (can_follow && is_lead))
+	}
+	
+	/// The bid must have already been validated because it will be considered the new highest bid.
+	///
+	/// Returns true if bidding should end, and the turn index should not be incremented following this function.
+	/// Returns false if the next player needs to bid.
+	fn player_bid(&mut self, bid: Bid, loop_state: &mut GameLoopState) -> bool {
+		debug_assert!(self.validate_bid(bid));
+		if *loop_state == GameLoopState::GameOver { return true; }
+		if bid != Bid::Pass {
+			self.highest_bid = bid;
+			self.highest_bidder_idx = self.turn_idx;
+			if (bid == Bid::Four && !self.setup.dealer_override)
+				|| (bid == Bid::Override && self.setup.dealer_override) { return true; }
+		}
+		// if all players have bid, end the turn...
+		let should_end = self.turn_idx == self.dealer_idx;
+		if should_end {
+			if self.highest_bid == Bid::Pass {
+				*loop_state = GameLoopState::DealCards;
+			} else {
+				*loop_state = GameLoopState::Playing;
+				self.turn_idx = self.highest_bidder_idx;
+				self.owner_idx = self.highest_bidder_idx;
+			}
+		}
+		should_end
+	}
+	
+	/// The card must have already been validated because it will be taken from the player's hand and moved to the pile.
+	///
+	/// Returns Some if card playing for the round should end, and the turn index should not be incremented following this function.
+	/// Returns None if the next player needs to play a card.
+	fn player_played_card(&mut self, card: Card) -> Option<RoundScores> {
+		debug_assert!(self.validate_card(card));
+		self.setup.players[self.turn_idx].hand.remove_item(card);
+		self.pile.push(card);
+		
+		// TODO: we can improve gameplay experience by ending a round early when a team is guaranteed to win.
+		// When a team is 1 point away from winning, and they play a card that guarantees them a point at the end of the round,
+		// we can stop the round early. The best example is when a team is 1 point away, and they play the ace.
+		
+		if self.owner_idx == self.turn_idx {
+			// if this is the first card played this turn...
+			self.highest_card = card;
+			self.owner_idx = self.turn_idx;
+			self.lead = card.suit;
+			if self.turn_num == 0 {
+				// if this is the first turn of the round...
+				self.trump = card.suit;
+			}
+		} else if (card.suit == self.highest_card.suit && card.number > self.highest_card.number)
+			|| (self.highest_card.suit != self.trump && card.suit == self.trump)
+		{
+			// if this card beats the current best card...
+			self.highest_card = card;
+			self.owner_idx = self.turn_idx;
+		}
+		// if this is the last card to be played this turn...
+		if self.pile.len() == self.setup.players.len() {
+			self.turn_idx = self.owner_idx;
+			self.turn_num += 1;
+			// The winning team takes the pile after every turn.
+			self.teams[self.setup.players[self.owner_idx].team_id].pile.append(&mut self.pile);
+			if self.turn_num == CARDS_PER_PLAYER as u8 {
+				// if all cards have been played, end the round
+				self.turn_num = 0;
+				self.round_num += 1;
+				
+				// calculate round scores
+				let mut high_winner_team_id = 0;
+				let mut low_winner_team_id = 0;
+				let mut jack_winner_team_id = None;
+				let mut game_winner_team_id = 0;
+				let mut high = 0;
+				let mut low = 255;
+				let mut highest_game = 0u8;
+				let mut second_highest_game = 0;
+				let mut round_team_game_scores = SmallVec::new();
+				for (team_id, team) in self.teams.iter().enumerate() {
+					let mut game = 0;
+					for card in team.pile.iter() {
+						game += match card.number {
+							JACK => 1,
+							QUEEN => 2,
+							KING => 3,
+							ACE => 4,
+							10 => 10,
+							_ => 0
+						};
+						if card.suit != self.trump { continue; }
+						if card.number > high {
+							high_winner_team_id = team_id as u8;
+							high = card.number;
+						} else if card.number < low {
+							low_winner_team_id = team_id as u8;
+							low = card.number;
+						}
+						if card.number == JACK {
+							debug_assert_eq!(jack_winner_team_id, None);
+							jack_winner_team_id = Some(team_id as u8);
+						}
+					}
+					round_team_game_scores.push(game);
+					if game > highest_game {
+						game_winner_team_id = team_id as u8;
+						second_highest_game = highest_game;
+						highest_game = game;
+					}
+				}
+				let mut bidder_team_points = 0;
+				let bidder_team_id = self.setup.players[self.highest_bidder_idx].team_id;
+				if high_winner_team_id == bidder_team_id {
+					bidder_team_points += 1;
+				} else {
+					self.teams[high_winner_team_id].score += 1;
+				}
+				if low_winner_team_id == bidder_team_id {
+					bidder_team_points += 1;
+				} else {
+					self.teams[low_winner_team_id].score += 1;
+				}
+				if let Some(jack_team_id) = jack_winner_team_id {
+					if jack_team_id == bidder_team_id {
+						bidder_team_points += 1;
+					} else {
+						self.teams[jack_team_id].score += 1;
+					}
+				}
+				if game_winner_team_id == bidder_team_id {
+					bidder_team_points += 1;
+				} else {
+					self.teams[game_winner_team_id].score += 1;
+				}
+				if bidder_team_points >= self.highest_bid.to_points() {
+					self.teams[bidder_team_id].score += bidder_team_points;
+				} else {
+					self.teams[bidder_team_id].score -= self.highest_bid.to_points();
+				}
+				return Some(RoundScores {
+					high_winner_team_id,
+					low_winner_team_id,
+					jack_winner_team_id,
+					game_winner_team_id: if highest_game == second_highest_game { None } else { Some(game_winner_team_id) },
+					round_team_game_scores,
+					total_team_scores: self.teams.iter().map(|team| team.score).collect(),
+				});
+			}
+		}
+		None
+	}
+	
+	fn team_won(&self) -> bool {
+		let mut highest_score = 0;
+		let mut second_highest_score = 0;
+		for team in self.teams.iter() {
+			if team.score >= highest_score {
+				second_highest_score = highest_score;
+				highest_score = team.score;
+			}
+		}
+		highest_score as i16 > self.setup.max_score as i16 && (highest_score > second_highest_score + 1 || !self.setup.win_by_2)
+	}
+}
+
+#[cfg(not(feature = "client"))]
+impl GameState {
+	pub fn spawn_server(self, reject_tx: mpsc::UnboundedSender<ClientConnection>) -> GameLoopHandle {
+		let cancel_token = CancellationToken::new();
+		let cancel_token_clone = cancel_token.clone();
+		let (rejoin_tx, rejoin_rx) = mpsc::channel(MAX_PLAYERS);
+		GameLoopHandle {
+			cancel_token,
+			rejoin_tx,
+			task: tokio::spawn(self.run_event_loop(cancel_token_clone, rejoin_rx, reject_tx))
+		}
+	}
+	
+	fn collect_players(self) -> SmallVec<ClientConnection, MAX_PLAYERS> {
+		self.setup
+			.players
+			.into_iter()
+			.filter_map(|mut p| match std::mem::replace(p.player_type.get_mut(), PlayerType::Ai {account_id: 0}) {
+				PlayerType::HumanConnection {conn} => Some(conn),
+				_ => None,
+			})
+			.collect()
+	}
+	
+	/// Makes a copy of the game loop without sensitive data like the player's hand or the deck.
+	/// This should be called after a player makes a bid or plays a card,
+	/// but before the game state is updated with that bid or card.
+	fn snapshot(&self) -> Self {
+		Self {
+			// setup and deck are not fully cloned to prevent the user from accessing protected data
+			setup: self.setup.clone(),
+			deck: SmallVec::new(),
+			// the rest are fully cloned
+			teams: self.teams.clone(),
+			pile: self.pile.clone(),
+			trump: self.trump,
+			lead: self.lead,
+			owner_idx: self.owner_idx,
+			highest_card: self.highest_card,
+			highest_bidder_idx: self.highest_bidder_idx,
+			highest_bid: self.highest_bid,
+			turn_idx: self.turn_idx,
+			turn_num: self.turn_num,
+			dealer_idx: self.dealer_idx,
+			round_num: self.round_num,
+		}
+	}
+	
+	async fn run_event_loop(
+		mut self,
+		cancel_token: CancellationToken,
+		mut rejoin_rx: mpsc::Receiver<ClientConnection>,
+		reject_tx: mpsc::UnboundedSender<ClientConnection>,
+	) -> SmallVec<ClientConnection, MAX_PLAYERS> {
+		let mut loop_state = GameLoopState::DealCards;
+		let mut idx_payloads = (0..self.setup.players.len())
+			.map(|idx| Payload::GameEvent(GameEvent::Init {idx}))
+			.collect();
+		self.notify_all_unique(&mut loop_state, &mut rejoin_rx, &reject_tx, &mut idx_payloads).await;
+		loop {
+			if cancel_token.is_cancelled() {
+				return self.collect_players();
+			}
+			// See if there are any players that have rejoined.
+			// This is called twice: once here at the top of the loop,
+			// and whenever we send any messages to a HumanConnection player.
+			// It's done when sending messages because the player might take many seconds
+			// or minutes to finish a turn, and we want the rejoining player to instantly join without delay.
+			// It's also done here because it otherwise doesn't get run when it's the Ai's turn.
+			let rejoined = rejoin_rx.try_recv().ok();
+			if rejoined.is_some() {
+				// SAFETY:
+				// we have exclusive access to self
+				let mut rejoin_prep = unsafe { self.prepare_rejoin() };
+				// SAFETY:
+				// We have exclusive access to self
+				unsafe { self.rejoin_player(&mut rejoin_prep, &reject_tx, rejoined).await; }
+				self.send_all_player_rejoined(rejoin_prep, &mut loop_state, &mut rejoin_rx, &reject_tx).await;
+			}
+			// Tip: `continue` can be used to not increment the turn index.
+			match loop_state {
+				GameLoopState::DealCards => {
+					self.deal_cards();
+					loop_state = GameLoopState::Bidding;
+					let mut payloads = self
+						.setup
+						.players
+						.iter()
+						.map(|p|
+							Payload::GameEvent(GameEvent::DealCards {hand: p.hand.clone()}),
+						)
+						.collect();
+					self.notify_all_unique(&mut loop_state, &mut rejoin_rx, &reject_tx, &mut payloads).await;
+					// no continue because it is currently the dealer's turn and we want the next player to start bidding.
+				}
+				GameLoopState::Bidding => {
+					let bid = self.prompt(&mut loop_state, &mut rejoin_rx, &reject_tx).await;
+					if self.player_bid(bid, &mut loop_state) {
+						continue;
+					}
+				}
+				GameLoopState::Playing => {
+					let card = self.prompt(&mut loop_state, &mut rejoin_rx, &reject_tx).await;
+					if let Some(round_scores) = self.player_played_card(card) {
+						loop_state = GameLoopState::RoundOver;
+						self.notify_all(
+							&mut loop_state,
+							&mut rejoin_rx,
+							&reject_tx,
+							Payload::GameEvent(GameEvent::RoundScores(round_scores))
+						).await;
+						continue;
+					}
+				}
+				GameLoopState::RoundOver => {
+					if self.team_won() {
+						loop_state = GameLoopState::GameOver;
+					} else {
+						loop_state = GameLoopState::DealCards;
+					}
+					continue;
+				}
+				GameLoopState::GameOver => {
+					self.notify_all(
+						&mut loop_state,
+						&mut rejoin_rx,
+						&reject_tx,
+						Payload::GameEvent(GameEvent::GameOver)
+					).await;
+					return self.collect_players();
+				}
+			}
+			self.turn_idx = self.next_turn();
+		}
+	}
+	
+	/// This function can be called for Ai and HumanConnection players
+	async fn prompt<T: PromptResult>(
+		&mut self,
+		loop_state: &mut GameLoopState,
+		join_rx: &mut mpsc::Receiver<ClientConnection>,
+		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
+	) -> T {
+		// SAFETY:
+		// we have exclusive access to self
+		if matches!(unsafe { &*self.setup.players[self.turn_idx].player_type.get() }, PlayerType::Ai{..}) {
+			return T::ai_play(self);
+		}
+		// SAFETY:
+		// Ai was checked so this is HumanConnection.
+		// send_prompt must only push self.turn_idx to disconnected_idxs iff that player disconnects,
+		// and it preserves the ClientConnection object in that player to be later properly disconnected.
+		unsafe {self.send_with_join(
+			loop_state,
+			join_rx,
+			reject_tx,
+			async move |this, disconnected_idxs| this.send_prompt(disconnected_idxs).await
+		).await}
+	}
+	
+	/// This function can be called for Ai and HumanConnection players
+	async fn notify(
+		&mut self,
+		loop_state: &mut GameLoopState,
+		join_rx: &mut mpsc::Receiver<ClientConnection>,
+		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
+		payload: Payload,
+	) {
+		// SAFETY:
+		// we have exclusive access to self
+		if matches!(unsafe { &*self.setup.players[self.turn_idx].player_type.get() }, PlayerType::Ai{..}) {
+			return; // Ai doesn't care about anything save bid/card prompts
+		}
+		// SAFETY:
+		// Ai was checked so this is HumanConnection.
+		// send_payload must only push player_idx to disconnected_idxs iff that player disconnects,
+		// and it preserves the ClientConnection object in that player to be later properly disconnected.
+		unsafe {self.send_with_join(
+			loop_state,
+			join_rx,
+			reject_tx,
+			async move |this, disconnected_idxs| this.send_payload(
+				disconnected_idxs,
+				this.turn_idx,
+				payload,
+			).await
+		).await}
+	}
+	
+	async fn notify_all(
+		&mut self,
+		loop_state: &mut GameLoopState,
+		join_rx: &mut mpsc::Receiver<ClientConnection>,
+		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
+		payload: Payload,
+	) {
+		// u8::MAX will never be a valid index, so this just skips a player that doesn't exist anyway
+		const {assert!(MAX_PLAYERS > u8::MAX as usize);}
+		self.notify_all_but(u8::MAX, loop_state, join_rx, reject_tx, payload).await
+	}
+	
+	async fn notify_all_but(
+		&mut self,
+		idx: u8,
+		loop_state: &mut GameLoopState,
+		join_rx: &mut mpsc::Receiver<ClientConnection>,
+		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
+		payload: Payload,
+	) {
+		let payload_ref = &payload;
+		// SAFETY:
+		// Ais are skipped so these only send to HumanConnection players.
+		// send_payload must only push player_idx to disconnected_idxs iff that player disconnects,
+		// and it preserves the ClientConnection object in that player to be later properly disconnected.
+		// Each player it sends to is a unique player in the array and disjoint in memory.
+		unsafe {self.send_with_join(
+			loop_state,
+			join_rx,
+			reject_tx,
+			async move |this, disconnected_idxs| {
+				futures::future::join_all(
+					(0..this.setup.players.len())
+						.into_iter()
+						.filter_map(|i| if i != idx {
+							Some(async move {
+								// each future needs its own small vec because this future can't capture variables by mutable reference
+								let mut disconn_idxs = SmallVec::new();
+								this.send_payload(&mut disconn_idxs, i, payload_ref.clone()).await;
+								disconn_idxs
+							})
+						} else { None })
+				).await
+					.into_iter()
+					.for_each(|disconn_idxs|
+						disconn_idxs.into_iter().for_each(|i|
+							if !disconnected_idxs.iter().any(|ii| i == *ii) {
+								debug_assert!(disconnected_idxs.len() < disconnected_idxs.cap());
+								disconnected_idxs.push(i);
+							}
+						)
+					);
+			}
+		).await}
+	}
+	
+	async fn notify_all_unique(
+		&mut self,
+		loop_state: &mut GameLoopState,
+		join_rx: &mut mpsc::Receiver<ClientConnection>,
+		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
+		payloads: &mut SmallVec<Payload, MAX_PLAYERS>,
+	) {
+		// SAFETY:
+		// Ais are skipped so these only send to HumanConnection players.
+		// send_payload must only push player_idx to disconnected_idxs iff that player disconnects,
+		// and it preserves the ClientConnection object in that player to be later properly disconnected.
+		// Each player it sends to is a unique player in the array and disjoint in memory.
+		unsafe {self.send_with_join(
+			loop_state,
+			join_rx,
+			reject_tx,
+			async move |this, disconnected_idxs| {
+				futures::future::join_all(
+					(0..this.setup.players.len())
+						.into_iter()
+						.map(|i| {
+							let payload = std::mem::replace(&mut payloads[i], Payload::Ack);
+							async move {
+								// each future needs its own small vec because this future can't capture variables by mutable reference
+								let mut disconn_idxs = SmallVec::new();
+								this.send_payload(&mut disconn_idxs, i, payload).await;
+								disconn_idxs
+							}
+						})
+				).await
+					.into_iter()
+					.for_each(|disconn_idxs|
+						disconn_idxs.into_iter().for_each(|i|
+							if !disconnected_idxs.iter().any(|ii| i == *ii) {
+								debug_assert!(disconnected_idxs.len() < disconnected_idxs.cap());
+								disconnected_idxs.push(i);
+							}
+						)
+					);
+			}
+		).await}
+	}
+	
+	/// ## Notice
+	/// This function can be recursive.
+	/// If a player rejoins or disconnects, this function will notify all other players.
+	/// If nobody rejoins or disconnects, or if all players have disconnected, then it doesn't.
+	/// ## Safety
+	/// When async_send_fn is called, a player might be disconnected.
+	/// The index of that player needs to be pushed to the &mut SmallVec parameter.
+	async unsafe fn send_with_join<T: PromptResult>(
+		&mut self,
+		loop_state: &mut GameLoopState,
+		join_rx: &mut mpsc::Receiver<ClientConnection>,
+		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
+		async_send_fn: impl AsyncFnOnce(&Self, &mut SmallVec<u8, MAX_PLAYERS>) -> T,
+	) -> T {
+		// SAFETY:
+		// we have exclusive access to self
+		let mut rejoin_prep = unsafe { self.prepare_rejoin() };
+		let mut disconnected_idxs = SmallVec::new();
+		
+		// The following future is what actually sends the prompt,
+		// verifies output, and implements retry logic and error handling for the response
+		let output = {
+			let future = async_send_fn(self, &mut disconnected_idxs);
+			// pin the future so it doesn't get dropped in the select loop
+			tokio::pin!(future);
+			// by doing select in a loop, we can immediately handle a player trying to rejoin
+			// without dropping the future. When a player rejoins, we just go to the next iteration and keep going.
+			// When the future completes, we break from the loop with the result
+			loop {
+				tokio::select! {
+					output = &mut future => break output,
+					// SAFETY:
+					// see safety of Self::rejoin_player
+					join_res = join_rx.recv() => unsafe {self.rejoin_player(
+						&mut rejoin_prep,
+						reject_tx,
+						join_res,
+					).await},
+				}
+			}
+		};
+		self.send_all_player_rejoined(rejoin_prep, loop_state, join_rx, reject_tx).await;
+		for i in disconnected_idxs.into_iter() {
+			// SAFETY:
+			// We have exclusive access to self.
+			// disconnected_idxs determines which players must be disconnected.
+			// The functions that populate it must guarantee that the players at these indices are HumanConnection.
+			unsafe {
+				self.disconnect_player(loop_state, join_rx, reject_tx, i).await
+			}
+		}
+		output
+	}
+	
+	async fn send_all_player_rejoined(
+		&mut self,
+		rejoin_prep: RejoinPrep,
+		loop_state: &mut GameLoopState,
+		join_rx: &mut mpsc::Receiver<ClientConnection>,
+		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
+	) {
+		for i in rejoin_prep.rejoined_idxs.into_iter() {
+			Box::pin(self.notify_all(
+				loop_state,
+				join_rx,
+				reject_tx,
+				Payload::Reconnected {
+					player_idx: i,
+					// SAFETY:
+					// We have exclusive access to self
+					username: unsafe { &*self.setup.players[i].player_type.get() }.username().to_string()
+				},
+			)).await
+		}
+	}
+	
+	// ## Safety
+	// The returned RejoinPrep is safe to use.
+	// Don't hold mutable pointers to players while this function is called.
+	unsafe fn prepare_rejoin(&self) -> RejoinPrep {
+		RejoinPrep {
+			// create copies of AI account ids and hands and game state snapshot
+			// because they're cheaper than synchronizing shared state
+			// SAFETY:
+			// see above
+			account_ids: self.setup.players.iter().map(|p| match unsafe { &*p.player_type.get() } {
+				PlayerType::Ai {account_id} => *account_id,
+				_ => 0,
+			}).collect(),
+			// SAFETY:
+			// see above
+			hands: self.setup.players.iter().map(|p| match unsafe { &*p.player_type.get() } {
+				PlayerType::Ai {account_id} if *account_id != 0 => p.hand.clone(),
+				#[cfg(debug_assertions)]
+				_ => {
+					let mut v = SmallVec::new();
+					v.push(Card::zero()); // this tell us when this hand is invalid
+					v
+				}
+				#[cfg(not(debug_assertions))]
+				_ => SmallVec::new(),
+			}).collect(),
+			rejoined_idxs: SmallVec::new(),
+			// The hand will be set correctly inside the rejoin_player function
+			snapshot_payload: Payload::Snapshot(Box::new(self.snapshot()), SmallVec::new()),
+		}
+	}
+	
+	/// Attempts to let the client rejoin the game.
+	/// If the rejoin is unsuccessful, the connection is rejected and sent back to the server.
+	/// ## Safety
+	/// account_ids must be 0 for each index where the player is HumanConnection.
+	/// This function is called in a select loop with some other future that takes &Self.
+	/// That future holds *mut PlayerType across .await boundaries for players that are PlayerType::HumanConnection,
+	/// so this function must not in any way access HumanConnection players.
+	/// This is why we have the account_ids array to tell us which players are guaranteed to be Ai
+	/// (`if account_ids[i] == conn.account_id`).
+	/// Since the pointers in this unsafe block are not held across .await boundaries,
+	/// it is safe for the other future to mutably access any player_type, even Ai.
+	async unsafe fn rejoin_player(
+		&self,
+		rejoin_prep: &mut RejoinPrep,
+		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
+		conn: Option<ClientConnection>,
+	) {
+		let Some(mut conn) = conn else {
+			error!("rejoin channel closed unexpectedly");
+			return;
+		};
+		debug_assert_ne!(conn.account_id, 0);
+		debug_assert_eq!(rejoin_prep.account_ids.len(), rejoin_prep.hands.len());
+		let Some((i, account_id)) = rejoin_prep.account_ids.iter_mut().enumerate().find(|(_, id)| **id == conn.account_id) else {
+			reject_tx.send(conn).unwrap();
+			return;
+		};
+		let Payload::Snapshot(_, ref mut ssp_hand) = rejoin_prep.snapshot_payload else {
+			unreachable!("snapshot_ssp should be a snapshot")
+		};
+		std::mem::swap(ssp_hand, &mut rejoin_prep.hands[i as u8]);
+		debug_assert!(ssp_hand.len() != 1 || ssp_hand[0] != Card::zero());
+		if let Err(err) = conn.send_expect_ack(0, rejoin_prep.snapshot_payload.clone(), NETWORK_TIMEOUT).await {
+			warn!("Failed to rejoin player: {err}");
+			if err != Error::Disconnected {
+				reject_tx.send(conn).unwrap();
+			}
+			return;
+		}
+		*account_id = 0;
+		debug_assert!(rejoin_prep.rejoined_idxs.len() < rejoin_prep.rejoined_idxs.cap());
+		rejoin_prep.rejoined_idxs.push(i as u8);
+		// SAFETY:
+		// see above safety message
+		// we can use ptr.write because the Ai variant doesn't need to call drop
+		unsafe {
+			let ptr = self.setup.players[i as u8].player_type.get();
+			std::debug_assert_matches!(&*ptr, PlayerType::Ai{..});
+			ptr.write(PlayerType::HumanConnection { conn });
+		}
+	}
+	
+	/// ## Safety
+	/// Player at player_idx must be HumanConnection.
+	async unsafe fn disconnect_player(
+		&mut self,
+		loop_state: &mut GameLoopState,
+		join_rx: &mut mpsc::Receiver<ClientConnection>,
+		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
+		player_idx: u8,
+	) {
+		warn!("player disconnected");
+		{
+			let human_conn = self.setup.players[player_idx].player_type.get_mut();
+			let account_id = {
+				let PlayerType::HumanConnection {conn} = human_conn else {
+					unreachable_unchecked!("Player should be human")
+				};
+				conn.account_id
+			};
+			*human_conn = PlayerType::Ai {account_id};
+		}
+		// SAFETY:
+		// &mut self gives exclusive access
+		if self.setup.players.iter().all(|p| matches!(unsafe {&*p.player_type.get()}, PlayerType::Ai{..})) {
+			// all humans have disconnected
+			*loop_state = GameLoopState::GameOver;
+			return;
+		}
+		Box::pin(self.notify_all(
+			loop_state,
+			join_rx,
+			reject_tx,
+			Payload::Disconnected {player_idx},
+		)).await;
+	}
+	
+	/// Sends a prompt to the player of the current turn.
+	/// Returns the response from the player.
+	/// If there is an error that requires the player to disconnect,
+	/// this function returns true.
+	/// Otherwise, it returns false.
+	/// ## Safety
+	/// Player at self.turn_idx must be HumanConnection.
+	/// Player at self.turn_idx must not be accessed anywhere else.
+	/// This function should be used as the future in send_with_join.
+	async unsafe fn send_prompt<T: PromptResult>(&self, disconnected_idxs: &mut SmallVec<u8, MAX_PLAYERS>) -> T {
+		const { assert!(size_of::<T>() != 0, "Prompt function shouldn't be used on `Unit`"); }
+		debug_assert!(disconnected_idxs.len() < disconnected_idxs.cap());
+		// SAFETY:
+		// The future that receives rejoining players must not access any player_type that is HumanConnection
+		let PlayerType::HumanConnection{conn} = (unsafe { &mut *self.setup.players[self.turn_idx].player_type.get() }) else {
+			unreachable_unchecked!("Player should be human")
+		};
+		let mut chain_id = 0;
+		let timeout_res = tokio::time::timeout(Duration::from_secs(self.setup.turn_time as u64), async {
+			loop {
+				let prompt_res = T::send_prompt(conn, &mut chain_id).await?;
+				if prompt_res.validate(self) {
+					return Ok(prompt_res);
+				}
+			}
+		}).await;
+		let (res, response) = match timeout_res {
+			Ok(Ok(prompt_res)) => (prompt_res, Payload::Ack),
+			Ok(Err(Error::Disconnected)) => {
+				disconnected_idxs.push(self.turn_idx);
+				return T::ai_play(self);
+			}
+			Ok(Err(err)) => (T::ai_play(self), Payload::Err(err)),
+			Err(_) => {
+				warn!("player response timed out");
+				conn.timeout_strikes += 1;
+				let prompt_res = T::ai_play(self);
+				if conn.timeout_strikes == 3 {
+					disconnected_idxs.push(self.turn_idx);
+					return prompt_res;
+				}
+				(prompt_res, Payload::Err(Error::TimedOut))
+			}
+		};
+		if let Err(err) = conn.send_expect_ack(0, response, NETWORK_TIMEOUT).await {
+			if err == Error::Disconnected {
+				disconnected_idxs.push(self.turn_idx);
+			}
+			warn!("Prompt ack failed. Error: {err}");
+			return T::ai_play(self);
+		}
+		res
+	}
+	
+	/// Sends a payload to the player at player_idx.
+	/// If there is an error that requires the player to disconnect,
+	/// this function returns true.
+	/// Otherwise, it returns false.
+	/// ## Safety
+	/// Player at player_idx must be HumanConnection.
+	/// Player at player_idx must not be accessed anywhere else.
+	/// This function should be used as the future in send_with_join.
+	async unsafe fn send_payload(&self, disconnected_idxs: &mut SmallVec<u8, MAX_PLAYERS>, player_idx: u8, payload: Payload) {
+		debug_assert!(disconnected_idxs.len() < disconnected_idxs.cap());
+		// SAFETY:
+		// The future that receives rejoining players must not access any player_type that is HumanConnection
+		let PlayerType::HumanConnection{conn} = (unsafe { &mut *self.setup.players[player_idx].player_type.get() }) else {
+			unreachable_unchecked!("Player should be human");
+		};
+		if let Err(err) = conn.send_expect_ack(0, payload, NETWORK_TIMEOUT).await {
+			if err == Error::Disconnected {
+				disconnected_idxs.push(self.turn_idx);
+			}
+			warn!("Prompt ack failed. Error: {err}");
+		}
+	}
+}
+
+#[cfg(not(feature = "client"))]
+trait PromptResult: Copy {
+	async fn send_prompt(
+		conn: &mut ClientConnection,
+		chain_id: &mut u32,
+	) -> Result<Self, Error>;
+	fn validate(self, game_state: &GameState) -> bool;
+	fn ai_play(game_state: &GameState) -> Self;
+}
+
+#[cfg(not(feature = "client"))]
+impl PromptResult for Bid {
+	#[inline(always)]
+	async fn send_prompt(
+		conn: &mut ClientConnection,
+		chain_id: &mut u32,
+	) -> Result<Self, Error> {
+		conn.send_prompt_bid(chain_id).await
+	}
+	#[inline(always)]
+	fn validate(self, game_state: &GameState) -> bool {
+		game_state.validate_bid(self)
+	}
+	#[inline(always)]
+	fn ai_play(game_state: &GameState) -> Self {
+		game_state.ai_bid()
+	}
+}
+
+#[cfg(not(feature = "client"))]
+impl PromptResult for Card {
+	#[inline(always)]
+	async fn send_prompt(
+		conn: &mut ClientConnection,
+		chain_id: &mut u32,
+	) -> Result<Self, Error> {
+		conn.send_prompt_card(chain_id).await
+	}
+	#[inline(always)]
+	fn validate(self, game_state: &GameState) -> bool {
+		game_state.validate_card(self)
+	}
+	#[inline(always)]
+	fn ai_play(game_state: &GameState) -> Self {
+		game_state.ai_play_card()
+	}
+}
+
+#[cfg(not(feature = "client"))]
+impl PromptResult for () {
+	#[inline(always)]
+	async fn send_prompt(
+		_conn: &mut ClientConnection,
+		_chain_id: &mut u32,
+	) -> Result<Self, Error> {Ok(())}
+	#[inline(always)]
+	fn validate(self, _game_state: &GameState) -> bool {true}
+	#[inline(always)]
+	fn ai_play(_game_state: &GameState) -> Self {}
+}
+
+#[cfg(not(feature = "client"))]
+struct RejoinPrep {
+	account_ids: SmallVec<u32, MAX_PLAYERS>,
+	hands: SmallVec<SmallVec<Card, CARDS_PER_PLAYER>, MAX_PLAYERS>,
+	rejoined_idxs: SmallVec<u8, MAX_PLAYERS>,
+	snapshot_payload: Payload,
 }

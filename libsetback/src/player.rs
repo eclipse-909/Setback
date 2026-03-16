@@ -1,8 +1,10 @@
 use {
 	crate::*,
 	serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant},
-	tokio::sync::mpsc::{Receiver, Sender},
+	std::cell::SyncUnsafeCell,
 };
+#[cfg(not(feature = "gpui"))]
+use tokio::sync::watch::Sender;
 
 #[derive(Debug)]
 #[cfg(feature = "gpui")]
@@ -11,46 +13,103 @@ pub struct GpuiEventEmitter;
 impl gpui::EventEmitter<GameEvent> for GpuiEventEmitter {}
 
 #[cfg(feature = "gpui")]
-pub type GameEventEmitter = gpui::Entity<GpuiEventEmitter>;
+pub struct GameEventEmitter(pub gpui::Entity<GpuiEventEmitter>, pub gpui::AsyncApp);
+
 #[cfg(not(feature = "gpui"))]
-pub type GameEventEmitter = tokio::sync::mpsc::UnboundedSender<GameEvent>;
+pub struct GameEventEmitter(pub(crate) Sender<GameEvent>);
+
+impl GameEventEmitter {
+	#[cfg(feature = "gpui")]
+	pub fn send(&mut self, event: GameEvent) {
+		self.0.update(&mut self.1, |_,cx| cx.emit(event)).unwrap();
+	}
+
+	#[cfg(not(feature = "gpui"))]
+	pub fn send(&self, event: GameEvent) {
+		self.0.send(event).unwrap();
+	}
+}
+
+impl std::fmt::Debug for GameEventEmitter {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "GameEventEmitter")
+	}
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Player {
-	pub player_type: PlayerType,
+	#[serde(with = "serde_sync_unsafe_cell")]
+	pub player_type: SyncUnsafeCell<PlayerType>,
 	pub hand: SmallVec<Card, CARDS_PER_PLAYER>,
+	/// This is some arbitrary integer during the setup because team numbers can be arbitrary and nonconsecutive.
+	/// Once the game starts, team ids are normalized to be consecutive and zero-based,
+	/// meaning they can be used as an index into an array of teams.
 	pub team_id: u8,
 }
 
-impl Player {
+#[repr(u8)]
+#[derive(Deserialize, Debug)]
+pub enum PlayerType {
+	/// Yourself in singleplayer.
+	#[serde(skip)]
 	#[cfg(feature = "client")]
-	pub fn new_singleplayer_self(team_id: u8, username: String, game_event_emitter: GameEventEmitter) -> (Self, Sender<Option<GameEvent>>) {
-		let (tx, event_rx) = tokio::sync::mpsc::channel(1);
-		(Self {
-			player_type: PlayerType::SingleplayerSelf {
-				username,
-				game_event_emitter,
-				event_rx,
-			},
-			hand: SmallVec::new(),
-			team_id,
-		}, tx)
-	}
+	SingleplayerSelf {
+		/// Username may be empty if the username could not be read from the file.
+		/// In that case, just don't display it.
+		username: String,
+	} = 0,
+	/// A slot for a human player in a multiplayer game setup that doesn't have a connection yet.
+	#[cfg(not(feature = "client"))]
+	HumanEmpty = 1,
+	/// A connected player in multiplayer.
+	/// This gets serialized into HumanPlayer because the [ClientConnection] struct is not serializable.
+	///
+	/// Futures will take ownership of the inner ClientConnection and they leave behind HumanPlayer.
+	/// When the future completes, the HumanConnection variant is restored.
+	#[serde(skip_deserializing)]
+	#[cfg(not(feature = "client"))]
+	HumanConnection {conn: ClientConnection} = 2,
+	/// This variant has 2 uses:
+	/// 1. The server serializes a HumanConnection into this variant when sending data to clients.
+	///    The clients only need to know the username and ready state.
+	/// 2. A HumanConnection in a multiplayer game that has had its ClientConnection moved out and into a future,
+	///    where it can be used for communication. The future will return the connection when done and turned back into HumanConnection.
+	HumanPlayer { username: String, ready: bool } = 3,
+	/// An NPC
+	Ai {
+		/// If a client disconnects, their player is turned into an AI.
+		/// This account id keeps track of that account to allow the player to reconnect.
+		account_id: u32,
+	} = 4,
+}
 
-	///Empty slot for a human player in multiplayer.
-	// TOOD: #[cfg(not(feature = "client"))]
-	pub const fn new_human_empty(team_id: u8) -> Self {
+impl Player {
+	/// The sender returned is used to respond to prompts
+	#[cfg(feature = "client")]
+	pub fn new_singleplayer_self(team_id: u8, username: String) -> Self {
 		Self {
-			player_type: PlayerType::HumanEmpty,
+			player_type: SyncUnsafeCell::new(PlayerType::SingleplayerSelf {
+				username,
+			}),
 			hand: SmallVec::new(),
 			team_id,
 		}
 	}
 
-	// TOOD: #[cfg(not(feature = "client"))]
+	///Empty slot for a human player in multiplayer.
+	#[cfg(not(feature = "client"))]
+	pub const fn new_human_empty(team_id: u8) -> Self {
+		Self {
+			player_type: SyncUnsafeCell::new(PlayerType::HumanEmpty),
+			hand: SmallVec::new(),
+			team_id,
+		}
+	}
+
+	#[cfg(not(feature = "client"))]
 	pub const fn new_host_connected(conn: ClientConnection, team_id: u8) -> Self {
 		Self {
-			player_type: PlayerType::HumanConnection {conn},
+			player_type: SyncUnsafeCell::new(PlayerType::HumanConnection {conn}),
 			hand: SmallVec::new(),
 			team_id,
 		}
@@ -58,7 +117,7 @@ impl Player {
 
 	pub const fn new_ai(team_id: u8) -> Self {
 		Self {
-			player_type: PlayerType::Ai,
+			player_type: SyncUnsafeCell::new(PlayerType::Ai {account_id: 0}),
 			hand: SmallVec::new(),
 			team_id,
 		}
@@ -67,58 +126,99 @@ impl Player {
 	pub fn can_follow(&self, lead: Suit) -> bool {
 		self.hand.iter().any(|card| card.suit == lead)
 	}
+}
 
-	pub const fn username(&self) -> &str {
-		match &self.player_type {
-			PlayerType::SingleplayerSelf { username, .. } => username.as_str(),
-			PlayerType::HumanPlayer { username, .. } => username.as_str(),
-			PlayerType::HumanConnection { conn: ClientConnection { username, .. } } => username.as_str(),
-			PlayerType::HumanEmpty => "Waiting for player...",
-			PlayerType::Ai => "CPU"
+impl Clone for Player {
+	/// ## Notice
+	/// Does not clone the player's hand, that is just an empty list.
+	/// This function is only used when a player is trying to rejoin an ongoing game that they disconnected from
+	/// and needs to get the game state.
+	/// Do not use this function unless you know what it does and what you're doing.
+	/// ## Safety
+	/// Only HumanConnection, HumanPlayer, and Ai variants can be cloned. Others are undefined behavior.
+	fn clone(&self) -> Self {
+		Self {
+			player_type: SyncUnsafeCell::new(
+			// SAFETY:
+			// We just need readonly access
+			match unsafe { &*self.player_type.get() } {
+				#[cfg(not(feature = "client"))]
+				PlayerType::HumanConnection {conn: ClientConnection {
+					username, ready, ..
+				}} => PlayerType::HumanPlayer { username: username.clone(), ready: *ready },
+				#[cfg(feature = "client")]
+				PlayerType::HumanPlayer { username, ready } => PlayerType::HumanPlayer { username: username.clone(), ready: *ready },
+				PlayerType::Ai{..} => PlayerType::Ai { account_id: 0 },
+				_ => unreachable_unchecked!("Variant should not be cloned: {:?}", self),
+			}),
+			hand: SmallVec::new(),
+			team_id: self.team_id,
 		}
 	}
 }
 
-#[repr(u8)]
-#[derive(Deserialize, Debug)]
-pub enum PlayerType {
-	/// Yourself in singleplayer.
-	/// ## SAFETY
-	/// It is undefined behavior to serialize this variant.
-	#[serde(skip_deserializing)]
-	// #[cfg(feature = "client")]
-	SingleplayerSelf {
-		/// Username may be empty if the username could not be read from the file.
-		/// In that case, just don't display it.
-		username: String,
-		game_event_emitter: GameEventEmitter,
-		event_rx: Receiver<Option<GameEvent>>,
-	} = 0,
-	/// A slot for a human player in multiplayer that doesn't have a connection yet.
-	// TODO: #[cfg(not(feature = "client"))]
-	HumanEmpty = 1,
-	/// A connected player in multiplayer.
-	/// This gets serialized into HumanPlayer because the [ClientConnection] struct is not serializable.
-	#[serde(skip_deserializing)]
-	// TODO: #[cfg(not(feature = "client"))]
-	HumanConnection { conn: ClientConnection } = 2,
-	/// Same as HumanConnection
-	HumanPlayer { username: String, ready: bool } = 3,
-	Ai = 4,
+impl PlayerType {
+	/// Variant HumanPlayer is left behind with the username from the connection.
+	/// This is done to support players rejoining the game and allowing the username to be sent to them.
+	/// Players rejoining is done every time the game loop future is polled,
+	/// which means &mut ClientConnection can't be held across .await if owned by that same future.
+	/// It must be moved out of that future and into the nested future where it can be held across .await.
+	///
+	/// Must call [Self::restore_human_conn] to put it back.
+	/// ## Safety
+	/// Must be variant HumanConnection, else undefined behavior.
+	#[cfg(not(feature = "client"))]
+	pub unsafe fn take_human_conn(&mut self) -> ClientConnection {
+		let PlayerType::HumanConnection {conn} = self else {
+			unreachable_unchecked!("Expected variant HumanConnection, got {:?}", self);
+		};
+		let username = std::mem::replace(&mut conn.username, String::new());
+		let human_player = PlayerType::HumanPlayer { username, ready: false };
+		let PlayerType::HumanConnection {conn} = std::mem::replace(self, human_player) else {
+			unreachable_unchecked!("Expected variant HumanConnection, got {:?}", self);
+		};
+		conn
+	}
+
+	/// See [Self::replace_human_conn]
+	/// ## Safety
+	/// Must be variant HumanPlayer, else undefined behavior.
+	#[cfg(not(feature = "client"))]
+	pub unsafe fn restore_human_conn(&mut self, mut conn: ClientConnection) {
+		let PlayerType::HumanPlayer {username, ..} = self else {
+			unreachable_unchecked!("Expected variant HumanPlayer, got {:?}", self);
+		};
+		std::mem::swap(&mut conn.username, username);
+		*self = PlayerType::HumanConnection {conn};
+	}
+	
+	pub fn username(&self) -> &str {
+		match self {
+			#[cfg(feature = "client")]
+			PlayerType::SingleplayerSelf {username, ..} => username.as_str(),
+			PlayerType::HumanPlayer {username, ..} => username.as_str(),
+			#[cfg(not(feature = "client"))]
+			PlayerType::HumanConnection {conn} => conn.username.as_str(),
+			#[cfg(not(feature = "client"))]
+			PlayerType::HumanEmpty => "Waiting for player...",
+			PlayerType::Ai{..} => "CPU"
+		}
+	}
 }
 
 impl Serialize for PlayerType {
 	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
 		const PLAYER_TYPE: &str = "PlayerType";
 		match self {
+			#[cfg(not(feature = "client"))]
 			PlayerType::HumanEmpty => Serializer::serialize_unit_variant(
 				serializer,
 				PLAYER_TYPE,
 				1,
 				"HumanEmpty",
 			),
-			PlayerType::HumanConnection { conn: ClientConnection { username, ready, ..} }
-			| PlayerType::HumanPlayer { username, ready } => {
+			#[cfg(not(feature = "client"))]
+			PlayerType::HumanConnection { conn: ClientConnection { username, ready, ..} } => {
 				let mut state = Serializer::serialize_struct_variant(
 					serializer,
 					PLAYER_TYPE,
@@ -130,18 +230,48 @@ impl Serialize for PlayerType {
 				SerializeStructVariant::serialize_field(&mut state, "ready", ready)?;
 				state.end()
 			}
-			PlayerType::Ai => Serializer::serialize_unit_variant(
-				serializer,
-				PLAYER_TYPE,
-				4,
-				"AI",
-			),
-			_ => {
-				#[cfg(debug_assertions)]
-				unreachable!("Variant should not be serialized: {:?}", self);
-				#[cfg(not(debug_assertions))]
-				unsafe {std::hint::unreachable_unchecked();}
+			#[cfg(feature = "client")]
+			PlayerType::HumanPlayer { username, ready } => {
+				let mut state = Serializer::serialize_struct_variant(
+					serializer,
+					PLAYER_TYPE,
+					3,
+					"HumanPlayer",
+					2
+				)?;
+				SerializeStructVariant::serialize_field(&mut state, "username", username)?;
+				SerializeStructVariant::serialize_field(&mut state, "ready", ready)?;
+				state.end()
 			}
+			PlayerType::Ai{..} => {
+				let mut state = Serializer::serialize_struct_variant(
+					serializer,
+					PLAYER_TYPE,
+					4,
+					"Ai",
+					1
+				)?;
+				SerializeStructVariant::serialize_field(&mut state, "account_id", &0)?;
+				state.end()
+			}
+			_ => Err(serde::ser::Error::custom("variant should not be serialized: {:?}")),
 		}
+	}
+}
+
+mod serde_sync_unsafe_cell {
+	use {
+		serde::Deserializer,
+		super::*
+	};
+	
+	pub fn serialize<S: Serializer>(this: &SyncUnsafeCell<PlayerType>, serializer: S) -> Result<S::Ok, S::Error> {
+		// SAFETY:
+		// just need readonly access
+		unsafe { &*this.get() }.serialize(serializer)
+	}
+	
+	pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<SyncUnsafeCell<PlayerType>, D::Error> {
+		Ok(SyncUnsafeCell::new(PlayerType::deserialize(deserializer)?))
 	}
 }

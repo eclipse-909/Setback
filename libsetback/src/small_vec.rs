@@ -1,4 +1,5 @@
 use {
+	crate::unreachable_unchecked,
 	std::{
 		marker::PhantomData,
 		mem::{MaybeUninit, ManuallyDrop},
@@ -24,6 +25,7 @@ pub struct SmallVec<T, const CAPACITY: usize> {
 }
 
 impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
+	#[allow(clippy::new_without_default)]
 	pub const fn new() -> Self {
 		const {assert!(CAPACITY <= u8::MAX as usize, "CAPACITY must be less than 256");}
 		Self {
@@ -34,29 +36,36 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 
 	#[inline(always)]
 	pub const fn len(&self) -> u8 { self.len }
+	
+	#[inline(always)]
+	pub const fn cap(&self) -> u8 { CAPACITY as u8 }
 
 	#[inline(always)]
-	pub const fn empty(&self) -> bool { self.len == 0 }
+	pub const fn is_empty(&self) -> bool { self.len == 0 }
 
+	/// ## Safety
+	/// self must not be full
 	pub const fn push(&mut self, val: T) {
 		let len = self.len as usize;
 		debug_assert!(len < CAPACITY, "Index out of bounds");
-		// SAFETY
+		// SAFETY:
 		// array bounds check is skipped in release mode
-		unsafe {self.arr.as_mut_ptr().add(len).write(MaybeUninit::new(val))};
+		unsafe {(*self.arr.as_mut_ptr().add(len)).write(val)};
 		self.len += 1;
 	}
 
-	/// ## SAFETY
+	/// ## Safety
 	/// It is undefined behavior if a == b in Release mode. It panics in Debug mode.
 	pub const fn swap(&mut self, a: u8, b: u8) {
 		debug_assert!(a != b, "Indices should not be the same.");
 		debug_assert!(a < self.len && b < self.len, "Index out of bounds.");
+		// SAFETY:
+		// array bounds check is skipped in release mode
 		unsafe {std::ptr::swap(self.arr.as_mut_ptr().add(a as usize), self.arr.as_mut_ptr().add(b as usize))};
 	}
 
 	/// Takes an element out from index and reinserts it at new_index, shifting elements in between if necessary.
-	/// ## SAFETY
+	/// ## Safety
 	/// It is undefined behavior if index == new_index in Release mode. It panics in Debug mode.
 	pub const fn reinsert(&mut self, index: u8, new_index: u8) {
 		let len = self.len as usize;
@@ -64,6 +73,8 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		let new_index = new_index as usize;
 		debug_assert!(len <= CAPACITY && index <= len && new_index <= len, "Index out of bounds");
 		let ptr = self.arr.as_mut_ptr();
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
 		unsafe {
 			let ptr_index = ptr.add(index);
 			let ptr_new_index = ptr.add(new_index);
@@ -84,19 +95,20 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 				);
 			} else {
 				debug_assert!(index != new_index, "index and new_index should not be the same.");
-				#[cfg(not(debug_assertions))]
-				std::hint::unreachable_unchecked();
+				unreachable_unchecked!();
 			}
 			ptr_new_index.write(item);
 		}
 	}
 
 	/// Moves all elements from other into self.
-	/// ## SAFETY
+	/// ## Safety
 	/// - self and other must not overlap
 	/// - self.len + other.len must be <= CAPACITY
 	pub const fn append<const N: usize>(&mut self, other: &mut SmallVec<T, N>) {
 		debug_assert!(self.len + other.len <= CAPACITY as u8, "Index out of bounds");
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
 		unsafe {std::ptr::copy_nonoverlapping(
 			other.arr.as_ptr(),
 			self.arr.as_mut_ptr().add(self.len as usize),
@@ -106,9 +118,15 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		other.len = 0;
 	}
 
+	/// Shifts following elements to the left
+	/// ## Safety
+	/// index must be less than length
 	pub const fn remove(&mut self, index: u8) -> T {
 		let len = self.len as usize;
 		let index = index as usize;
+		debug_assert!(index < len, "Index out of bounds");
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
 		unsafe {
 			let ptr_index = self.arr.as_mut_ptr().add(index);
 			let rm = std::ptr::read(ptr_index).assume_init();
@@ -124,11 +142,35 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		}
 	}
 
-	pub const fn pop(&mut self) -> T {
-		self.len -= 1;
-		unsafe {
-			(*self.arr.as_ptr().add(self.len as usize)).assume_init_read()
+	/// Shifts following elements to the left
+	/// ## Safety
+	/// item must be known to be in the array
+	pub fn remove_item(&mut self, item: T) where T: PartialEq {
+		for i in 0..self.len {
+			// SAFETY:
+			// trust me bro (don't actually trust me bro)
+			unsafe {
+				let ptr = self.arr.as_mut_ptr().add(i as usize).cast::<T>();
+				if *ptr == item {
+					std::ptr::copy(
+						ptr.add(1),
+						ptr,
+						(self.len - i - 1) as usize,
+					);
+					self.len -= 1;
+					return;
+				}
+			}
 		}
+		unreachable_unchecked!("Item must be known to be in the array");
+	}
+
+	pub const fn pop(&mut self) -> T {
+		debug_assert!(self.len > 0, "Index out of bounds");
+		self.len -= 1;
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
+		unsafe {(*self.arr.as_ptr().add(self.len as usize)).assume_init_read()}
 	}
 
 	/// Removes and returns the last N elements from self.
@@ -137,6 +179,8 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 	pub const fn split<const N: usize>(&mut self) -> SmallVec<T, N> {
 		debug_assert!(self.len >= N as u8, "Index out of bounds");
 		let mut vec = SmallVec::new();
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
 		unsafe {
 			std::ptr::copy_nonoverlapping(
 				self.arr.as_ptr().add(self.len as usize - N),
@@ -149,20 +193,37 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		}
 	}
 
-	pub const fn iter(&self) -> core::slice::Iter<T> {
+	pub const fn iter(&self) -> core::slice::Iter<'_, T> {
 		self.as_slice().iter()
 	}
 
-	pub const fn iter_mut(&mut self) -> core::slice::IterMut<T> {
+	pub const fn iter_mut(&mut self) -> core::slice::IterMut<'_, T> {
 		self.as_slice_mut().iter_mut()
 	}
 
 	pub const fn as_slice(&self) -> &[T] {
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
 		unsafe {std::slice::from_raw_parts(self.arr.as_ptr().cast(), self.len as usize)}
 	}
 
 	pub const fn as_slice_mut(&mut self) -> &mut [T] {
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
 		unsafe {std::slice::from_raw_parts_mut(self.arr.as_mut_ptr().cast(), self.len as usize)}
+	}
+
+	/// Creates 2 slices split at idx, and neither includes idx.
+	/// ## Safety
+	/// idx must be less than length
+	pub const fn split_at_mut(&mut self, idx: u8) -> (&mut [T], &mut [T]) {
+		debug_assert!(idx < self.len);
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
+		unsafe {(
+			std::slice::from_raw_parts_mut(self.arr.as_mut_ptr().cast(), idx as usize),
+			std::slice::from_raw_parts_mut(self.arr.as_mut_ptr().add(idx as usize + 1).cast(), (self.len - idx - 1) as usize)
+		)}
 	}
 
 	/// Unstable sort
@@ -177,6 +238,8 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 			if self[read] != self[write] {
 				write += 1;
 				if read == write {continue;}
+				// SAFETY:
+				// trust me bro (don't actually trust me bro)
 				unsafe {
 					let ptr: *mut T = self.arr.as_mut_ptr().add(write as usize).cast();
 					ptr.drop_in_place();
@@ -220,6 +283,8 @@ impl<T, const CAPACITY: usize> Index<u8> for SmallVec<T, CAPACITY> {
 
 	fn index(&self, index: u8) -> &Self::Output {
 		debug_assert!(index < self.len, "Index out of bounds");
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
 		unsafe {self.arr.get_unchecked(index as usize).assume_init_ref()}
 	}
 }
@@ -227,6 +292,8 @@ impl<T, const CAPACITY: usize> Index<u8> for SmallVec<T, CAPACITY> {
 impl<T, const CAPACITY: usize> IndexMut<u8> for SmallVec<T, CAPACITY> {
 	fn index_mut(&mut self, index: u8) -> &mut Self::Output {
 		debug_assert!(index < self.len, "Index out of bounds");
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
 		unsafe {self.arr.get_unchecked_mut(index as usize).assume_init_mut()}
 	}
 }
@@ -244,7 +311,9 @@ impl<T, const CAPACITY: usize> FromIterator<T> for SmallVec<T, CAPACITY> {
 impl<T, const CAPACITY: usize> Drop for SmallVec<T, CAPACITY> {
 	fn drop(&mut self) {
 		for i in 0..self.len {
-			unsafe {(*self.arr.as_mut_ptr().add(i as usize)).assume_init_drop()};
+			// SAFETY:
+			// trust me bro (don't actually trust me bro)
+			unsafe {self.arr.get_unchecked_mut(i as usize).assume_init_drop()};
 		}
 	}
 }
@@ -279,7 +348,12 @@ impl<'de, T: Deserialize<'de>, const CAPACITY: usize> Visitor<'de> for SmallVecV
 			return Err(serde::de::Error::custom("SmallVec sequence missing size hint"));
 		};
 		if size > CAPACITY {
-			return Err(serde::de::Error::invalid_length(size, &const_format_args!("{CAPACITY}").as_str().unwrap_or_else(|| unreachable!())));
+			return Err(serde::de::Error::invalid_length(
+				size,
+				&const_format_args!("{CAPACITY}")
+					.as_str()
+					.unwrap_or_else(|| unreachable_unchecked!("Rust stdlib guaranteed this wouldn't happen"))
+			));
 		}
 		let mut values = SmallVec::new();
 		while let Some(value) = seq.next_element()? {
@@ -294,7 +368,6 @@ impl<'de, T: Deserialize<'de>, const CAPACITY: usize> Visitor<'de> for SmallVecV
 /// If the program panics before the iterator is fully consumed in Release mode,
 /// the remaining items will not have drop called on them.
 pub struct IntoIter<T, const CAPACITY: usize> {
-	//TODO: use a pointer to the next item instead of index to avoid pointer arithmetic every time
 	index: u8,
 	small_vec: ManuallyDrop<SmallVec<T, CAPACITY>>,
 }
@@ -303,7 +376,9 @@ impl<T, const CAPACITY: usize> Iterator for IntoIter<T, CAPACITY> {
 	type Item = T;
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.index == self.small_vec.len {return None;}
-		let item = unsafe {(*self.small_vec.arr.as_ptr().add(self.index as usize)).assume_init_read()};
+		// SAFETY:
+		// trust me bro (don't actually trust me bro)
+		let item = unsafe {self.small_vec.arr.get_unchecked(self.index as usize).assume_init_read()};
 		self.index += 1;
 		Some(item)
 	}
@@ -316,7 +391,9 @@ impl<T, const CAPACITY: usize> Drop for IntoIter<T, CAPACITY> {
 	/// We don't need to waste time in Release mode dropping things if the program has already crashed.
 	fn drop(&mut self) {
 		for i in self.index..self.small_vec.len {
-			unsafe {(*self.small_vec.arr.as_mut_ptr().add(i as usize)).assume_init_drop()};
+			// SAFETY:
+			// trust me bro (don't actually trust me bro)
+			unsafe {self.small_vec.arr.get_unchecked_mut(i as usize).assume_init_drop()};
 		}
 	}
 }

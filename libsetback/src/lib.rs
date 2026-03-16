@@ -1,19 +1,16 @@
 #![feature(
 	allocator_api,
-	slice_ptr_get,
-	slice_swap_unchecked,
 	const_slice_make_iter,
-	iter_map_windows,
 	maybe_uninit_uninit_array_transpose,
 	const_format_args,
-	cold_path,
+	unsafe_cell_access,
+	sync_unsafe_cell,
 )]
 
 mod arena;
 mod connection;
 mod constants;
 mod error;
-mod free_list;
 mod items;
 mod models;
 mod player;
@@ -22,20 +19,40 @@ pub mod sdp;
 mod setup;
 mod small_vec;
 pub mod ssp;
+
+#[cfg(not(feature = "client"))]
 mod state;
-pub mod stream;
+
+#[cfg(feature = "gpui")]
+mod global;
+
+pub(crate) use {
+	player::*,
+	setup::*,
+};
 
 pub use {
 	arena::*,
-	connection::*,
+	connection::{setback_api, SetbackClient},
 	constants::*,
-	error::*,
-	free_list::*,
+	error::Error,
 	items::*,
 	models::*,
-	player::*,
-	runtime::*,
-	setup::*,
+	player::GameEventEmitter,
+	runtime::GameState,
+	setup::GameSetup,
 	small_vec::*,
+};
+
+#[cfg(not(feature = "client"))]
+pub use {
 	state::*,
+	connection::ClientConnection,
+	runtime::GameLoopHandle
+};
+
+#[cfg(feature = "gpui")]
+pub use {
+	global::*,
+	player::GpuiEventEmitter
 };

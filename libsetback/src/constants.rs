@@ -1,9 +1,6 @@
 use {
 	crate::Version,
-	std::{
-		net::{Ipv4Addr, SocketAddrV4},
-		time::Duration
-	}
+	std::net::{Ipv4Addr, SocketAddrV4}
 };
 
 // setup
@@ -32,6 +29,7 @@ pub const URL_API_LOGIN: &str = api!("login");
 pub const URL_API_LOGOUT: &str = api!("logout");
 pub const URL_API_USERNAME: &str = api!("username");
 pub const URL_API_RENEW: &str = api!("renew");
+pub const URL_API_REPORT_PLAYER: &str = api!("report_player");
 #[cfg(test)]
 pub const TEST_AUTH_TOKEN: &str = "test";
 
@@ -44,14 +42,12 @@ pub const SSP_VERSION: Version = Version {major: 0, minor: 1, patch: 0};
 pub const MAX_GAME_LIST: u8 = 127;
 /// This is the port that setbackd is bound to on the server. This is the port that clients must connect to initially.
 pub const SETBACKD_PORT: u16 = 42069;
-pub const NETWORK_TIMEOUT: Duration = Duration::from_secs(8);
-pub const RETRY_ATTEMPTS: u8 = 3;
+pub const NETWORK_TIMEOUT: u64 = 4;
 pub const DEFAULT_TURN_TIME: u8 = 30;
 pub const MAX_TURN_TIME_SERVER: u8 = 120;
 pub const DNS_NAME: &str = "www.setback.com";
 pub const MAX_CLIENTS: usize = 10_000;
 pub const MAX_GAMES: usize = 10_000;
-#[cfg(feature = "client")]
 pub const fn server(port: u16) -> SocketAddrV4 {
 	SocketAddrV4::new(
 		Ipv4Addr::new(127, 0, 0, 1), //TODO change this to actual address once server is deployed

@@ -1,16 +1,12 @@
 use {
-	crate::{
-		constants::*,
-		connection::*,
-		setup::*,
-		runtime::*,
-	},
+	crate::*,
+	scc::HashMap,
 	std::sync::Arc,
-	scc::HashMap
+	tokio_util::sync::CancellationToken,
 };
 
-pub type ClientStore = HashMap<u32, ClientConnection>;
-pub type GameSetupStore = HashMap<u32, GameSetup>;
+pub type ClientStore = HashMap<u32, CancellationToken>;
+pub type GameSetupStore = HashMap<u32, SetupState>;
 pub type GameRuntimeStore = HashMap<u32, GameLoopHandle>;
 
 /// State for the setback server.
@@ -32,12 +28,4 @@ impl State {
 			game_runtime_store: HashMap::with_capacity(MAX_GAMES),
 		})
 	}
-
-	pub fn add_client() {}
-
-	pub fn create_game() {}
-
-	pub fn join_game() {}
-
-	pub fn leave_game() {}
 }

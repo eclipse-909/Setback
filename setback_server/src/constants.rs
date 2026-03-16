@@ -1,1 +1,0 @@
-pub const BIN_VERION: Version = pkg_version!();

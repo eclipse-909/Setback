@@ -53,13 +53,22 @@ pub enum ChainId {
 
 impl ChainId {
 	/// Gets the u32 id of the chain.
-	/// ## PANICS
-	/// If called on [Self::None]
-	pub const fn id_unwrap(&self) -> u32 {
+	/// ## Panics
+	/// If called on [Self::None] in debug mode. Undefined behavior in release mode
+	pub const fn get_id(&self) -> u32 {
 		match self {
-			Self::None => panic!("Chain id should have an id"),
+			Self::None => unreachable_unchecked!("Chain id should have an id"),
 			Self::EndOfChain(id) => *id,
 			Self::ExpectResponse(id) => *id,
+		}
+	}
+
+	/// Essentially maps this to an Optional u32
+	pub const fn try_get_id(&self) -> Option<u32> {
+		match self {
+			Self::None => None,
+			Self::EndOfChain(id) => Some(*id),
+			Self::ExpectResponse(id) => Some(*id),
 		}
 	}
 }
@@ -67,7 +76,7 @@ impl ChainId {
 // Request - client sends message to server.
 // Response - server sends message to client in response to a request.
 // Spontaneous - server sends message to client without request.
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum Payload {
 	/// Client ---Authenticate--> Server<br>
 	/// Client <--Connect--- Server<br>
@@ -95,10 +104,15 @@ pub enum Payload {
 	/// Informs you when another player disconnects and provides the index of that player.
 	/// The server internally uses Error::Disconnected to track when players disconnect.
 	Disconnected { player_idx: u8 },
+	/// Client <--Disconnect--- Server<br>
+	/// Spontaneous<br><br>
+	/// Informs you when another player reconnects and provides the index of that player.
+	Reconnected { player_idx: u8, username: String },
 	/// Client ---Any--> Server<br>
 	/// Client <--Ack--- Server<br>
 	/// Response only<br><br>
 	/// If a request doesn't respond with useful data, the server will send back Ack as a signal that everything is ok.
+	/// If the client sends Ack to the server, the server will never respond even if the ChainId is ExpectResponse.
 	Ack,
 	/// Client ---Any--> Server<br>
 	/// Client <--Err--- Server<br>
@@ -119,6 +133,12 @@ pub enum Payload {
 	/// Request only<br><br>
 	/// Client requests to join game. An empty string password implies a public game. Anything else is a private game.
 	JoinGame { code: u32, password: String },
+	/// Client ---RejoinGame--> Server<br>
+	/// Client <--Snapshot--- Server<br>
+	/// Request only<br><br>
+	/// Client requests to rejoin game. An empty string password implies a public game. Anything else is a private game.
+	/// This is only used if the client has disconnected from an ongoing game and wants to rejoin.
+	RejoinGame { code: u32, password: String },
 	/// Client ---CreateGame--> Server<br>
 	/// Client <--Game--- Server<br>
 	/// Response only<br><br>
@@ -134,7 +154,13 @@ pub enum Payload {
 	/// Host-request and spontaneous<br><br>
 	/// Host can update the settings in the lobby which gets sent to the server.
 	/// The server updates its state and propagates the message to all other clients.
-	Game(GameSetup),
+	Game(Box<SetupState>),
+	/// Client ---RejoinGame--> Server<br>
+	/// Client <--Snapshot--- Server<br>
+	/// Response only<br><br>
+	/// Client requests to rejoin game. An empty string password implies a public game. Anything else is a private game.
+	/// This is only used if the client has disconnected from an ongoing game and wants to rejoin.
+	Snapshot(Box<GameState>, SmallVec<Card, CARDS_PER_PLAYER>),
 	/// Client ---SearchGames--> Server<br>
 	/// Client <--PublicGames--- Server<br>
 	/// Request only<br><br>
@@ -199,5 +225,12 @@ pub enum Payload {
 	/// Client <--Ack--- Server<br>
 	/// Server-request and client-response<br><br>
 	/// The server emits these events to the client. The client usually needs to respond to these.
+	/// If the client responds to a prompt with invalid data, the prompt will be resent either until
+	/// the client provides valid data or there is an error.
 	GameEvent(GameEvent),
+	/// Client ---ReportPlayer--> Server<br>
+	/// Client <--Ack--- Server<br>
+	/// Request only<br><br>
+	/// The player may report a human player in multiplayer.
+	ReportPlayer(ReportPlayerRequest),
 }
