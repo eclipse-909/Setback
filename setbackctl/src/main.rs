@@ -1,5 +1,7 @@
 use {
-	clap::{Parser, Subcommand}, libsetback::{SDP_VERSION, codec, sdp::*, setbackctl_unix_socket, setbackd_unix_socket}, std::os::unix::net::UnixDatagram
+	clap::{Parser, Subcommand},
+	libsetback::{SDP_VERSION, sdp::*, SETBACKCTL_UNIX_SOCKET, SETBACK_WEBSITE_UNIX_SOCKET},
+	std::os::unix::net::UnixDatagram
 };
 
 /// CLI controller for Setback processes (setbackd, setback_website, and setback_server)

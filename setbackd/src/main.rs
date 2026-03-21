@@ -1,9 +1,10 @@
 use {
+	reqwest::Client,
 	futures::{SinkExt, StreamExt},
 	libsetback::{
 		ClientConnection, Error,
 		SDP_VERSION, SETBACKD_PORT,
-		codec, sdp::*, setback_api, setbackd_unix_socket
+		sdp::*, setback_api, SETBACKD_UNIX_SOCKET
 	},
 	std::{
 		collections::HashMap,
@@ -33,6 +34,21 @@ unsafe extern "C" {
 const PIDFILE: &str = "/var/lib/setback/pidfile";
 const SETBACK_SERVER_BIN: *const c_char = c"/usr/local/bin/setback_server".as_ptr();
 
+macro_rules! crash {
+	($fmt:expr) => {{
+		error!($fmt);
+		std::io::stdout().flush();
+		exit(1);
+	}};
+	($fmt:expr, $arg0:expr) => {
+		|$arg0| {
+			error!($fmt, $arg0);
+			std::io::stdout().flush();
+			exit(1);
+		}
+	};
+}
+
 fn main() {
 	// Setup logging, updater, tokio runtime, SIGTERM handler, Unix socket, public API connection, and TCP listener.
 	// Errors at this point are considered not recoverable because all these things are necessary.
@@ -46,7 +62,7 @@ fn main() {
 
 	let rt = tokio::runtime::Builder::new_multi_thread()
 		.enable_all()
-		.max_blocking_threads(2) // not sure how many blocking threads are used interally by tokio
+		.max_blocking_threads(2) // not sure how many blocking threads are used internally by tokio
 		.worker_threads(1) // can increase if bottlenecked
 		.build()
 		.unwrap_or_else(crash!("Could not create async runtime. Error: {}", e));
@@ -57,7 +73,7 @@ fn main() {
 	let sigterm1 = signal(SignalKind::terminate())
 		.unwrap_or_else(crash!("Could not create SIGTERM handler. Error: {}", e));
 
-	let sock = UnixDatagram::bind(setbackd_unix_socket())
+	let sock = UnixDatagram::bind(SETBACKD_UNIX_SOCKET)
 		.unwrap_or_else(crash!("Could not bind unix socket. Error: {}", e));
 
 	let api = setback_api()
@@ -279,19 +295,4 @@ r#"Setup continuous deployment:
 - update symlinks to point to latest version
 - systemctl restart"#
 	)
-}
-
-macro_rules! crash {
-	($fmt:expr) => {{
-		error!($fmt);
-		std::io::stdout().flush();
-		exit(1);
-	}};
-	($fmt:expr, $arg0:expr) => {
-		|$arg0| {
-			error!($fmt, $arg0);
-			std::io::stdout().flush();
-			exit(1);
-		}
-	};
 }

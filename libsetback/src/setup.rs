@@ -1,6 +1,7 @@
 use {
 	crate::*,
 	serde::{Deserialize, Serialize},
+	tracing::{info, error, warn}
 };
 
 /// Setup data is created modified when setting up a game.
@@ -45,6 +46,7 @@ impl GameSetup {
 	
 	#[cfg(feature = "test-dep")]
 	pub fn new_ai_only() -> Self {
+		info!("Creating AI only game");
 		let mut setup_data = Self::new();
 		for _ in 0..MAX_PLAYERS {
 			setup_data.add_ai();
@@ -54,6 +56,7 @@ impl GameSetup {
 
 	#[cfg(feature = "client")]
 	pub fn new_singleplayer(username: String) -> Self {
+		info!("Creating singleplayer game");
 		let sp_self = Player::new_singleplayer_self(0, username);
 		let mut setup_data = Self::new();
 		setup_data.0.players.push(sp_self);
@@ -65,6 +68,7 @@ impl GameSetup {
 	
 	#[cfg(not(feature = "client"))]
 	pub fn new_multiplayer(host: ClientConnection) -> Self {
+		info!("Creating multiplayer game");
 		let host = Player::new_host_connected(host, 0);
 		let mut setup_data = Self::new();
 		setup_data.0.players.push(host);
@@ -74,18 +78,21 @@ impl GameSetup {
 		setup_data
 	}
 
-	pub const fn add_ai(&mut self) {
+	pub fn add_ai(&mut self) {
+		info!("Adding AI player");
 		self.0.players.push(Player::new_ai(self.0.players.len() & 1));
 	}
 	
 	#[cfg(not(feature = "client"))]
-	pub const fn add_human(&mut self) {
+	pub fn add_human(&mut self) {
+		info!("Adding human player");
 		self.0.players.push(Player::new_human_empty(self.0.players.len() & 1));
 	}
 
 	/// Updates a player's status as AI or human.
 	#[cfg(not(feature = "client"))]
 	pub fn update_human(&mut self, index: u8, is_human: bool) {
+		info!("Setting player at index {index} to {}", if is_human {"empty human"} else {"AI"});
 		*self.0.players[index].player_type.get_mut() = if is_human {
 			PlayerType::HumanEmpty
 		} else {
@@ -95,6 +102,7 @@ impl GameSetup {
 
 	/// Updates a player's team.
 	pub fn update_team(&mut self, index: u8, team_id: u8) {
+		info!("Setting player at index {index} to team {team_id}");
 		self.0.players[index].team_id = team_id;
 	}
 
@@ -102,6 +110,7 @@ impl GameSetup {
 	#[inline(always)]
 	#[cfg(not(feature = "client"))]
 	pub fn set_client(&mut self, index: u8, conn: ClientConnection) {
+		info!("Setting empty human at index {index} to connected human client");
 		let pt = self.0.players[index].player_type.get_mut();
 		debug_assert!(
 			matches!(pt, PlayerType::HumanEmpty),
@@ -116,6 +125,7 @@ impl GameSetup {
 	/// like multiple humans in singleplayer or empty human slots in multiplayer
 	#[allow(clippy::result_large_err)]
 	pub fn init(mut self) -> Result<GameState, Self> {
+		info!("Attempting to initialize game");
 		// verify that the players are in the correct state
 		// Singleplayer
 		// * cfg feature = client
@@ -125,6 +135,10 @@ impl GameSetup {
 		// * cfg not feature = client
 		// * at least 2 HumanConnection
 		// * remainder are Ai or HumanConnection
+		if self.0.players.len() < MIN_PLAYERS {
+			warn!("Not enough players - got {}, need {MIN_PLAYERS}", self.0.players.len());
+			return Err(self);
+		}
 		#[cfg(feature = "client")]
 		let mut num_singleplayer = 0;
 		#[cfg(not(feature = "client"))]
@@ -149,14 +163,20 @@ impl GameSetup {
 			});
 		#[cfg(all(feature = "client", not(feature = "test-dep")))]
 		if num_singleplayer != 1 || self.0.players.len() - 1 != num_ai {
+			error!("Incorrect player configuration - humans: {num_singleplayer}, AIs: {num_ai}");
 			return Err(self);
 		}
 		#[cfg(all(feature = "client", feature = "test-dep"))]
 		if num_ai != self.0.players.len() {
+			warn!("Incorrect player configuration - all players should be AI for tests");
 			return Err(self);
 		}
 		#[cfg(not(feature = "client"))]
 		if num_human_connection < 2 || num_human_empty == 0 || self.0.players.len() - num_human_connection != num_ai {
+			error!(
+				"Incorrect player configuration - empty humans: {}, connected humans: {}, AIs: {}",
+				num_human_empty, num_human_connection, num_ai
+			);
 			return Err(self);
 		}
 		

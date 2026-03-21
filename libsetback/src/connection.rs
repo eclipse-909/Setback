@@ -89,6 +89,7 @@ impl SetbackClient {
 	/// If not in tokio runtime
 	pub async fn new(credentials: LoginRequest) -> Result<(Self, UnboundedReceiver<Result<Ssp, Error>>), Error> {
 		//login
+		info!("Logging into api");
 		let api = setback_api().unwrap();
 		let session = api
 			.post(URL_API_LOGIN)
@@ -101,26 +102,12 @@ impl SetbackClient {
 			.json::<LoginResponse>()
 			.await
 			.map_err(|_| Error::DevError)?;
-
-		todo!("move this to setback workspace after this function returns Ok");
-		// //Save username and password
-		// std::thread::spawn(move || {
-		// 	if let Err(err) = std::fs::write(USR_CRD, credentials.username.as_str()) {
-		// 		error!("Error creating usr.crd file: {}", err);
-		// 		return;
-		// 	}
-		// 	if let Err(err) = keyring::Entry::new(
-		// 		KEYRING_SERVICE,
-		// 		credentials.username.as_str()
-		// 	).and_then(|entry| entry.set_password(credentials.password.as_str())) {
-		// 		error!("Error setting password in keyring: {}", err);
-		// 		return;
-		// 	}
-		// 	info!("Saved credentials successfully");
-		// });
+		info!("Logged into api");
 
 		//Connect to server
+		info!("Connecting to Setback server (setbackd)");
 		let (mut reader, writer) = Self::make_tls_stream(SETBACKD_PORT).await?;
+		info!("Connected to Setback server (setbackd)");
 		let cancel_token = CancellationToken::new();
 		let cancel_token_clone = cancel_token.clone();
 		let chain_map = ChainMap::default();
@@ -139,6 +126,7 @@ impl SetbackClient {
 
 		// No need to use chains yet because this handshake is required before arbitrary communication
 		let auth_payload = Payload::Authenticate { auth_token: session.auth_token };
+		info!("Authenticating with Setback server (setbackd)");
 		client.write(ChainId::ExpectResponse(0), auth_payload.clone()).await?;
 		let auth_res = reader.next().await.ok_or(Error::Disconnected)??;
 		if !matches!(auth_res.chain_id, ChainId::EndOfChain(0)) {
@@ -147,13 +135,19 @@ impl SetbackClient {
 		let Payload::Connect {port} = auth_res.payload else {
 			return Err(Error::ServerError);
 		};
+		info!("Authenticated with Setback server (setbackd)");
 
 		// Then disconnect and reconnect to client port
-		client.shutdown().await;
-		let (mut reader, mut writer) = Self::make_tls_stream(port).await?;
+		info!("Disconnecting from Setback server (setbackd)");
+		_ = client.writer.get_mut().get_mut().shutdown().await;
+		info!("Disconnected from Setback server (setbackd)");
+		info!("Connecting to Setback server (setback_server)");
+		let (mut reader, writer) = Self::make_tls_stream(port).await?;
+		info!("Connected to Setback server (setback_server)");
 
 		// Reauthenticate - still don't need chaining
 		client.writer = writer;
+		info!("Authenticating with Setback server (setback_server)");
 		client.write(ChainId::ExpectResponse(0), auth_payload.clone()).await?;
 		if !matches!(auth_res.chain_id, ChainId::EndOfChain(0)) {
 			return Err(Error::ServerError);
@@ -161,6 +155,7 @@ impl SetbackClient {
 		if !matches!(reader.next().await.ok_or(Error::Disconnected)??.payload, Payload::Connect {..}) {
 			return Err(Error::ServerError);
 		}
+		info!("Authenticated with Setback server (setback_server)");
 
 		// Listen for messages from server
 		let (ssp_tx, ssp_rx) = unbounded_channel();
@@ -174,6 +169,7 @@ impl SetbackClient {
 		mut chain_map: ChainMap,
 		ssp_tx: UnboundedSender<Result<Ssp, Error>>,
 	) {
+		info!("Listening for messages from server");
 		loop {
 			match reader.next().await {
 				// Route to transmitter via chaining...
@@ -201,9 +197,10 @@ impl SetbackClient {
 				// ... or send to default transmitter
 				Some(result) => ssp_tx.send(result.map_err(Error::from)).unwrap(),
 				// disconnected
-				None => return,
+				None => break,
 			}
 		}
+		info!("Stopped listening for messages from server");
 	}
 
 	async fn make_tls_stream(port: u16) -> Result<(TlsReader, TlsWriter), Error> {
@@ -236,6 +233,7 @@ impl SetbackClient {
 		//Client specifically doesn't have a renew method because I want the request to go through the server.
 		//This way the ServerConnection.auth_token and renew_token get updated.
 		//If the client tries to call renew via reqwest and not through the server, the tokens will not be updated in ServerConnection.
+		info!("Renewing auth token");
 		self.auth_token = self
 			.api
 			.post(URL_API_RENEW)
@@ -252,11 +250,13 @@ impl SetbackClient {
 			.await
 			.map_err(|_| Error::DevError)?
 			.auth_token;
+		info!("Renewed auth token");
 		Ok(())
 	}
 
-	pub async fn logout(&self, #[cfg(not(test))] auth_token: &str) -> Result<(), Error> {
-		#[cfg(not(test))]
+	pub async fn logout(&self, #[cfg(not(feature = "test-dep"))] auth_token: &str) -> Result<(), Error> {
+		info!("Logging out");
+		#[cfg(not(feature = "test-dep"))]
 		self.api
 			.get(URL_API_LOGOUT)
 			.bearer_auth(auth_token)
@@ -265,7 +265,7 @@ impl SetbackClient {
 			.map_err(|_| Error::NetworkError)?
 			.error_for_status()
 			.map_err(|_| Error::ServerError)?;
-
+		info!("Logged out");
 		Ok(())
 	}
 

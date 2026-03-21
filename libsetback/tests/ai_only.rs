@@ -4,11 +4,12 @@ use std::fs;
 #[cfg(not(feature = "gpui"))]
 #[tokio::test]
 async fn test_ai_only() {
-	let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/libsetback/tests/logs/ai_only.log"));
+	let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/logs/ai_only.log"));
 	fs::create_dir_all(path.parent().unwrap()).unwrap();
 	let log = fs::File::create(path).unwrap();
 	tracing_subscriber::fmt()
 		.with_writer(log)
+		.with_ansi(false)
 		.with_level(true)
 		.compact()
 		.init();

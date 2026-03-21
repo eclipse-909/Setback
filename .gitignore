@@ -1,9 +1,11 @@
 /.idea
 /.zed
+/logs
 /setback/settings.json
 /setback/usr.crd
 /target
 /tmp
 /*.bak
 /*/.env
+/*/logs
 setback.db

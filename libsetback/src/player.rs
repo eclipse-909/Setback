@@ -4,7 +4,7 @@ use {
 	std::cell::SyncUnsafeCell,
 };
 #[cfg(not(feature = "gpui"))]
-use tokio::sync::watch::Sender;
+use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug)]
 #[cfg(feature = "gpui")]
@@ -16,7 +16,7 @@ impl gpui::EventEmitter<GameEvent> for GpuiEventEmitter {}
 pub struct GameEventEmitter(pub gpui::Entity<GpuiEventEmitter>, pub gpui::AsyncApp);
 
 #[cfg(not(feature = "gpui"))]
-pub struct GameEventEmitter(pub(crate) Sender<GameEvent>);
+pub struct GameEventEmitter(pub(crate) UnboundedSender<GameEvent>);
 
 impl GameEventEmitter {
 	#[cfg(feature = "gpui")]
@@ -158,40 +158,6 @@ impl Clone for Player {
 }
 
 impl PlayerType {
-	/// Variant HumanPlayer is left behind with the username from the connection.
-	/// This is done to support players rejoining the game and allowing the username to be sent to them.
-	/// Players rejoining is done every time the game loop future is polled,
-	/// which means &mut ClientConnection can't be held across .await if owned by that same future.
-	/// It must be moved out of that future and into the nested future where it can be held across .await.
-	///
-	/// Must call [Self::restore_human_conn] to put it back.
-	/// ## Safety
-	/// Must be variant HumanConnection, else undefined behavior.
-	#[cfg(not(feature = "client"))]
-	pub unsafe fn take_human_conn(&mut self) -> ClientConnection {
-		let PlayerType::HumanConnection {conn} = self else {
-			unreachable_unchecked!("Expected variant HumanConnection, got {:?}", self);
-		};
-		let username = std::mem::replace(&mut conn.username, String::new());
-		let human_player = PlayerType::HumanPlayer { username, ready: false };
-		let PlayerType::HumanConnection {conn} = std::mem::replace(self, human_player) else {
-			unreachable_unchecked!("Expected variant HumanConnection, got {:?}", self);
-		};
-		conn
-	}
-
-	/// See [Self::replace_human_conn]
-	/// ## Safety
-	/// Must be variant HumanPlayer, else undefined behavior.
-	#[cfg(not(feature = "client"))]
-	pub unsafe fn restore_human_conn(&mut self, mut conn: ClientConnection) {
-		let PlayerType::HumanPlayer {username, ..} = self else {
-			unreachable_unchecked!("Expected variant HumanPlayer, got {:?}", self);
-		};
-		std::mem::swap(&mut conn.username, username);
-		*self = PlayerType::HumanConnection {conn};
-	}
-	
 	pub fn username(&self) -> &str {
 		match self {
 			#[cfg(feature = "client")]

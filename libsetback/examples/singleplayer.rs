@@ -10,6 +10,16 @@ fn main() {compile_error!("disable the gpui feature to run this example")}
 #[cfg(not(feature = "gpui"))]
 #[tokio::main]
 async fn main() {
+	let log_path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/logs/singleplayer.log"));
+	std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+	let log_file = std::fs::File::create(log_path).unwrap();
+	tracing_subscriber::fmt()
+		.with_writer(log_file)
+		.with_ansi(false)
+		.with_level(true)
+		.compact()
+		.init();
+	
 	let (cancel_token, mut event_subscriber, prompt_responder) = GameSetup::new_singleplayer(String::from("example"))
 		.init()
 		.expect("Game cannot start in invalid state")
@@ -18,31 +28,25 @@ async fn main() {
 	let mut my_idx = u8::MAX;
 	let mut input_buf = String::new();
 	loop {
-		event_subscriber.changed().await.expect("event subscriber channel closed");
-		std::io::stdout().flush().expect("Failed to flush stdout");
-		match &*event_subscriber.borrow_and_update() {
+		std::io::stdout().flush().unwrap();
+		match event_subscriber.recv().await.expect("event subscriber closed unexpectedly") {
 			GameEvent::Init {idx} => {
-				my_idx = *idx;
-				let nth = match idx + 1 {
-					1 => "st",
-					2 => "nd",
-					3 => "rd",
-					_ => "th",
-				};
-				println!("Game is starting! You are the {}{} player (at index {idx})", idx + 1, nth);
+				my_idx = idx;
+				println!("Game is starting! You are player {idx}");
 			}
 			GameEvent::PlayerBid {bid, idx} => {
-				if *idx == my_idx {
-					println!("You bid {bid:?}");
+				if idx == my_idx {
+					println!("You bid {}", bid.to_points());
 				} else {
-					println!("Player {} bid {bid:?}", idx + 1);
+					println!("Player {idx} bid {}", bid.to_points());
 				}
 			}
 			GameEvent::PlayerPlayedCard {card, idx} => {
-				if *idx == my_idx {
+				if idx == my_idx {
 					println!("You played the {card:?}");
+					my_hand.remove_item(card);
 				} else {
-					println!("Player {} played the {card:?}", idx + 1);
+					println!("Player {idx} played the {card:?}");
 				}
 			}
 			GameEvent::PromptBid(maybe_err) => {
@@ -89,7 +93,7 @@ async fn main() {
 			}
 			GameEvent::DealCards {hand, idx} => {
 				my_hand = hand.clone();
-				println!("Player {} dealt cards. Your hand: {my_hand:?}", idx + 1);
+				println!("Player {idx} dealt cards. Your hand: {my_hand:?}");
 			}
 			GameEvent::RoundScores(round_scores) => println!("{round_scores:?}"),
 			GameEvent::GameOver => {

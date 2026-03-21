@@ -1,3 +1,4 @@
+use tokio::io::split;
 use {
 	crate::{SmallVec, constants::*, setup::*, Error},
 	serde::{Deserialize, Serialize},
@@ -181,6 +182,7 @@ index: 0-based index of card in hand
 	/// Valid formats - see [Self::CARD_INPUT_FMT].
 	/// Case insensitive.
 	pub fn parse_string(string: &str) -> Option<Result<Self, u8>> {
+		let string = string.to_lowercase();
 		let strings: Vec<&str> = string.split(' ').collect();
 		match strings.len() {
 			1 => if let Ok(idx) = strings[1].parse::<u8>() {
@@ -191,12 +193,12 @@ index: 0-based index of card in hand
 				suit: Self::parse_suit_string(strings[1])?
 			})),
 			3 => {
-				if strings[1].trim().to_lowercase().as_str() != "of" {
+				if strings[1].trim() != "of" {
 					return None;
 				}
 				return Some(Ok(Card {
 					number: Self::parse_num_string(strings[0])?,
-					suit: Self::parse_suit_string(strings[3])?
+					suit: Self::parse_suit_string(strings[2])?
 				}));
 			}
 			_ => {}
@@ -205,7 +207,7 @@ index: 0-based index of card in hand
 	}
 	
 	fn parse_num_string(string: &str) -> Option<u8> {
-		match string.trim().to_lowercase().as_str() {
+		match string.trim() {
 			"j" | "jack" => Some(JACK),
 			"q" | "queen" => Some(QUEEN),
 			"k" | "king" => Some(KING),
@@ -215,7 +217,7 @@ index: 0-based index of card in hand
 	}
 	
 	fn parse_suit_string(string: &str) -> Option<Suit> {
-		match string.trim().to_lowercase().as_str() {
+		match string.trim() {
 			"hearts" => Some(Suit::Hearts),
 			"clubs" => Some(Suit::Clubs),
 			"diamonds" => Some(Suit::Diamonds),

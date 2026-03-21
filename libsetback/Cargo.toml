@@ -21,7 +21,7 @@ webpki-roots.workspace = true
 
 [dev-dependencies]
 trybuild.workspace = true
-libsetback = { workspace = true, features = ["test-dep"] }
+libsetback.workspace = true
 tracing-subscriber.workspace = true
 
 [features]
@@ -35,7 +35,7 @@ required-features = ["client"]
 
 [[test]]
 name = "ai_only"
-required-features = ["client"]
+required-features = ["client", "test-dep"]
 
 [lints.clippy]
 undocumented_unsafe_blocks = "deny"

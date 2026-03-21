@@ -2,17 +2,15 @@ use {
 	crate::*,
 	rand::seq::{SliceRandom, IndexedRandom},
 	serde::{Deserialize, Serialize},
+	tokio::sync::watch,
 	tokio_util::sync::CancellationToken,
-	tracing::{warn, error},
+	tracing::{info, warn, error},
 };
-#[cfg(feature = "client")]
-use tokio::sync::watch;
+#[cfg(not(feature = "gpui"))]
+use tokio::sync::mpsc;
 #[cfg(not(feature = "client"))]
 use {
-	tokio::{
-		task::JoinHandle,
-		sync::mpsc,
-	},
+	tokio::task::JoinHandle,
 	std::time::Duration,
 	crate::ssp::*,
 };
@@ -62,14 +60,14 @@ enum GameLoopState {
 impl GameState {
 	/// Returns a cancel token, event subscriber, and prompt responder
 	#[cfg(all(not(feature = "gpui"), feature = "client"))]
-	pub fn spawn_singleplayer(self) -> (CancellationToken, watch::Receiver<GameEvent>, watch::Sender<GameEvent>) {
+	pub fn spawn_singleplayer(self) -> (CancellationToken, mpsc::UnboundedReceiver<GameEvent>, watch::Sender<GameEvent>) {
 		let cancel_token = CancellationToken::new();
 		let cancel_token_clone = cancel_token.clone();
 		// SAFETY:
 		// we have exclusive access to self
 		let human_idx = unsafe { self.human_idx() };
-		let (event_emitter, mut event_subscriber) = watch::channel(GameEvent::Init {idx: human_idx});
-		event_subscriber.mark_changed();
+		let (event_emitter, event_subscriber) = mpsc::unbounded_channel();
+		event_emitter.send(GameEvent::Init {idx: human_idx}).unwrap();
 		let (prompt_responder, response_rx) = watch::channel(GameEvent::Init {idx: human_idx});
 		tokio::spawn(async move {
 			tokio::select! {
@@ -131,14 +129,26 @@ impl GameState {
 	}
 	
 	#[cfg(feature = "client")]
-	async fn run_event_loop(mut self, human_idx: u8, cancel_token: CancellationToken, mut event_emitter: GameEventEmitter, mut response_rx: watch::Receiver<GameEvent>) {
+	async fn run_event_loop(
+		mut self,
+		human_idx: u8,
+		cancel_token: CancellationToken,
+		#[cfg(feature = "gpui")]
+		mut event_emitter: GameEventEmitter,
+		#[cfg(not(feature = "gpui"))]
+		event_emitter: GameEventEmitter,
+		mut response_rx: watch::Receiver<GameEvent>
+	) {
 		let mut loop_state = GameLoopState::DealCards;
 		loop {
 			// Tip: `continue` can be used to not increment the turn index.
 			match loop_state {
 				GameLoopState::DealCards => {
 					self.deal_cards();
-					event_emitter.send(GameEvent::DealCards { hand: self.setup.players[human_idx].hand.clone(), idx: self.turn_idx });
+					event_emitter.send(GameEvent::DealCards {
+						hand: self.setup.players[human_idx].hand.clone(),
+						idx: self.turn_idx
+					});
 					loop_state = GameLoopState::Bidding;
 					// no continue because it is currently the dealer's turn and we want the next player to start bidding.
 				}
@@ -182,10 +192,14 @@ impl GameState {
 					// It feels redundant to let the player know which card they played,
 					// but this tells the player that their card was valid.
 					event_emitter.send(GameEvent::PlayerPlayedCard { idx: self.turn_idx, card });
-					if let Some(round_scores) = self.player_played_card(card) {
-						event_emitter.send(GameEvent::RoundScores(round_scores));
-						loop_state = GameLoopState::RoundOver;
-						continue;
+					match self.player_played_card(card) {
+						PlayedCardResult::RoundOver(round_scores) => {
+							event_emitter.send(GameEvent::RoundScores(round_scores));
+							loop_state = GameLoopState::RoundOver;
+							continue;
+						}
+						PlayedCardResult::TurnOver => continue,
+						PlayedCardResult::None => {}
 					}
 				}
 				GameLoopState::RoundOver => {
@@ -208,7 +222,7 @@ impl GameState {
 	
 	fn next_turn(&self) -> u8 {
 		let turn_idx = self.turn_idx + 1;
-		if turn_idx >= self.setup.players.len() {
+		if turn_idx == self.setup.players.len() {
 			0
 		} else {
 			turn_idx
@@ -235,6 +249,7 @@ impl GameState {
 		for player in self.setup.players.iter_mut() {
 			player.hand = self.deck.split();
 		}
+		info!("player {} dealt the cards", self.turn_idx);
 		debug_assert_eq!(self.deck.len(), DECK_SIZE as u8 - (self.setup.players.len() * CARDS_PER_PLAYER as u8));
 	}
 	
@@ -316,7 +331,7 @@ impl GameState {
 				bid += 1;
 			}
 		}
-		if bid <= self.highest_bidder_idx {
+		if bid <= self.highest_bid.to_points() as u8 {
 			bid = 0;
 		}
 		Bid::from(bid)
@@ -377,16 +392,17 @@ impl GameState {
 	
 	/// Returns true if valid, false if invalid
 	fn validate_bid(&self, bid: Bid) -> bool {
-		(bid != Bid::Override || self.setup.dealer_override) && (bid == Bid::Pass || bid > self.highest_bid)
+		bid == Bid::Pass || (bid > self.highest_bid && (bid != Bid::Override || self.setup.dealer_override))
 	}
 	
 	/// Returns true if valid, false if invalid
 	fn validate_card(&self, card: Card) -> bool {
 		let has_card = self.setup.players[self.turn_idx].hand.iter().any(|c| *c == card);
 		let can_follow = self.setup.players[self.turn_idx].can_follow(self.lead);
+		let is_owner = self.owner_idx == self.turn_idx;
 		let is_lead = card.suit == self.lead;
 		let is_trump = card.suit == self.trump;
-		has_card && (is_trump || (can_follow && is_lead))
+		has_card && (is_lead || is_trump || is_owner || !can_follow)
 	}
 	
 	/// The bid must have already been validated because it will be considered the new highest bid.
@@ -395,6 +411,7 @@ impl GameState {
 	/// Returns false if the next player needs to bid.
 	fn player_bid(&mut self, bid: Bid, loop_state: &mut GameLoopState) -> bool {
 		debug_assert!(self.validate_bid(bid));
+		info!("player {} bid {}", self.turn_idx, bid.to_points());
 		if *loop_state == GameLoopState::GameOver { return true; }
 		if bid != Bid::Pass {
 			self.highest_bid = bid;
@@ -420,8 +437,9 @@ impl GameState {
 	///
 	/// Returns Some if card playing for the round should end, and the turn index should not be incremented following this function.
 	/// Returns None if the next player needs to play a card.
-	fn player_played_card(&mut self, card: Card) -> Option<RoundScores> {
+	fn player_played_card(&mut self, card: Card) -> PlayedCardResult {
 		debug_assert!(self.validate_card(card));
+		info!("player {} played the {card:?}", self.turn_idx);
 		self.setup.players[self.turn_idx].hand.remove_item(card);
 		self.pile.push(card);
 		
@@ -455,6 +473,10 @@ impl GameState {
 				// if all cards have been played, end the round
 				self.turn_num = 0;
 				self.round_num += 1;
+				self.dealer_idx += 1;
+				if self.dealer_idx == self.setup.players.len() {
+					self.dealer_idx = 0;
+				}
 				
 				// calculate round scores
 				let mut high_winner_team_id = 0;
@@ -526,17 +548,20 @@ impl GameState {
 				} else {
 					self.teams[bidder_team_id].score -= self.highest_bid.to_points();
 				}
-				return Some(RoundScores {
+				let round_scores = RoundScores {
 					high_winner_team_id,
 					low_winner_team_id,
 					jack_winner_team_id,
 					game_winner_team_id: if highest_game == second_highest_game { None } else { Some(game_winner_team_id) },
 					round_team_game_scores,
 					total_team_scores: self.teams.iter().map(|team| team.score).collect(),
-				});
+				};
+				info!("Round ended - {round_scores:?}");
+				return PlayedCardResult::RoundOver(round_scores);
 			}
+			return PlayedCardResult::TurnOver;
 		}
-		None
+		PlayedCardResult::None
 	}
 	
 	fn team_won(&self) -> bool {
@@ -655,15 +680,19 @@ impl GameState {
 				}
 				GameLoopState::Playing => {
 					let card = self.prompt(&mut loop_state, &mut rejoin_rx, &reject_tx).await;
-					if let Some(round_scores) = self.player_played_card(card) {
-						loop_state = GameLoopState::RoundOver;
-						self.notify_all(
-							&mut loop_state,
-							&mut rejoin_rx,
-							&reject_tx,
-							Payload::GameEvent(GameEvent::RoundScores(round_scores))
-						).await;
-						continue;
+					match self.player_played_card(card) {
+						PlayedCardResult::RoundOver(round_scores) => {
+							loop_state = GameLoopState::RoundOver;
+							self.notify_all(
+								&mut loop_state,
+								&mut rejoin_rx,
+								&reject_tx,
+								Payload::GameEvent(GameEvent::RoundScores(round_scores))
+							).await;
+							continue;
+						}
+						PlayedCardResult::TurnOver => continue,
+						PlayedCardResult::None => {}
 					}
 				}
 				GameLoopState::RoundOver => {
@@ -1180,4 +1209,10 @@ struct RejoinPrep {
 	hands: SmallVec<SmallVec<Card, CARDS_PER_PLAYER>, MAX_PLAYERS>,
 	rejoined_idxs: SmallVec<u8, MAX_PLAYERS>,
 	snapshot_payload: Payload,
+}
+
+enum PlayedCardResult {
+	RoundOver(RoundScores),
+	TurnOver,
+	None,
 }
