@@ -1,5 +1,8 @@
+use std::io::Write;
+use std::path::Path;
+use tokio_util::codec;
 use {
-	libsetback::{*, sdp::*, stream::MemPool},
+	libsetback::{*, sdp::*},
 	reqwest::Client,
 	scc::{HashMap, hash_map::Entry},
 	std::{
@@ -13,10 +16,25 @@ use {
 		sync::mpsc::{self, UnboundedSender, UnboundedReceiver},
 	},
 	tokio_util::sync::CancellationToken,
-	tracing::{error, info}
+	tracing::{error, info, warn}
 };
 
-const BIN_VERION: Version = pkg_version!();
+const BIN_VERSION: Version = pkg_version!();
+
+macro_rules! crash {
+	($fmt:expr) => {{
+		error!($fmt);
+		std::io::stdout().flush();
+		exit(1);
+	}};
+	($fmt:expr, $arg0:expr) => {
+		|$arg0| {
+			error!($fmt, $arg0);
+			std::io::stdout().flush();
+			exit(1);
+		}
+	};
+}
 
 fn main() {
 	// Setup logger, runtime, SIGTERM handler, API connection, and unix socket to setbackd
@@ -32,7 +50,7 @@ fn main() {
         .unwrap();
 	let _rt_guard = rt.enter();
 
-	let sigterm = signal(SignalKind::terminate())
+	let mut sigterm = signal(SignalKind::terminate())
 		.unwrap_or_else(crash!("Could not create SIGTERM handler. Error: {}", e));
 	let master_cancel_token = CancellationToken::new();
 	let cancel_token = master_cancel_token.clone();
@@ -72,7 +90,7 @@ fn main() {
 	});
 
 	todo!("Find out how to block on all running tasks");
-	info!("setback_server-{} shutdown", BIN_VERION);
+	info!("setback_server-{} shutdown", BIN_VERSION);
 	std::io::stdout().flush();
 }
 
@@ -80,7 +98,7 @@ async fn listen_unix_socket(sock: UnixDatagram, port: u16) -> ! {
 	let buf = [0u8; codec::MAX_LEN].as_mut_slice();
 	if let Ok(buf) = Sdp::new(Payload::NotifyStart(StartInfo {
 		port,
-		version: BIN_VERION,
+		version: BIN_VERSION,
 		addr: setbackd_unix_socket().to_string_lossy().to_string(),
 	})).serialize(buf) {
 		sock.send_to(buf, setbackd_unix_socket()).await;
@@ -124,32 +142,16 @@ async fn listen_unix_socket(sock: UnixDatagram, port: u16) -> ! {
 }
 
 async fn listen_tcp_socket(listener: TcpListener, api: Client, state: Arc<State>) -> ! {
-	let mem_pool = FreeList::new();
 	loop {
 		match listener.accept().await {
 			Ok((stream, addr)) => {
 				// Under normal usage, the client will have authenticated with setbackd prior to connecting here.
 				// Since this port is open and accepting connections, we must assume that anyone can directly connect here.
-				if let Some(client) = ClientConnection::new(stream, api.clone(), addr, mem_pool.clone()).await {
+				if let Some(client) = ClientConnection::new(stream, api.clone(), addr).await {
 					client.spawn_read_loop_for_server(state.clone());
 				}
 			}
 			Err(e) => warn!("Could not accept client. Error: {e}")
 		}
 	}
-}
-
-macro_rules! crash {
-	($fmt:expr) => {{
-		error!($fmt);
-		std::io::stdout().flush();
-		exit(1);
-	}};
-	($fmt:expr, $arg0:expr) => {
-		|$arg0| {
-			error!($fmt, $arg0);
-			std::io::stdout().flush();
-			exit(1);
-		}
-	};
 }

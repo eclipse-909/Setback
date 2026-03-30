@@ -1,14 +1,22 @@
 use serde::{Deserialize, Serialize};
 
-/// POST /api/login and POST /api/signup
-#[derive(Serialize)]
+/// POST /api/login
+#[derive(Serialize, Deserialize)]
 pub struct LoginRequest {
+	pub username_or_email: String,
+	pub password: String,
+}
+
+/// POST /api/signup
+#[derive(Serialize, Deserialize)]
+pub struct SignupRequest {
 	pub username: String,
+	pub email: String,
 	pub password: String,
 }
 
 /// POST /api/login and POST /api/signup
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct LoginResponse {
 	pub auth_token: String,
 	pub renew_token: String,
@@ -16,25 +24,13 @@ pub struct LoginResponse {
 }
 
 /// GET /api/username
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct UsernameResponse {
 	pub username: String,
 	pub account_id: u32,
 }
 
-/// POST /api/renew
-#[derive(Serialize)]
-pub struct RenewRequest {
-	pub renew_token: String,
-}
-
-/// POST /api/renew
-#[derive(Deserialize)]
-pub struct RenewResponse {
-	pub auth_token: String,
-}
-
-/// POST /api/report_player
+/// POST /api/report
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ReportPlayerRequest {
 	username: String,
@@ -51,4 +47,10 @@ pub enum ReportReason {
 	Hacking,
 	/// A player is using external communication with teammates or opponents to influence the outcome of the game.
 	Cheating,
+}
+
+/// POST /api/feedback
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FeedbackRequest {
+	description: String,
 }

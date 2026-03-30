@@ -1,5 +1,6 @@
 /.idea
 /.zed
+/certs
 /logs
 /setback/settings.json
 /setback/usr.crd

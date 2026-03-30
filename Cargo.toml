@@ -5,7 +5,6 @@ members = [
 	"setback_server",
 	"setback_website",
 	"setbackctl",
-	"setbackd"
 ]
 resolver = "3"
 
@@ -31,8 +30,9 @@ dotenvy = "0.15.7"
 futures = "0.3.32"
 futures-util = "0.3.32"
 gpui = "0.2.2"
+http = "1.4.0"
 image = { version = "0.25.10", features = ["gif"] }
-jsonwebtoken = "10.3.0"
+jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 keyring = { version = "3.6.3", features = [
 	"apple-native",
 	"windows-native",
@@ -52,7 +52,7 @@ regex = "1.12.3"
 reqwest = { version = "0.13.2", features = ["cookies", "json", "rustls"] }
 rpassword = "7.4.0"
 rustls = "0.23.37"
-scc = "3.6.11"
+scc = "3.6.12"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sqlx = { version = "0.8.6", default-features = false, features = [
@@ -68,11 +68,12 @@ tokio = { version = "1.50.0", features = ["full"] }
 tokio-rustls = "0.26.4"
 tokio-serde = { version = "0.9.0", features = ["bincode"] }
 tokio-util = { version = "0.7.18", features = ["codec"] }
-tower-cookies = "0.11.0"
+tower-cookies = { version = "0.11.0", features = ["private"] }
+tower-http = { version = "0.6.8", features = ["cors", "fs"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.4"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 trybuild = "1.0.116"
-unicode-segmentation = "1.12.0"
+unicode-segmentation = "1.13.2"
 webpki-roots = "1.0.6"
 whoami = "2.1.1"

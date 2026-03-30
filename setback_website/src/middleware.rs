@@ -1,83 +1,78 @@
 use {
-	crate::constants::COOKIE_AUTH_TOKEN,
 	axum::{
 		extract::Request,
 		http::StatusCode,
 		middleware::Next,
 		response::IntoResponse
 	},
-	chrono::{Duration, Utc},
-	libsetback::{SETBACK_VERSION, Version},
+	libsetback::{SSP_VERSION, DNS_NAME, Version},
 	serde::{Deserialize, Serialize},
-	sqlx::PgPool,
 	tower_cookies::{
-		Cookies,
+		Cookies, Cookie,
 		cookie::{
-			Cookie, Key, SameSite,
-			time::{Duration, OffsetDateTime},
+			Key, SameSite,
+			time::{Duration, UtcDateTime, OffsetDateTime},
 		},
 	}
 };
 
 #[derive(Serialize, Deserialize)]
 struct AuthToken {
+	/// Expiration time (as UTC timestamp)
+	expires: i64,
 	user: User,
-	max_age: Duration,
-	expires: OffsetDateTime,
 	version: Version,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct User {
-	pub id: u32,
-	pub username: String,
+	account_id: u32,
+	username: String,
 }
 
 impl AuthToken {
-	pub fn new(user: User) -> Self {
-		let max_age = Duration::hours(3);
-		let expires = OffsetDateTime::now_utc() + age;
+	pub fn new(account_id: u32, username: String) -> Self {
 		Self {
-			user,
-			max_age,
-			expires,
-			version: SETBACK_VERSION
+			expires: (UtcDateTime::now() + Duration::days(7)).unix_timestamp(),
+			user: User {account_id, username},
+			version: SSP_VERSION,
 		}
 	}
-
-	pub fn new_refresh(user: User) -> Self {
-		let max_age = Duration::weeks(1);
-		let expires = OffsetDateTime::now_utc() + age;
-		Self {
-			user,
-			max_age,
-			expires,
-			version: SETBACK_VERSION
-		}
+	
+	pub fn insert(&self, cookies: &mut Cookies, key: &Key) -> Result<(), StatusCode> {
+		let Ok(token) = serde_json::to_string(self) else {
+			return Err(StatusCode::INTERNAL_SERVER_ERROR);
+		};
+		let cookie = Cookie::build((http::header::AUTHORIZATION.as_str(), token))
+			.domain(DNS_NAME)
+			.path("/")
+			.secure(true)
+			.http_only(true)
+			.same_site(SameSite::Strict)
+			.expires(Some(
+				OffsetDateTime::from_unix_timestamp(self.expires)
+					.map_err(|_| StatusCode::UNAUTHORIZED)?
+			))
+			.build();
+		cookies.private(key).add(cookie);
+		Ok(())
 	}
 
-	pub fn revoke(&mut self) {
-		self.max_age = Duration::zero();
-		self.expires = OffsetDateTime::UNIX_EPOCH;
+	pub fn set_expired(&mut self) {
+		self.expires = 0;
 	}
 }
 
 /// Auth middleware for account routes
-/// - Decrypts `auth-token` private cookie using `Key` from extensions
-/// - Validates embedded expiration and that the user exists in DB
-/// - Inserts `User` into request extensions on success; otherwise 401
+/// - Decrypts authorization private cookie using Key from extensions
+/// - Validates embedded expiration
 pub async fn middleware_auth(cookies: Cookies, mut req: Request, next: Next) -> impl IntoResponse {
+	// Decrypt private cookie and extract token
 	let key = match req.extensions().get::<Key>() {
 		Some(k) => k,
 		None => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
 	};
-	let pool = match req.extensions().get::<PgPool>() {
-		Some(p) => p,
-		None => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-	};
-
-	// Decrypt private cookie and extract token
-	let decrypted = match cookies.private(key).get(COOKIE_AUTH_TOKEN) {
+	let decrypted = match cookies.private(key).get(http::header::AUTHORIZATION.as_str()) {
 		Some(c) => c,
 		None => return StatusCode::UNAUTHORIZED.into_response(),
 	};
@@ -86,25 +81,10 @@ pub async fn middleware_auth(cookies: Cookies, mut req: Request, next: Next) -> 
 		Err(_) => return StatusCode::UNAUTHORIZED.into_response(),
 	};
 
-	let now = Utc::now().timestamp();
-	if now > auth_token.expires {
+	if UtcDateTime::now().unix_timestamp() >= auth_token.expires {
 		return StatusCode::UNAUTHORIZED.into_response();
 	}
-
-	// Ensure user exists
-	// TODO: convert to macro query
-	let exists_row = sqlx::query("SELECT EXISTS(SELECT 1 FROM accounts WHERE id = $1)")
-		.bind(auth_token.user.id)
-		.fetch_one(pool)
-		.await
-		.is_ok();
-
-	if !exists_row {
-		return StatusCode::UNAUTHORIZED.into_response();
-	}
-
-	// Attach user to request
+	
 	req.extensions_mut().insert(auth_token.user);
-
 	next.run(req).await
 }

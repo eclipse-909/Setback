@@ -5,7 +5,7 @@ use {
 };
 
 #[cfg(feature = "gpui")]
-fn main() {compile_error!("disable the gpui feature to run this example")}
+fn main() {panic!("disable the gpui feature to run this example")}
 
 #[cfg(not(feature = "gpui"))]
 #[tokio::main]

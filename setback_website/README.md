@@ -1,11 +1,13 @@
 # Setback Website
 This is an API and file server in one REST app.
 ## Endpoints
-- POST api/login
 - POST api/signup
-- GET api/logout
-- GET api/username
-- POST api/refresh
+- POST api/login
+- GET  api/logout
+- GET  api/username
+- POST api/report
+- POST api/feedback
+- GET  api/healthcheck
 ## Pages
 - index
 - download

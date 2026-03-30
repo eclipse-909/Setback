@@ -44,7 +44,6 @@ impl GameSetup {
 		})
 	}
 	
-	#[cfg(feature = "test-dep")]
 	pub fn new_ai_only() -> Self {
 		info!("Creating AI only game");
 		let mut setup_data = Self::new();
@@ -107,7 +106,6 @@ impl GameSetup {
 	}
 
 	/// Makes this player type a networked client.
-	#[inline(always)]
 	#[cfg(not(feature = "client"))]
 	pub fn set_client(&mut self, index: u8, conn: ClientConnection) {
 		info!("Setting empty human at index {index} to connected human client");

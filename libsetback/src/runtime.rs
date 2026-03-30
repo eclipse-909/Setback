@@ -2,18 +2,18 @@ use {
 	crate::*,
 	rand::seq::{SliceRandom, IndexedRandom},
 	serde::{Deserialize, Serialize},
-	tokio::sync::watch,
+	tokio::{
+		sync::mpsc,
+		task::JoinHandle
+	},
 	tokio_util::sync::CancellationToken,
 	tracing::{info, warn, error},
-};
-#[cfg(not(feature = "gpui"))]
-use tokio::sync::mpsc;
-#[cfg(not(feature = "client"))]
-use {
-	tokio::task::JoinHandle,
 	std::time::Duration,
-	crate::ssp::*,
 };
+#[cfg(feature = "client")]
+use tokio::sync::watch;
+#[cfg(not(feature = "client"))]
+use crate::ssp::*;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GameState {
@@ -40,7 +40,6 @@ pub struct GameState {
 	pub(crate) round_num: u8,
 }
 
-#[cfg(not(feature = "client"))]
 pub struct GameLoopHandle {
 	pub cancel_token: CancellationToken,
 	pub rejoin_tx: mpsc::Sender<ClientConnection>,
@@ -81,7 +80,7 @@ impl GameState {
 	
 	/// Returns a cancel token and prompt responder
 	#[cfg(feature = "gpui")]
-	pub fn spawn_singleplayer(
+	pub fn spawn_singleplayer_gpui(
 		self,
 		gpui_event_emitter: gpui::Entity<GpuiEventEmitter>,
 		app: gpui::AsyncApp
@@ -145,6 +144,7 @@ impl GameState {
 			match loop_state {
 				GameLoopState::DealCards => {
 					self.deal_cards();
+					#[cfg(not(feature = "test-dep"))]
 					event_emitter.send(GameEvent::DealCards {
 						hand: self.setup.players[human_idx].hand.clone(),
 						idx: self.turn_idx
@@ -169,6 +169,7 @@ impl GameState {
 					};
 					// It feels redundant to let the player know what they just bid,
 					// but this tells the player that their bid was valid.
+					#[cfg(not(feature = "test-dep"))]
 					event_emitter.send(GameEvent::PlayerBid { idx: self.turn_idx, bid });
 					if self.player_bid(bid, &mut loop_state) {
 						continue;
@@ -191,9 +192,11 @@ impl GameState {
 					};
 					// It feels redundant to let the player know which card they played,
 					// but this tells the player that their card was valid.
+					#[cfg(not(feature = "test-dep"))]
 					event_emitter.send(GameEvent::PlayerPlayedCard { idx: self.turn_idx, card });
 					match self.player_played_card(card) {
 						PlayedCardResult::RoundOver(round_scores) => {
+							#[cfg(not(feature = "test-dep"))]
 							event_emitter.send(GameEvent::RoundScores(round_scores));
 							loop_state = GameLoopState::RoundOver;
 							continue;
@@ -211,8 +214,10 @@ impl GameState {
 					continue;
 				}
 				GameLoopState::GameOver => {
+					#[cfg(not(feature = "test-dep"))]
 					event_emitter.send(GameEvent::GameOver);
 					cancel_token.cancel();
+					info!("Game over");
 					return;
 				}
 			}
@@ -666,7 +671,7 @@ impl GameState {
 						.players
 						.iter()
 						.map(|p|
-							Payload::GameEvent(GameEvent::DealCards {hand: p.hand.clone()}),
+							Payload::GameEvent(GameEvent::DealCards {hand: p.hand.clone(), idx: self.dealer_idx}),
 						)
 						.collect();
 					self.notify_all_unique(&mut loop_state, &mut rejoin_rx, &reject_tx, &mut payloads).await;
@@ -710,6 +715,7 @@ impl GameState {
 						&reject_tx,
 						Payload::GameEvent(GameEvent::GameOver)
 					).await;
+					info!("Game over");
 					return self.collect_players();
 				}
 			}
@@ -738,35 +744,6 @@ impl GameState {
 			join_rx,
 			reject_tx,
 			async move |this, disconnected_idxs| this.send_prompt(disconnected_idxs).await
-		).await}
-	}
-	
-	/// This function can be called for Ai and HumanConnection players
-	async fn notify(
-		&mut self,
-		loop_state: &mut GameLoopState,
-		join_rx: &mut mpsc::Receiver<ClientConnection>,
-		reject_tx: &mpsc::UnboundedSender<ClientConnection>,
-		payload: Payload,
-	) {
-		// SAFETY:
-		// we have exclusive access to self
-		if matches!(unsafe { &*self.setup.players[self.turn_idx].player_type.get() }, PlayerType::Ai{..}) {
-			return; // Ai doesn't care about anything save bid/card prompts
-		}
-		// SAFETY:
-		// Ai was checked so this is HumanConnection.
-		// send_payload must only push player_idx to disconnected_idxs iff that player disconnects,
-		// and it preserves the ClientConnection object in that player to be later properly disconnected.
-		unsafe {self.send_with_join(
-			loop_state,
-			join_rx,
-			reject_tx,
-			async move |this, disconnected_idxs| this.send_payload(
-				disconnected_idxs,
-				this.turn_idx,
-				payload,
-			).await
 		).await}
 	}
 	
@@ -803,7 +780,6 @@ impl GameState {
 			async move |this, disconnected_idxs| {
 				futures::future::join_all(
 					(0..this.setup.players.len())
-						.into_iter()
 						.filter_map(|i| if i != idx {
 							Some(async move {
 								// each future needs its own small vec because this future can't capture variables by mutable reference
@@ -845,7 +821,6 @@ impl GameState {
 			async move |this, disconnected_idxs| {
 				futures::future::join_all(
 					(0..this.setup.players.len())
-						.into_iter()
 						.map(|i| {
 							let payload = std::mem::replace(&mut payloads[i], Payload::Ack);
 							async move {

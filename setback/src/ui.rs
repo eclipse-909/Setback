@@ -1,7 +1,11 @@
 use {
 	crate::{
-		game::GameUi, main_menu::MainMenuUi, multiplayer::MultiplayerUi, settings::SettingsUi,
-		setup::SetupUi, state::Scene,
+		game::GameUi,
+		main_menu::MainMenuUi,
+		multiplayer::MultiplayerUi,
+		settings::SettingsUi,
+		setup::SetupUi,
+		state::Scene,
 	},
 	gpui::{Context, IntoElement, Render, Window},
 };
@@ -21,11 +25,11 @@ impl RootUi {
 impl Render for RootUi {
 	fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
 		match self.scene {
-			Scene::MainMenu => MainMenuUi,
-			Scene::Multiplayer => MultiplayerUi,
-			Scene::Settings => SettingsUi,
-			Scene::Setup => SetupUi,
-			Scene::Game => GameUi,
+			Scene::MainMenu => MainMenuUi.into(),
+			Scene::Multiplayer => MultiplayerUi.into(),
+			Scene::Settings => SettingsUi.into(),
+			Scene::Setup => SetupUi.into(),
+			Scene::Game => GameUi.into(),
 		}
 	}
 }

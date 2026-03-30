@@ -1,5 +1,4 @@
 use {
-	crate::util::Deferred,
 	libsetback::SetbackClient,
 	serde::{Deserialize, Serialize},
 	tokio::runtime::{Builder, Runtime},

@@ -6,7 +6,10 @@ use {
 	std::{
 		collections::HashMap,
 		sync::Arc,
+		net::SocketAddr,
+		time::Duration,
 	},
+	scc::hash_map::Entry,
 	tokio::{
 		io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf},
 		net::TcpStream,
@@ -23,14 +26,6 @@ use {
 		codec::{FramedWrite, FramedRead, LengthDelimitedCodec}
 	},
 	tracing::{info, warn}
-};
-#[cfg(not(feature = "client"))]
-use {
-	scc::hash_map::Entry,
-	std::{
-		net::SocketAddr,
-		time::Duration,
-	},
 };
 
 pub fn setback_api() -> Option<Client> { Client::builder().cookie_store(true).build().ok() }
@@ -105,16 +100,14 @@ impl SetbackClient {
 		info!("Logged into api");
 
 		//Connect to server
-		info!("Connecting to Setback server (setbackd)");
-		let (mut reader, writer) = Self::make_tls_stream(SETBACKD_PORT).await?;
-		info!("Connected to Setback server (setbackd)");
-		let cancel_token = CancellationToken::new();
-		let cancel_token_clone = cancel_token.clone();
+		info!("Connecting to Setback server");
+		let (mut reader, writer) = Self::make_tls_stream().await?;
+		info!("Connected to Setback server");
 		let chain_map = ChainMap::default();
 		let chain_map_clone = chain_map.clone();
 		let mut client = Self {
 			writer,
-			cancel_token,
+			cancel_token: CancellationToken::new(),
 			chain_map,
 			api,
 			auth_token: session.auth_token.clone(),
@@ -126,36 +119,16 @@ impl SetbackClient {
 
 		// No need to use chains yet because this handshake is required before arbitrary communication
 		let auth_payload = Payload::Authenticate { auth_token: session.auth_token };
-		info!("Authenticating with Setback server (setbackd)");
+		info!("Authenticating with Setback server");
 		client.write(ChainId::ExpectResponse(0), auth_payload.clone()).await?;
 		let auth_res = reader.next().await.ok_or(Error::Disconnected)??;
 		if !matches!(auth_res.chain_id, ChainId::EndOfChain(0)) {
 			return Err(Error::ServerError);
 		};
-		let Payload::Connect {port} = auth_res.payload else {
+		if !matches!(auth_res.payload, Payload::Ack) {
 			return Err(Error::ServerError);
 		};
-		info!("Authenticated with Setback server (setbackd)");
-
-		// Then disconnect and reconnect to client port
-		info!("Disconnecting from Setback server (setbackd)");
-		_ = client.writer.get_mut().get_mut().shutdown().await;
-		info!("Disconnected from Setback server (setbackd)");
-		info!("Connecting to Setback server (setback_server)");
-		let (mut reader, writer) = Self::make_tls_stream(port).await?;
-		info!("Connected to Setback server (setback_server)");
-
-		// Reauthenticate - still don't need chaining
-		client.writer = writer;
-		info!("Authenticating with Setback server (setback_server)");
-		client.write(ChainId::ExpectResponse(0), auth_payload.clone()).await?;
-		if !matches!(auth_res.chain_id, ChainId::EndOfChain(0)) {
-			return Err(Error::ServerError);
-		};
-		if !matches!(reader.next().await.ok_or(Error::Disconnected)??.payload, Payload::Connect {..}) {
-			return Err(Error::ServerError);
-		}
-		info!("Authenticated with Setback server (setback_server)");
+		info!("Authenticated with Setback server");
 
 		// Listen for messages from server
 		let (ssp_tx, ssp_rx) = unbounded_channel();
@@ -203,7 +176,7 @@ impl SetbackClient {
 		info!("Stopped listening for messages from server");
 	}
 
-	async fn make_tls_stream(port: u16) -> Result<(TlsReader, TlsWriter), Error> {
+	async fn make_tls_stream() -> Result<(TlsReader, TlsWriter), Error> {
 		let mut root_cert_store = RootCertStore::empty();
 		root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 		// Don't hover over or inspect       ^^^^^^^^^^^^^^^^
@@ -213,7 +186,7 @@ impl SetbackClient {
 			.with_no_client_auth();
 		let connector = TlsConnector::from(Arc::new(config));
 		let dns_name = ServerName::try_from(DNS_NAME).unwrap();
-		let tcp_stream = TcpStream::connect(server(port))
+		let tcp_stream = TcpStream::connect(SETBACK_SERVER_SOCKET)
 			.await
 			.map_err(|_| Error::ServerDown)?;
 		let (r, w) = tokio::io::split(connector.connect(dns_name, tcp_stream).await?);
@@ -227,31 +200,6 @@ impl SetbackClient {
 	pub async fn shutdown(&mut self) {
 		self.cancel_token.cancel();
 		_ = self.writer.get_mut().get_mut().shutdown().await;
-	}
-
-	pub async fn renew_token(&mut self) -> Result<(), Error> {
-		//Client specifically doesn't have a renew method because I want the request to go through the server.
-		//This way the ServerConnection.auth_token and renew_token get updated.
-		//If the client tries to call renew via reqwest and not through the server, the tokens will not be updated in ServerConnection.
-		info!("Renewing auth token");
-		self.auth_token = self
-			.api
-			.post(URL_API_RENEW)
-			.bearer_auth(self.auth_token.clone())
-			.json(&RenewRequest {
-				renew_token: self.renew_token.clone(),
-			})
-			.send()
-			.await
-			.map_err(|_| Error::NetworkError)?
-			.error_for_status()
-			.map_err(Error::from)?
-			.json::<RenewResponse>()
-			.await
-			.map_err(|_| Error::DevError)?
-			.auth_token;
-		info!("Renewed auth token");
-		Ok(())
 	}
 
 	pub async fn logout(&self, #[cfg(not(feature = "test-dep"))] auth_token: &str) -> Result<(), Error> {
@@ -271,7 +219,7 @@ impl SetbackClient {
 
 	/// Chain_id must not be ChainId::None. Removes the chain id from the chain map if Err is returned.
 	async fn write(&mut self, chain_id: ChainId, payload: Payload) -> Result<(), Error> {
-		self.writer.send(Ssp::new_with_token(payload, chain_id, self.auth_token.clone())).await.map_err(|e| {
+		self.writer.send(Ssp::new(payload, chain_id)).await.map_err(|e| {
 			self.chain_map.remove(&chain_id.get_id());
 			warn!("Failed to write Ssp to tcp socket. Error: {e}");
 			Error::from(e)
@@ -316,17 +264,6 @@ impl SetbackClient {
 	pub async fn send_search_games(&mut self, filter: GameFilter) -> Result<Vec<PublicGame>, Error> {
 		match self.send_recv(Payload::SearchGames(filter)).await? {
 			Payload::PublicGames(games) => Ok(games),
-			Payload::Err(err) => Err(err),
-			_ => Err(Error::ServerError),
-		}
-	}
-
-	pub async fn send_renew_token(&mut self) -> Result<(), Error> {
-		match self.send_recv(Payload::RenewAuth { token: self.renew_token.clone() }).await? {
-			Payload::RenewAuth {token} => {
-				self.auth_token = token;
-				Ok(())
-			}
 			Payload::Err(err) => Err(err),
 			_ => Err(Error::ServerError),
 		}
@@ -418,11 +355,9 @@ impl std::fmt::Debug for SetbackClient {
 }
 
 /// Connection to the client, owned by the server.
-#[cfg(not(feature = "client"))]
 pub struct ClientConnection {
 	writer: TcpWriter,
 	reader: TcpReader,
-	auth_token: String,
 	pub(crate) account_id: u32,
 	pub(crate) username: String,
 	pub(crate) ready: bool,
@@ -430,27 +365,15 @@ pub struct ClientConnection {
 	pub(crate) timeout_strikes: u8,
 }
 
-#[cfg(not(feature = "client"))]
-struct AuthRes {
-	writer: TcpWriter,
-	reader: TcpReader,
-	auth_token: String,
-	username: String,
-	account_id: u32,
-}
-
-#[cfg(not(feature = "client"))]
 impl ClientConnection {
-	/// This is used when someone first tries to connect to setbackd.
-	/// Their token will be validated and a port number will be sent back if validated.
-	/// The client will disconnect from the server, and reconnect on that port number.
-	/// If not authenticated, this function will send a message to the client letting them know.
-	pub async fn authenticate(
+	/// This is used when someone first tries to connect to the server.
+	/// Their token will be validated. They are sent Ack if successful or Err
+	/// if unauthenticated.
+	pub async fn new(
 		tcp_stream: TcpStream,
 		api: Client,
-		server_port: u16,
 		client_addr: SocketAddr,
-	) -> Result<AuthRes, Error> {
+	) -> Option<Self> {
 		let (r, w) = tokio::io::split(tcp_stream);
 		let codec = new_length_delimited_codec();
 		let mut reader = Framed::new(
@@ -461,7 +384,7 @@ impl ClientConnection {
 			FramedWrite::new(w, codec.clone()),
 			Bincode::default()
 		);
-
+		
 		//TODO:
 		// Use client_addr for security features like IP bans
 		
@@ -486,47 +409,29 @@ impl ClientConnection {
 			};
 			// validate token and get username
 			let UsernameResponse {username, account_id} = Self::get_username(api, auth_token.as_str()).await?;
-			writer.send(Ssp::new(Payload::Connect {port: server_port}, ChainId::EndOfChain(0))).await.map_err(Error::from)?;
-			Ok((auth_token, username, account_id))
+			writer.send(Ssp::new(Payload::Ack, ChainId::EndOfChain(0))).await.map_err(Error::from)?;
+			Ok((username, account_id))
 		}.await;
-
+		
 		match res {
-			Ok((auth_token, username, account_id)) => Ok(AuthRes {writer, reader, auth_token, username, account_id}),
+			Ok((username, account_id)) => Some(Self {
+				writer,
+				reader,
+				account_id,
+				username,
+				ready: false,
+				host: false,
+				timeout_strikes: 0,
+			}),
 			Err(err) => {
-				writer.send(Ssp::new(Payload::Err(err), ChainId::EndOfChain(0))).await.map_err(Error::from)?;
-				Err(err)
+				info!("Authentication failed for client - Error: {err}");
+				writer
+					.send(Ssp::new(Payload::Err(err), ChainId::EndOfChain(0)))
+					.await
+					.ok()?;
+				None
 			}
 		}
-	}
-
-	/// The client has already been authenticated and is reconnecting to the server on the port they previously recieved.
-	/// This function reauthenticates the client.
-	pub async fn new(
-		tcp_stream: TcpStream,
-		api: Client,
-		client_addr: SocketAddr,
-	) -> Option<Self> {
-		let AuthRes {
-			reader,
-			writer,
-			auth_token,
-			username,
-			account_id
-		} = Self::authenticate(tcp_stream, api, 0, client_addr)
-			.await
-			.inspect_err(|e| info!("Authentication failed for client - Error: {e}"))
-			.ok()?;
-
-		Some(Self {
-			writer,
-			reader,
-			auth_token,
-			account_id,
-			username,
-			ready: false,
-			host: false,
-			timeout_strikes: 0,
-		})
 	}
 
 	/// Called after client connects to server. Not used when client is in a game.
@@ -573,10 +478,10 @@ impl ClientConnection {
 		}
 	}
 
-	/// Wraps [read] and validates the auth token and version.
+	/// Wraps [read] and validates the and version.
 	/// This should always be used in the server instead of [read] for security.
 	/// The chain id is the chain id from the received ssp.
-	/// It's returned here just in case auth or version checking fails and you need to respond.
+	/// It's returned here just in case version checking fails and you need to respond.
 	async fn read(&mut self) -> (ChainId, Result<Ssp, Error>) {
 		let mut ssp = match self.reader.next().await {
 			Some(Ok(ssp)) => ssp,
@@ -587,11 +492,6 @@ impl ClientConnection {
 			ChainId::ExpectResponse(id) => ChainId::EndOfChain(id),
 			_ => ChainId::None
 		};
-		// This method of validating the auth token every time a message is received is not very secure,
-		// but it's much faster than making a request to the api every time.
-		if ssp.auth_token != self.auth_token {
-			return (chain_id, Err(Error::Unauthenticated));
-		}
 		if !ssp.version.is_compatible(SSP_VERSION) {
 			return (chain_id, Err(Error::BadVersion));
 		}
@@ -615,7 +515,7 @@ impl ClientConnection {
 	/// Only use this when a client is in a game.
 	/// This does not respond to the client; the client is still expecting a response.
 	pub async fn send_prompt_bid(&mut self, chain_id: &mut u32) -> Result<Bid, Error> {
-		self.write(ChainId::ExpectResponse(*chain_id), Payload::GameEvent(GameEvent::PromptBid)).await?;
+		self.write(ChainId::ExpectResponse(*chain_id), Payload::GameEvent(GameEvent::PromptBid(None))).await?;
 		let (id, res) = self.read().await;
 		let ChainId::ExpectResponse(i) = id else {
 			return Err(Error::BadRequest);
@@ -634,7 +534,7 @@ impl ClientConnection {
 	/// Only use this when a client is in a game.
 	/// This does not respond to the client; the client is still expecting a response.
 	pub async fn send_prompt_card(&mut self, chain_id: &mut u32) -> Result<Card, Error> {
-		self.write(ChainId::ExpectResponse(*chain_id), Payload::GameEvent(GameEvent::PromptCard)).await?;
+		self.write(ChainId::ExpectResponse(*chain_id), Payload::GameEvent(GameEvent::PromptCard(None))).await?;
 		let (id, res) = self.read().await;
 		let ChainId::ExpectResponse(i) = id else {
 			return Err(Error::BadRequest);
@@ -698,23 +598,6 @@ impl ClientConnection {
 			.map_err(|_| Error::ServerError)
 	}
 
-	async fn renew_token(api: Client, auth_token: &str, renew_token: String) -> Result<String, Error> {
-		Ok(api
-			.post(URL_API_RENEW)
-			.bearer_auth(auth_token)
-			.json(&RenewRequest {renew_token})
-			.send()
-			.await
-			.map_err(|_| Error::NetworkError)?
-			.error_for_status()
-			.map_err(Error::from)?
-			.json::<RenewResponse>()
-			.await
-			.map_err(|_| Error::ServerError)?
-			.auth_token
-		)
-	}
-
 	async fn report_player(api: Client, auth_token: &str, report: &ReportPlayerRequest) -> Result<(), Error> {
 		api.post(URL_API_REPORT_PLAYER)
 			.bearer_auth(auth_token)
@@ -732,7 +615,6 @@ impl ClientConnection {
 	}
 }
 
-#[cfg(not(feature = "client"))]
 impl std::fmt::Debug for ClientConnection {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("ClientConnection")

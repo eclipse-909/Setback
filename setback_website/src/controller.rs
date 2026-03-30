@@ -1,30 +1,32 @@
 use {
-	crate::{
-		error::Result,
-		middleware::User,
-		models::*,
-	},
-	axum::{Extension, Json, extract::Multipart},
-	libsetback::{LoginRequest, LoginResponse, UsernameResponse, RenewRequest, RenewResponse},
+	crate::middleware::User,
+	axum::{Extension, Json},
+	libsetback::{SignupRequest, LoginRequest, LoginResponse, UsernameResponse, ReportPlayerRequest, FeedbackRequest},
 	sqlx::MySqlPool,
-	tower_cookies::{Cookies, cookie::Key}
+	tower_cookies::{Cookies, cookie::Key},
+	argon2::{
+		Argon2,
+		password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+	}
 };
+
+type Result<T> = core::result::Result<T, http::StatusCode>;
+
+pub async fn api_signup(
+	cookies: Cookies,
+	Extension(key): Extension<Key>,
+	Extension(db): Extension<MySqlPool>,
+	Json(req): Json<SignupRequest>,
+) -> Result<Json<LoginResponse>> {
+	todo!()
+}
 
 pub async fn api_login(
 	cookies: Cookies,
 	Extension(key): Extension<Key>,
 	Extension(db): Extension<MySqlPool>,
 	Json(req): Json<LoginRequest>,
-) -> Result<LoginResponse> {
-	todo!()
-}
-
-pub async fn api_signup(
-	cookies: Cookies,
-	Extension(key): Extension<Key>,
-	Extension(db): Extension<MySqlPool>,
-	Json(req): Json<LoginRequest>,
-) -> Result<LoginResponse> {
+) -> Result<Json<LoginResponse>> {
 	todo!()
 }
 
@@ -39,22 +41,22 @@ pub async fn api_logout(
 //TODO: only the server needs this so maybe we should restrict access and not make it public
 pub async fn api_username(
 	Extension(user): Extension<User>,
-) -> Result<UsernameResponse> {
+) -> Result<Json<UsernameResponse>> {
 	todo!()
 }
 
-pub async fn api_refresh(
-	cookies: Cookies,
-	Extension(key): Extension<Key>,
+pub async fn api_report(
 	Extension(user): Extension<User>,
-	Json(req): Json<RenewRequest>,
-) -> Result<RenewResponse> {
+	Json(req): Json<ReportPlayerRequest>,
+) -> Result<()> {
 	todo!()
 }
 
 pub async fn api_feedback(
 	Extension(user): Extension<User>,
-	multipart: Multipart,
+	Json(req): Json<FeedbackRequest>,
 ) -> Result<()> {
 	todo!()
 }
+
+pub async fn api_healthcheck() -> Result<()> {Ok(())}

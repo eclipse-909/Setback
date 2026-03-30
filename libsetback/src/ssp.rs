@@ -12,8 +12,6 @@ pub struct Ssp {
 	/// Only the server uses this internally.
 	#[serde(skip)]
 	pub src_id: u32,
-	/// Contains encrypted data to uniquely identify the user and prove their identity.
-	pub auth_token: String,
 	/// Chaining is how the program knows which responses go to which requests.
 	pub chain_id: ChainId,
 	/// The actual data being sent.
@@ -25,16 +23,6 @@ impl Ssp {
 		Self {
 			version: SSP_VERSION,
 			src_id: 0,
-			auth_token: String::new(),
-			chain_id,
-			payload,
-		}
-	}
-	pub const fn new_with_token(payload: Payload, chain_id: ChainId, auth_token: String) -> Self {
-		Self {
-			version: SSP_VERSION,
-			src_id: 0,
-			auth_token,
 			chain_id,
 			payload,
 		}
@@ -79,26 +67,13 @@ impl ChainId {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum Payload {
 	/// Client ---Authenticate--> Server<br>
-	/// Client <--Connect--- Server<br>
+	/// Client <--Ack--- Server<br>
 	/// Request only<br><br>
 	/// Client must send this immediately after attempting to connect to the server.
-	/// Client sends its account id as src_id and sends the auth token it got from logging into the website.
-	/// Server responds with Connect which carries the port number the client should reconnect to.
+	/// Client sends its account id as src_id and sends the auth token it got from logging into the API.
+	/// Server responds with Ack if authentication was successful.
+	/// Server responds with Err if authentication was unsuccessful.
 	Authenticate { auth_token: String },
-	/// Client ---RenewAuth--> Server<br>
-	/// Client <--RenewAuth--- Server<br>
-	/// Request and response<br><br>
-	/// Client sends renew token to server to get a new auth token.
-	/// Server responds with auth token if successful.
-	RenewAuth { token: String },
-	/// Client ---Authenticate--> Server<br>
-	/// Client <--Connect--- Server<br>
-	/// Response only<br><br>
-	/// Client must send Authenticate immediately after attempting to connect to the server.
-	/// Client sends its account id as src_id and sends the auth token it got from logging into the website.
-	/// Server responds with this which carries the port number the client should reconnect to.
-	/// Port 0 indicates reconnection is not necessary.
-	Connect { port: u16 },
 	/// Client <--Disconnect--- Server<br>
 	/// Spontaneous<br><br>
 	/// Informs you when another player disconnects and provides the index of that player.

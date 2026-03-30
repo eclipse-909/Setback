@@ -1,4 +1,3 @@
-use tokio::io::split;
 use {
 	crate::{SmallVec, constants::*, setup::*, Error},
 	serde::{Deserialize, Serialize},

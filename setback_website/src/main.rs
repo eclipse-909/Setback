@@ -1,21 +1,19 @@
-mod api;
 mod constants;
 mod controller;
-mod db;
-mod error;
-mod jwt;
 mod middleware;
-mod session;
-mod sql;
-mod models;
 
 use {
-	axum::{Extension, Router, routing::get_service},
+	crate::{
+		constants::*,
+		controller::*,
+		middleware::*,
+	},
+	libsetback::DNS_NAME,
+	axum::{Extension, Router, routing::{get_service, get, post}},
 	http::{Method, header::HeaderValue},
 	std::{
-		net::{IpAddr, SocketAddr},
+		net::{IpAddr, SocketAddr, Ipv4Addr},
 		path::Path,
-		str::FromStr
 	},
 	tower_cookies::{
 		CookieManagerLayer,
@@ -29,32 +27,45 @@ use {
 
 #[tokio::main]
 async fn main() {
-	dotenvy::dotenv().ok();
-
 	let api_routes = Router::new()
-	    .route("/login", post(api_login))
-	    .route("/signup", post(api_signup))
 	    .route("/logout", get(api_logout))
 	    .route("/username", get(api_username))
-	    .route("/refresh", post(api_refresh));
+	    .route("/report", post(api_report))
+	    .route("/feedback", post(api_feedback))
+		.route_layer(axum::middleware::from_fn(middleware_auth))
+	    .route("/signup", post(api_signup))
+	    .route("/login", post(api_login))
+	    .route("/healthcheck", get(api_healthcheck));
 
 	let app = Router::new()
 		.merge(Router::new().nest("/api", api_routes))
 		.fallback_service(get_service(
-			ServeDir::new(CLIENT_DIR)
-				.fallback(ServeFile::new(Path::new(CLIENT_DIR).join("html/file_not_found.html"))),
+			ServeDir::new(FRONTEND_DIR)
+				.fallback(ServeFile::new(Path::new(FRONTEND_DIR).join("html/404.html"))),
 		))
-		.layer(Extension(db::new_pool()))
+		.layer(Extension(
+			sqlx::mysql::MySqlPoolOptions::new()
+				.max_connections(8)
+				.connect(std::env::var(ENV_DB_URL).unwrap().as_str())
+				.await
+				.unwrap()
+		))
 		.layer(Extension(Key::generate()))
 		.layer(CookieManagerLayer::new())
 		.layer(CorsLayer::new()
-			.allow_origin(
-				front_end_url
+			.allow_origin([
+				"http://localhost:8080"
 					.parse::<HeaderValue>()
-					.expect("Invalid frontend_url format"),
-			)
+					.unwrap(),
+				"http://127.0.0.1:8080"
+					.parse::<HeaderValue>()
+					.unwrap(),
+				format!("http://{DNS_NAME}:8080")
+					.parse::<HeaderValue>()
+					.unwrap(),
+			])
 			.allow_credentials(true)
-			.allow_methods([Method::GET, Method::POST, Method::DELETE])
+			.allow_methods([Method::GET, Method::POST])
 			.allow_headers([
 				http::header::CONTENT_TYPE,
 				http::header::ACCEPT,
@@ -63,7 +74,7 @@ async fn main() {
 			])
 		);
 
-	let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080);
+	let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 8080);
 	let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 	axum::serve(listener, app.into_make_service()).await.unwrap();
 }

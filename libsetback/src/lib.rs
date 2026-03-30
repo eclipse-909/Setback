@@ -18,10 +18,9 @@ mod runtime;
 pub mod sdp;
 mod setup;
 mod small_vec;
+mod state;
 pub mod ssp;
 
-#[cfg(not(feature = "client"))]
-mod state;
 
 #[cfg(feature = "gpui")]
 mod global;
@@ -33,22 +32,16 @@ pub(crate) use {
 
 pub use {
 	arena::*,
-	connection::{setback_api, SetbackClient},
+	connection::{setback_api, SetbackClient, ClientConnection},
 	constants::*,
 	error::Error,
 	items::*,
 	models::*,
 	player::GameEventEmitter,
-	runtime::GameState,
+	runtime::{GameState, GameLoopHandle},
 	setup::GameSetup,
 	small_vec::*,
-};
-
-#[cfg(not(feature = "client"))]
-pub use {
 	state::*,
-	connection::ClientConnection,
-	runtime::GameLoopHandle
 };
 
 #[cfg(feature = "gpui")]
