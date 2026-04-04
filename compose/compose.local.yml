@@ -1,0 +1,128 @@
+# compose.local.yml — Run the setbackd locally.
+# Usage: docker compose -f compose/compose.local.yml up -d
+
+name: setbackd
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxy_net
+    ports:
+      - "127.0.0.1:80:80"       # setback_website (HTTP -> HTTPS redirect)
+      - "127.0.0.1:443:443"     # setback_website (HTTPS)
+      - "127.0.0.1:42069:42069" # setback_service
+      - "127.0.0.1:8080:8080"   # Traefik Dashboard
+      - "127.0.0.1:8081:8081"   # phpmyadmin
+      - "127.0.0.1:3306:3306"   # database
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_logs:/var/log/traefik
+      - ./traefik/traefik.local.yml:/etc/traefik/traefik.yml:ro
+      # Mount shared middlewares and the local-specific TLS file into the same
+      # directory. tls.prod.yml is never mounted in local, and vice versa.
+      - ./traefik/dynamic/middlewares.yml:/etc/traefik/dynamic/middlewares.yml:ro
+      - ./traefik/dynamic/tls.local.yml:/etc/traefik/dynamic/tls.yml:ro
+      - ./certs:/etc/traefik/certs:ro
+
+  setback_service:
+    build:
+      context: ./setback_service
+      args:
+        profile: debug
+    restart: unless-stopped
+    expose:
+      - "42069"
+    networks:
+      - proxy_net
+    stop_grace_period: 6h
+    depends_on:
+      setback_website:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.setback-service.entrypoints=tcp-service"
+      - "traefik.tcp.routers.setback-service.tls=true"
+      - "traefik.tcp.services.setback-service.loadbalancer.server.port=42069"
+      - "traefik.tcp.services.setback-service.loadbalancer.healthcheck.port=42069"
+      - "traefik.tcp.services.setback-service.loadbalancer.healthcheck.interval=10s"
+      # Accept all SNI — no real domain needed in dev
+      - "traefik.tcp.routers.setback-service.rule=HostSNI(`*`)"
+      # Self-signed cert (declared in tls.dev.yml)
+      - "traefik.tcp.routers.setback-service.tls.options=dev@file"
+
+  setback_website:
+    build:
+      context: ./setback_website
+      args:
+        profile: debug
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: mysql://root:password@mysql:3306/setbackdb
+    expose:
+      - "8080"
+    networks:
+      - proxy_net
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/healthcheck" ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      mysql:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.setback-website.entrypoints=websecure"
+      - "traefik.http.routers.setback-website.tls=true"
+      - "traefik.http.routers.setback-website.middlewares=security-headers@file,rate-limit@file"
+      - "traefik.http.services.setback-website.loadbalancer.server.port=8080"
+      - "traefik.http.services.setback-website.loadbalancer.healthcheck.path=/health"
+      - "traefik.http.services.setback-website.loadbalancer.healthcheck.interval=5s"
+      - "traefik.http.services.setback-website.loadbalancer.healthcheck.timeout=3s"
+      - "traefik.http.routers.setback-website.rule=Host(`localhost`, `setback.localhost`)"
+      - "traefik.http.routers.setback-website.tls.options=default@file"
+
+  mysql:
+    image: mysql:latest
+    container_name: mysql
+    restart: unless-stopped
+    networks:
+      - proxy_net
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: setbackdb
+    expose:
+      - "3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: [ "CMD-SHELL", "mysqladmin ping -h localhost" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  phpmyadmin:
+    image: phpmyadmin:alpine
+    container_name: phpmyadmin
+    restart: unless-stopped
+    networks:
+      - proxy_net
+    ports:
+      - "8081:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  traefik_logs:
+  mysql_data:
+
+networks:
+  proxy_net:
+    driver: bridge

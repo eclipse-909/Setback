@@ -5,6 +5,7 @@
 
 # ── Build stage ───────────────────────────────────────────────────────────────
 FROM rust:latest AS builder
+ARG profile=debug
 
 WORKDIR /app
 
@@ -24,7 +25,7 @@ RUN mkdir -p setback_server/src setback_website/src \
     && echo "fn main() {}" > setback_website/src/main.rs \
     && echo "fn main() {}" > setbackctl/src/main.rs
 
-RUN cargo +nightly build -p setback_server
+RUN cargo +nightly build -p setback_server --profile ${profile}
 RUN rm -rf libsetback/src setback/src setback_server/src setback_website/src setbackctl/src
 
 # Copy real source and build for real
@@ -35,7 +36,7 @@ COPY setback_website/src ./setback_website/src
 COPY setbackctl/src ./setbackctl/src
 
 RUN touch setback_server/src/main.rs
-RUN cargo +nightly build -p setback_server
+RUN cargo +nightly build -p setback_server --profile ${profile}
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -46,7 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY --from=builder /app/target/debug/setback_server ./setback_server
+COPY --from=builder /app/target/${profile}/setback_server ./setback_server
 
 EXPOSE 42069
 
