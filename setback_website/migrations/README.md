@@ -1,0 +1,1 @@
+All sql files should be MySql compatible.

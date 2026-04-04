@@ -1,0 +1,33 @@
+name: setbackd
+
+services:
+  setback_service:
+    image: ${SETBACK_SERVICE_IMAGE}
+    restart: unless-stopped
+    expose:
+      - "42069"
+    networks:
+      - proxy_net
+    stop_signal: SIGTERM
+    stop_grace_period: 6h5m
+    depends_on:
+      setback_website:
+        condition: service_healthy
+
+  setback_website:
+    image: ${SETBACK_WEBSITE_IMAGE}
+    restart: unless-stopped
+    expose:
+      - "8080"
+    networks:
+      - proxy_net
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/healthcheck" ]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+networks:
+  proxy_net:
+    external: true

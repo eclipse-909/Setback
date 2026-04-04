@@ -1,201 +1,157 @@
+use std::io::Write;
+use std::path::Path;
+use tokio_util::codec;
 use {
-	crate::mp_game::{MPGame, Games, MAX_GAMES},
-	libsetback::{TcpClient, ssp, Protocol, Version, Player, Error, ClientError, spawn_async, spawn_sync},
+	libsetback::{*, sdp::*},
+	reqwest::Client,
+	scc::{HashMap, hash_map::Entry},
 	std::{
-		collections::HashMap,
-		sync::{Arc, RwLock, RwLockWriteGuard, RwLockReadGuard}
+		net::{Ipv4Addr, SocketAddrV4, SocketAddr},
+		process::exit,
+		sync::{atomic::Ordering, Arc},
 	},
 	tokio::{
-		io::AsyncWriteExt,
-		net::TcpListener,
-		sync::{watch, mpsc},
-		time::{self, Duration, Interval}
+		net::{TcpListener, UnixDatagram, TcpStream},
+		signal::unix::{SignalKind, signal},
+		sync::mpsc::{self, UnboundedSender, UnboundedReceiver},
 	},
-	bincode::config::{Configuration, standard}
+	tokio_util::sync::CancellationToken,
+	tracing::{error, info, warn}
 };
 
-mod mp_game;
-mod client_connection;
-mod constants;
+const BIN_VERSION: Version = pkg_version!();
 
-type Clients = Arc<RwLock<HashMap<u32, Arc<RwLock<TcpClient>>>>>;
+macro_rules! crash {
+	($fmt:expr) => {{
+		error!($fmt);
+		std::io::stdout().flush();
+		exit(1);
+	}};
+	($fmt:expr, $arg0:expr) => {
+		|$arg0| {
+			error!($fmt, $arg0);
+			std::io::stdout().flush();
+			exit(1);
+		}
+	};
+}
 
-const SOCKET: &str = if cfg!(debug_assertions) {"127.0.0.1:42069"} else {"0.0.0.0:42069"};
-const MIN_CLIENTS: usize = 20;
-const MAX_CLIENTS: usize = 1000;
+fn main() {
+	// Setup logger, runtime, SIGTERM handler, API connection, and unix socket to setbackd
+	tracing_subscriber::fmt()
+		.with_writer(std::io::stdout)
+		.with_level(true)
+		.compact()
+		.init();
 
-#[tokio::main]
-async fn main() {
-	//create the server in main
-	let listener: TcpListener = TcpListener::bind(SOCKET).await.unwrap_or_else(|_| panic!("Server could not be bound to {}", SOCKET));
-	//these clients are owned by the server. other hashmaps will be owned by individual games, which are owned by the server
-	let clients: Clients = Arc::new(RwLock::new(HashMap::new()));
-	//the lobbies/games that are active
-	let games: Games = Arc::new(RwLock::new(HashMap::new()));
-	//sending will terminate all select! expressions with a receiver
-	let (server_terminator_tx, server_terminator_rx) = watch::channel::<()>(());
-	//communication between each client and the server
-	let (client_tx, mut client_rx) = mpsc::unbounded_channel::<Ssp>();
+	let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+	let _rt_guard = rt.enter();
 
-	//when clients receive messages in their TCP streams, they will send messages to the server.
-	//those messages go here, so they can be handled or relayed to other clients.
-	let clients_clone: Clients = clients.clone();
-	let server_term_tx: watch::Sender<()> = server_terminator_tx.clone();
-	let server_term_rx: watch::Receiver<()> = server_terminator_rx.clone();
-	spawn_async(server_terminator_rx.clone(), async move {
-		loop {
-			let Some(ssp) = client_rx.recv().await else {continue;};
-			match &ssp.protocol {
-				Protocol::Disconnect => {remove_player(&clients_clone, ssp.src_id).await;}
-				Protocol::CreateGame => {
-					if games.read().unwrap().len() >= MAX_GAMES as usize {
-						send_error_back(&clients_clone, ssp.src_id, Error::GamesAtCapacity).await;
-						continue;
-					}
-					let Some(client) = clients_clone.write().unwrap().remove(&ssp.src_id) else {continue;};
-					//create the bevy_game and add the client to it
-					let game: Arc<RwLock<MPGame>> = MPGame::create(games.clone(), server_term_tx.clone(), server_term_rx.clone()).await;
-					let mut game_guard: RwLockWriteGuard<MPGame> = game.write().unwrap();
-					game_guard.add_client(client.clone(), true).await;
-					//fill the rest with AIs
-					while game_guard.can_add_player() {
-						let team_id: u8 = (game_guard.sp_game.players.len() % 2) as u8;
-						game_guard.sp_game.players.push(Player::new_ai(team_id));
-					}
-					//Send bevy_game info back to client, letting them know they've joined the lobby
-					if client.write().unwrap().message_client(&ssp::new(Protocol::Game(game_guard.sp_game.meta_data.clone(), game_guard.sp_game.players.clone()))).await.is_err() {
-						remove_player(&clients_clone, ssp.src_id).await;
-					}
-				}
-				Protocol::JoinGame(code) => {
-					let games_guard: RwLockReadGuard<HashMap<u32, Arc<RwLock<MPGame>>>> = games.read().unwrap();
-					let Some(game) = games_guard.get(code) else {
-						send_error_back(&clients_clone, ssp.src_id, Error::GameNotFound).await;
-						continue;
-					};
-					let mut game_guard: RwLockWriteGuard<MPGame> = game.write().unwrap();
-					if !game_guard.can_add_player() {
-						send_error_back(&clients_clone, ssp.src_id, Error::GameAtCapacity).await;
-						continue;
-					}
-					let Some(client) = clients_clone.write().unwrap().remove(&ssp.src_id) else {continue;};
-					game_guard.add_client(client.clone(), false).await;
-					if client.write().unwrap().message_client(&ssp::new(Protocol::Game(game_guard.sp_game.meta_data.clone(), game_guard.sp_game.players.clone()))).await.is_err() {
-						remove_player(&clients_clone, ssp.src_id).await;
-					}
-				}
-				Protocol::SearchGames(filter) => {
-					send_message(&clients_clone, &ssp::new(Protocol::GameMetas(MPGame::get_game_metas(&games, filter).await)), ssp.src_id).await;
-				}
-				_ => {send_error_back(&clients_clone, ssp.src_id, Error::InvalidProtocol).await;}
+	let mut sigterm = signal(SignalKind::terminate())
+		.unwrap_or_else(crash!("Could not create SIGTERM handler. Error: {}", e));
+	let master_cancel_token = CancellationToken::new();
+	let cancel_token = master_cancel_token.clone();
+	rt.spawn(async move {
+		sigterm.recv().await;
+		cancel_token.cancel();
+	});
+
+	let api = setback_api()
+		.unwrap_or_else(crash!("Could not connect to setback public api."));
+
+	let sock = UnixDatagram::bind(setback_server_unix_socket(unsafe {libc::getpid()}))
+		.unwrap_or_else(crash!("Could not bind unix socket. Error: {}", e));
+
+	// Create tcp listener, and setup communication loops for unix socket and tcp listener
+	rt.block_on(async move {
+		let tcp_stream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+			.await
+			.unwrap_or_else(crash!("Could not bind tcp listener. Error: {}", e));
+		let port = tcp_stream.local_addr()
+			.unwrap_or_else(crash!("Could not get tcp listener port. Error: {}", e))
+			.port();
+
+		let state = State::new();
+		let cancel_token = master_cancel_token.clone();
+		tokio::spawn(async move {
+			tokio::select! {
+				_ = listen_unix_socket(sock, port) => unreachable_unchecked!("Unix socket listener should never return"),
+				_ = cancel_token.cancelled() => {}
 			}
+		});
+
+		tokio::select! {
+			_ = listen_tcp_socket(tcp_stream, api, state.clone()) => unreachable_unchecked!("TCP socket listener should never return"),
+			_ = master_cancel_token.cancelled() => {}
 		}
 	});
 
-	//continuously try to accept clients
-	spawn_sync(server_terminator_rx.clone(), async move {
-		loop {
-			//accept a new client
-			let Ok((mut tcp_stream, _)) = listener.accept().await else {continue;};
-			if clients.read().unwrap().len() as u32 == MAX_CLIENTS {
-				let _ = tcp_stream.shutdown().await;
-				continue;
-			}
-			
-			//Wait for the client to send the account_id
-			let tx: mpsc::UnboundedSender<Ssp> = client_tx.clone();
-			let client: Arc<RwLock<TcpClient>> = Arc::new(RwLock::new(TcpClient::new(tcp_stream, tx)));
-			//The client has 3 seconds to send a SyncID protocol before it is automatically disconnected.
-			let mut interval: Interval = time::interval(Duration::from_secs(3));
-			interval.tick().await;
-			let mut buf: Vec<u8> = vec![0; 1024];
-			let mut id: u32 = 0;
-			let mut client_guard: RwLockWriteGuard<TcpClient> = client.write().unwrap();
-			if !tokio::select! {
-				_ = interval.tick() => {false}
-				result = client_guard.read(&mut buf) => {
-					match result {
-						Ok(0) | Err(_) => {false}
-						Ok(n) => {
-							let Ok((Ssp{
-								version,
-								src_id,
-								protocol: Protocol::Connect
-							},_)) = bincode::decode_from_slice::<Ssp, Configuration>(&buf[..n as usize], standard()) else {return false;};
-							if version != Version::LATEST {return false;}
-							id = src_id;
-							true
-						}
-					}
+	todo!("Find out how to block on all running tasks");
+	info!("setback_server-{} shutdown", BIN_VERSION);
+	std::io::stdout().flush();
+}
+
+async fn listen_unix_socket(sock: UnixDatagram, port: u16) -> ! {
+	let buf = [0u8; codec::MAX_LEN].as_mut_slice();
+	if let Ok(buf) = Sdp::new(Payload::NotifyStart(StartInfo {
+		port,
+		version: BIN_VERSION,
+		addr: setbackd_unix_socket().to_string_lossy().to_string(),
+	})).serialize(buf) {
+		sock.send_to(buf, setbackd_unix_socket()).await;
+	}
+	loop {
+		let addr = match sock.recv_from(buf).await {
+			Ok(r) => {
+				if r.1.as_pathname().unwrap_or(Path::new("")) != setbackd_unix_socket() {
+					warn!("Only setbackd is allowed to communicate with setback_server over this socket");
+					continue;
 				}
-			} /*if the SyncID message cannot be properly received*/ {
-				let _ = client_guard.shutdown().await;
+				r.1
+			}
+			Err(e) => {
+				warn!("Error receiving message from unix socket. Error: {e}");
 				continue;
 			}
-			client_guard.account_id = id;
-			if client_guard.message_client(&ssp::new(Protocol::Connect)).await.is_err() {continue;}
-			drop(client_guard);
-
-			//manage client in concurrent task
-			let client_clone: Arc<RwLock<TcpClient>> = client.clone();
-			let client_clone1: Arc<RwLock<TcpClient>> = client.clone();
-			clients.write().unwrap().insert(id, client);
-			let server_term_rx: watch::Receiver<()> = server_terminator_rx.clone();
-			let clients_clone: Clients = clients.clone();
-			tokio::spawn(async move {
-				//listen for messages and send them to the server/bevy_game
-				spawn_sync(server_term_rx, async move {
-					loop {
-						let mut client_guard: RwLockWriteGuard<TcpClient> = client_clone.write().unwrap();
-						match client_guard.read(&mut buf).await {
-							Ok(0) | Err(_) => {break;}
-							Ok(n) => {
-								match bincode::decode_from_slice::<Ssp, Configuration>(&buf[..n as usize], standard()) {
-									Ok((ssp, _)) => {
-										if ssp.version != Version::LATEST {
-											let _ = client_guard.message_client(&ssp::new(Protocol::ClientErr(ClientError::WrongVersion))).await;
-											break;
-										}
-										if client_guard.owner_tx.send(ssp).is_err() {break}
-									}
-									Err(_) => {
-										if client_guard.message_client(&ssp::new(Protocol::ServerErr(Error::Deserialization))).await.is_err() {break;}
-									}//1
-								}//2
-							}//3
-						}//4 - I wonder what will come next...
-					}//5 - OMG, five!
-				}).await;
-
-				//remove the client from the HashMap before the task ends, and shutdown the TcpStream
-				let mut client_guard1: RwLockWriteGuard<TcpClient> = client_clone1.write().unwrap();
-				let _ = client_guard1.shutdown().await;
-				let _ = client_guard1.owner_tx.send(ssp::new_with_src(Protocol::Disconnect, client_guard1.account_id));
-			});
+		};
+		// Result<received payload to handle, payload to send back immediately>
+		let payload = Sdp::deserialize(buf)
+			.and_then(|sdp| if !sdp.version.is_compatible(SDP_VERSION) {Err(Error::BadVersion)} else {Ok(sdp.payload)});
+		let payload = match payload {
+			Ok(p) => {
+				match p {
+					Payload::Err(err) => {
+						todo!("maybe implement retries?");
+						continue;
+					}
+					Payload::PsReq => {
+						todo!("send back PsRes")
+					}
+					_ => Payload::Err(Error::BadProtocol),
+				}
+			}
+			Err(e) => Payload::Err(e),
+		};
+		if let Ok(buf) = Sdp::new(payload).serialize(buf) {
+			sock.send_to(buf, addr).await;
 		}
-	}).await;
-	//the server is shut down if this line is reached
-}
-
-async fn send_message(clients: &Clients, ssp: &Ssp, dest_id: u32) {
-	let clients_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> = clients.write().unwrap();
-	let Some(client) = clients_guard.get(&dest_id) else {return;};
-	if client.write().unwrap().message_client(ssp).await.is_err() {
-		remove_player(clients, dest_id).await;
 	}
 }
 
-async fn send_error_back(clients: &Clients, src_id: u32, err: Error) {
-	let client_guard: RwLockWriteGuard<HashMap<u32, Arc<RwLock<TcpClient>>>> = clients.write().unwrap();
-	let Some(client) = client_guard.get(&src_id) else {return;};
-	if client.write().unwrap().message_client(&ssp::new(Protocol::ServerErr(err))).await.is_err() {
-		remove_player(clients, src_id).await;
-	}
-}
-
-///Removes a player from the hashmap of players, shuts down the TcpSteam, and drops it
-async fn remove_player(clients: &Clients, id: u32) {
-	if let Some(client) = clients.write().unwrap().remove(&id) {
-		let _ = client.write().unwrap().shutdown().await;
+async fn listen_tcp_socket(listener: TcpListener, api: Client, state: Arc<State>) -> ! {
+	loop {
+		match listener.accept().await {
+			Ok((stream, addr)) => {
+				// Under normal usage, the client will have authenticated with setbackd prior to connecting here.
+				// Since this port is open and accepting connections, we must assume that anyone can directly connect here.
+				if let Some(client) = ClientConnection::new(stream, api.clone(), addr).await {
+					client.spawn_read_loop_for_server(state.clone());
+				}
+			}
+			Err(e) => warn!("Could not accept client. Error: {e}")
+		}
 	}
 }

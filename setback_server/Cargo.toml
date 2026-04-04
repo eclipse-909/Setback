@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bincode.workspace = true
+libc.workspace = true
 libsetback.workspace = true
 rand.workspace = true
+reqwest.workspace = true
+scc.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

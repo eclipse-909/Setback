@@ -1,0 +1,62 @@
+# traefik/traefik.prod.yml — Production static configuration
+#
+# Mounted into the Traefik container as /etc/traefik/traefik.yml by
+# compose.prod.yml.
+#
+# Prod specifics vs dev:
+#   - Let's Encrypt TLS-ALPN-01 certificate resolver
+#       - Most secure ACME challenge: operates entirely over port 443
+#       - Port 80 is only used for HTTP→HTTPS redirects, not for cert issuance
+#       - Not vulnerable to BGP hijacking attacks that affect HTTP-01
+#       - No DNS provider API key required (unlike DNS-01)
+#   - Dashboard only accessible via an authenticated HTTPS router (no insecure port)
+#   - Log level INFO
+#   - Global HTTP → HTTPS redirect enforced at the entrypoint level
+
+api:
+  dashboard: true
+  # insecure is NOT set — dashboard is only accessible through the
+  # authenticated router defined in compose.prod.yml
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+
+  tcp-service:
+    address: ":42069"
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      # Replace with your real email — Let's Encrypt sends expiry notices here
+      email: "ethieq909@gmail.com"
+      storage: "/letsencrypt/acme.json"
+      tlsChallenge: {}   # Proof-of-ownership over port 443 — no port 80 required
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: proxy_net
+    watch: true
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+log:
+  level: INFO
+
+accessLog:
+  filePath: "/var/log/traefik/access.log"
+  bufferingSize: 100

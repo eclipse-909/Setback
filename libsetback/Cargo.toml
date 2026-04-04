@@ -4,9 +4,38 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bincode.workspace = true
+futures.workspace = true
+gpui = { workspace = true, optional = true }
+postcard.workspace = true
 rand.workspace = true
 reqwest.workspace = true
+rustls.workspace = true
+scc.workspace = true
 serde.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
+tokio-serde.workspace = true
 tokio-util.workspace = true
+tracing.workspace = true
+webpki-roots.workspace = true
+
+[dev-dependencies]
+trybuild.workspace = true
+libsetback.workspace = true
+tracing-subscriber.workspace = true
+
+[features]
+client = [] # ~client -> server
+gpui = ["client", "dep:gpui"]
+test-dep = []
+
+[[example]]
+name = "singleplayer"
+required-features = ["client"]
+
+[[test]]
+name = "ai_only"
+required-features = ["client", "test-dep"]
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

@@ -1,68 +1,56 @@
 use serde::{Deserialize, Serialize};
 
-///Used for /api/login
+/// POST /api/login
 #[derive(Serialize, Deserialize)]
 pub struct LoginRequest {
-	pub username: String,
-	pub password: String
+	pub username_or_email: String,
+	pub password: String,
 }
 
-///Used for /api/login
+/// POST /api/signup
+#[derive(Serialize, Deserialize)]
+pub struct SignupRequest {
+	pub username: String,
+	pub email: String,
+	pub password: String,
+}
+
+/// POST /api/login and POST /api/signup
 #[derive(Serialize, Deserialize)]
 pub struct LoginResponse {
 	pub auth_token: String,
-	pub refresh_token: String,
-	pub account_id: u32
-}
-
-///Used for /api/signup
-pub type SignupRequest = LoginRequest;
-
-///Used for /api/signup
-pub type SignupResponse = LoginResponse;
-
-///Used for /api/refresh
-#[derive(Serialize, Deserialize)]
-pub struct RefreshRequest {
-	pub refresh_token: String
-}
-
-///Used for /api/refresh
-#[derive(Serialize, Deserialize)]
-pub struct RefreshResponse {
-	pub auth_token: String
-}
-
-///Used for /api/id
-#[derive(Serialize, Deserialize)]
-pub struct IdResponse {
-	pub account_id: u32
-}
-
-///Used for /api/change_username
-#[derive(Serialize, Deserialize)]
-pub struct ChangeUsernameRequest {
-	pub username: String
-}
-
-///Used for /api/change_password
-#[derive(Serialize, Deserialize)]
-pub struct ChangePasswordRequest {
-	pub password: String
-}
-
-///Used for /api/update
-#[derive(Serialize, Deserialize)]
-pub struct UpdateResponse {
-	pub update_available: bool
-}
-
-///Used for database
-#[derive(Serialize, Deserialize)]
-pub struct AccountData {
-	///alias for rowid in sqlite
-	pub account_id: u32,
+	pub renew_token: String,
 	pub username: String,
-	pub password: String,
-	pub last_active: String
+}
+
+/// GET /api/username
+#[derive(Serialize, Deserialize)]
+pub struct UsernameResponse {
+	pub username: String,
+	pub account_id: u32,
+}
+
+/// POST /api/report
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ReportPlayerRequest {
+	username: String,
+	idx: u8,
+	reason: ReportReason,
+	description: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ReportReason {
+	/// Stalling is automatically reported, and the player is kicked from the game if they don't play for 3 turns in a game.
+	Stalling,
+	/// A player is exploiting a bug or vulnerability in the game to give themselves or another player an unfair advantage.
+	Hacking,
+	/// A player is using external communication with teammates or opponents to influence the outcome of the game.
+	Cheating,
+}
+
+/// POST /api/feedback
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FeedbackRequest {
+	description: String,
 }

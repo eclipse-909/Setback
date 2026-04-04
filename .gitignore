@@ -1,8 +1,20 @@
-/target
+# security
+.env*
+/*/.env*
+
+# editors
 /.idea
 /.zed
-setback.db
-rustc-ice-*
-/setback/logs/*
+/.vscode
+
+# generated
+/certs
+/setback/settings.json
 /setback/usr.crd
-/setback/settings.cfg
+/target
+/docs
+/*/logs
+
+# scratch space
+/tmp
+/*.bak

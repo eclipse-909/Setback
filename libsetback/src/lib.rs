@@ -1,23 +1,51 @@
+#![feature(
+	allocator_api,
+	const_slice_make_iter,
+	maybe_uninit_uninit_array_transpose,
+	const_format_args,
+	unsafe_cell_access,
+	sync_unsafe_cell,
+)]
+
+mod arena;
+mod connection;
 mod constants;
-mod ssp;
-mod player;
+mod error;
 mod items;
 mod models;
-mod connection;
-mod game;
-mod setup_data;
-mod unit_tests;
+mod player;
+mod runtime;
+pub mod sdp;
+mod setup;
+mod small_vec;
+mod state;
+pub mod ssp;
 
-pub use {
-	constants::*,
-	ssp::*,
+
+#[cfg(feature = "gpui")]
+mod global;
+
+pub(crate) use {
 	player::*,
-	items::*,
-	models::*,
-	connection::*,
-	game::*,
-	setup_data::*
+	setup::*,
 };
 
-#[cfg(test)]
-pub use unit_tests::testing::*;
+pub use {
+	arena::*,
+	connection::{setback_api, SetbackClient, ClientConnection},
+	constants::*,
+	error::Error,
+	items::*,
+	models::*,
+	player::GameEventEmitter,
+	runtime::{GameState, GameLoopHandle},
+	setup::GameSetup,
+	small_vec::*,
+	state::*,
+};
+
+#[cfg(feature = "gpui")]
+pub use {
+	global::*,
+	player::GpuiEventEmitter
+};
