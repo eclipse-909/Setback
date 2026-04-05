@@ -10,6 +10,7 @@ use {
 #[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
 pub enum Error {
 	Unknown,
+	BadEnvVar,
 	NetworkError,
 	BadEncoding,
 	BadRequest,
@@ -39,6 +40,7 @@ impl Display for Error {
 			f, "{}",
 			match self {
 				Error::Unknown => "An unknown error occurred. Please report this.",
+				Error::BadEnvVar => "Environment variable is not set. Please set it and try again.",
 				Error::NetworkError => "Network error. Please try again later.",
 				Error::BadEncoding => "Message is not in proper encoding.",
 				Error::BadRequest => "Bad request.",

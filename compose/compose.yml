@@ -1,9 +1,13 @@
+# compose.yml — Run setbackd in dev and prod environments for deployment
+
 name: setbackd
 
 services:
   setback_service:
     image: ${SETBACK_SERVICE_IMAGE}
     restart: unless-stopped
+    env_file:
+      - .env
     expose:
       - "42069"
     networks:
@@ -17,6 +21,8 @@ services:
   setback_website:
     image: ${SETBACK_WEBSITE_IMAGE}
     restart: unless-stopped
+    env_file:
+      - .env
     expose:
       - "8080"
     networks:

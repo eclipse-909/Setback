@@ -177,6 +177,8 @@ impl SetbackClient {
 	}
 
 	async fn make_tls_stream() -> Result<(TlsReader, TlsWriter), Error> {
+		let dns_name = std::env::var("DNS_NAME")
+			.map_err(|_| Error::BadEnvVar)?;
 		let mut root_cert_store = RootCertStore::empty();
 		root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 		// Don't hover over or inspect       ^^^^^^^^^^^^^^^^
@@ -185,7 +187,7 @@ impl SetbackClient {
 			.with_root_certificates(root_cert_store)
 			.with_no_client_auth();
 		let connector = TlsConnector::from(Arc::new(config));
-		let dns_name = ServerName::try_from(DNS_NAME).unwrap();
+		let dns_name = ServerName::try_from(dns_name).unwrap();
 		let tcp_stream = TcpStream::connect(SETBACK_SERVER_SOCKET)
 			.await
 			.map_err(|_| Error::ServerDown)?;

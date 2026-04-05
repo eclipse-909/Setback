@@ -13,19 +13,34 @@ else
 fi
 
 CARGO_METADATA=$(cargo metadata --no-deps --format-version=1)
-IMAGES=( "setback_server" "setback_website" )
 
-for IMG in "${IMAGES[@]}"; do
-    (
-        set -e
-        VERSION=$(echo "$CARGO_METADATA" | jq -r --arg name "$IMG" '.packages[] | select(.name == $name) | .version')
-        docker build \
-            --platform linux/arm64 \
-            -t eclipse909/private:"$IMG"-"$setback_env"-v"$VERSION" \
-            --build-arg profile="$cargo_profile" \
-            "$IMG"/
-        docker push eclipse909/private:"$IMG"-"$setback_env"-v"$VERSION"
-    ) &
-done
+setback_docker_build_and_push() {
+	# $1 = package
+	if [ -z "$1" ]; then
+		echo "please specify package name"
+		exit 1
+	fi
+	# $2 = port
+	if [ -z "$1" ]; then
+		echo "please specify port number"
+		exit 1
+	fi
+
+	VERSION=$(echo "$CARGO_METADATA" | jq -r --arg name "$1" '.packages[] | select(.name == $name) | .version')
+
+	docker build \
+		--platform linux/arm64 \
+		-t eclipse909/private:"$1"-"$setback_env"-v"$VERSION" \
+		--build-arg PROFILE="$cargo_profile" \
+		--build-arg PACKAGE="$1" \
+		--build-arg PORT="$2" \
+		.
+
+	docker push eclipse909/private:"$1"-"$setback_env"-v"$VERSION"
+}
+
+#                             <package>         <port>
+setback_docker_build_and_push "setback_server"  "42069" &
+setback_docker_build_and_push "setback_website" "8080"  &
 
 wait

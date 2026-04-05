@@ -9,14 +9,16 @@
 #   - Log level DEBUG for visibility
 #   - No HTTPS enforcement on the API
 
+# traefik dashboard
 api:
   debug: true
   dashboard: true
   disabledashboardad: true
-  insecure: true   # Dashboard on :8080 — safe because compose binds it to 127.0.0.1 only
+  insecure: true # binds to :8080 with http in local development builds
 
 entryPoints:
-  web: # setback-website (HTTP -> HTTPS)
+  # setback-website (HTTP -> HTTPS)
+  web:
     address: ":80"
     http:
       redirections:
@@ -25,7 +27,8 @@ entryPoints:
           scheme: https
           permanent: true
 
-  websecure: # setback-website (HTTPS)
+  # setback-website (HTTPS)
+  websecure:
     address: ":443"
     http:
       tls: {}

@@ -1,7 +1,7 @@
-# traefik/traefik.prod.yml — Production static configuration
+# traefik/traefik.yml — Development and production static configuration
 #
 # Mounted into the Traefik container as /etc/traefik/traefik.yml by
-# compose.prod.yml.
+# compose.yml.
 #
 # Prod specifics vs dev:
 #   - Let's Encrypt TLS-ALPN-01 certificate resolver

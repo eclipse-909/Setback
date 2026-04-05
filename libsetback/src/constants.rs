@@ -51,10 +51,6 @@ pub const PAGE_SIZE: usize = 4096;
 pub const MAX_CLIENTS: usize = 10_000;
 pub const MAX_GAMES: usize = 10_000;
 
-// networking
-
-pub const DNS_NAME: &str = "setback.com";
-
 // files
 
 macro_rules! runtime_dir {($path:literal) => {concat!("/run/setback/", $path)};}
