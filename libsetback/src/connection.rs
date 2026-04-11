@@ -8,6 +8,7 @@ use {
 		sync::Arc,
 		net::SocketAddr,
 		time::Duration,
+		env,
 	},
 	scc::hash_map::Entry,
 	tokio::{
@@ -25,7 +26,7 @@ use {
 		sync::CancellationToken,
 		codec::{FramedWrite, FramedRead, LengthDelimitedCodec}
 	},
-	tracing::{info, warn}
+	tracing::{info, warn, error}
 };
 
 pub fn setback_api() -> Option<Client> { Client::builder().cookie_store(true).build().ok() }
@@ -177,8 +178,14 @@ impl SetbackClient {
 	}
 
 	async fn make_tls_stream() -> Result<(TlsReader, TlsWriter), Error> {
-		let dns_name = std::env::var("DNS_NAME")
-			.map_err(|_| Error::BadEnvVar)?;
+		let dns_name = match env::var("DNS_NAME") {
+			Ok(name) => name,
+			Err(env::VarError::NotPresent) => String::from(DEFAULT_SETBACK_DNS_NAME),
+			Err(env::VarError::NotUnicode(var)) => {
+				error!("Value for environment variable DNS_NAME is not a valid unicode string: {var:?}");
+				return Err(Error::BadEnvVar);
+			}
+		};
 		let mut root_cert_store = RootCertStore::empty();
 		root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 		// Don't hover over or inspect       ^^^^^^^^^^^^^^^^
@@ -187,11 +194,11 @@ impl SetbackClient {
 			.with_root_certificates(root_cert_store)
 			.with_no_client_auth();
 		let connector = TlsConnector::from(Arc::new(config));
-		let dns_name = ServerName::try_from(dns_name).unwrap();
-		let tcp_stream = TcpStream::connect(SETBACK_SERVER_SOCKET)
+		let tcp_stream = TcpStream::connect(format!("{dns_name}:{SETBACK_SERVER_PORT}"))
 			.await
-			.map_err(|_| Error::ServerDown)?;
-		let (r, w) = tokio::io::split(connector.connect(dns_name, tcp_stream).await?);
+			.map_err(|_| Error::NetworkError)?;
+		let server_name = ServerName::try_from(dns_name).unwrap();
+		let (r, w) = tokio::io::split(connector.connect(server_name, tcp_stream).await?);
 		let codec = new_length_delimited_codec();
 		Ok((
 			Framed::new(FramedRead::new(r, codec.clone()), Bincode::default()),

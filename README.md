@@ -3,6 +3,7 @@
 
 This mono-repo contains the source code for all Setback programs, server and client side. See the READMEs below for more detail on each workspace.
 
+- [keepalive](keepalive/README.md) – CPU waster to prevent Oracle from reclaiming the VPS.
 - [libsetback](libsetback/README.md) – Library for shared code.
 - [setback](setback/README.md) – Setback game client.
 - [setback_server](setback_server/README.md) – Dedicated game server to host multiplayer games.

@@ -67,20 +67,20 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user
-RUN groupadd --system app \
-    && useradd --system --gid app --no-create-home app
+RUN groupadd --system setback \
+    && useradd --system --gid setback --no-create-home setback
 
-WORKDIR /app
+WORKDIR /setback
 
 # Copy the compiled binary from the builder stage.
 # The output directory is target/release for --profile release,
 # and target/debug for --profile debug (the default).
-COPY --from=builder --chown=app:app \
+COPY --from=builder --chown=setback:setback \
     /build/target/${PROFILE}/${PACKAGE} \
-    /app/server
+    /setback/server
 
-USER app
+USER setback
 
 EXPOSE ${PORT}
 
-ENTRYPOINT ["/app/server"]
+ENTRYPOINT ["/setback/server"]

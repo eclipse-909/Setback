@@ -1,7 +1,4 @@
-use {
-	crate::Version,
-	std::net::{Ipv4Addr, SocketAddrV4}
-};
+use crate::Version;
 
 // setup
 
@@ -24,21 +21,19 @@ pub const PILE_SIZE: usize = const {
 
 // api
 
-macro_rules! api { ($path:literal) => {concat!("http://127.0.0.1:8080/api/", $path)}; }
+macro_rules! api { ($path:literal) => {concat!("http://setback_website:8080/api/", $path)}; }
 pub const URL_API_LOGIN: &str = api!("login");
 pub const URL_API_LOGOUT: &str = api!("logout");
 pub const URL_API_USERNAME: &str = api!("username");
 pub const URL_API_RENEW: &str = api!("renew");
 pub const URL_API_REPORT_PLAYER: &str = api!("report");
 pub const TEST_AUTH_TOKEN: &str = "test";
+/// points to prod by default
+pub const DEFAULT_SETBACK_DNS_NAME: &str = "setback.eclipse-909.com";
 
 // server
 
 pub const SETBACK_SERVER_PORT: u16 = 42069;
-pub const SETBACK_SERVER_SOCKET: SocketAddrV4 = SocketAddrV4::new(
-	Ipv4Addr::new(127, 0, 0, 1),
-	SETBACK_SERVER_PORT,
-);
 pub const SSP_VERSION: Version = Version {major: 0, minor: 1, patch: 0};
 pub const SDP_VERSION: Version = Version {major: 0, minor: 1, patch: 0};
 /// Maximum number of games to be sent in a request over the network
