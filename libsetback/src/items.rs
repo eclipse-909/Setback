@@ -79,7 +79,7 @@ macro_rules! pkg_version {
 				}
 				bufs_idx += 1;
 			}
-			Self { major: nums[0], minor: nums[1], patch: nums[2] }
+			Version { major: nums[0], minor: nums[1], patch: nums[2] }
 		}
     };
 }
@@ -114,12 +114,12 @@ impl Bid {
 			Bid::Override => 4,
 		}
 	}
-	
+
 	pub const BID_INPUT_FMT: &str =
 r"
 0..5, pass, override
 ";
-	
+
 	/// Parses a string into a bid.
 	/// Returns None if the string is not a valid bid.
 	/// Valid formats - see [Self::BID_INPUT_FMT].
@@ -158,12 +158,12 @@ impl Card {
 			deck
 		}
 	}
-	
+
 	/// returns 0 of hearts, which is an invalid card that must not be used in the game.
 	pub(crate) const fn zero() -> Self {
 		Self {number: 0, suit: Suit::Hearts}
 	}
-	
+
 	pub const CARD_INPUT_FMT: &str =
 r"
 <number> <suit>
@@ -173,7 +173,7 @@ number: 2..=14, j, jack, q, queen, k, king, a, ace
 suit: hearts, clubs, diamonds, spades
 index: 0-based index of card in hand
 ";
-	
+
 	/// Parses a string into a card.
 	/// Returns None if the string is not a valid card.
 	/// Returns Ok if the card valid is given, or Err if the index was given.
@@ -204,7 +204,7 @@ index: 0-based index of card in hand
 		}
 		None
 	}
-	
+
 	fn parse_num_string(string: &str) -> Option<u8> {
 		match string.trim() {
 			"j" | "jack" => Some(JACK),
@@ -214,7 +214,7 @@ index: 0-based index of card in hand
 			_ => string.parse::<u8>().ok().and_then(|n| if !(2..=14).contains(&n) {None} else {Some(n)}),
 		}
 	}
-	
+
 	fn parse_suit_string(string: &str) -> Option<Suit> {
 		match string.trim() {
 			"hearts" => Some(Suit::Hearts),

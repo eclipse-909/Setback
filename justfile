@@ -25,7 +25,7 @@ run-game: (cargo "run" "setback")
 
 # run setbackd with docker compose
 run-server:
-    docker compose -f compose/compose.local.yml up -d --build
+	docker compose -f compose/compose.local.yml up -d --build
 	xdg-open http://localhost:8080/ # Traefik dashboard
 	xdg-open http://localhost:8081  # phpmyadmin
 	xdg-open https://localhost      # setback_website
