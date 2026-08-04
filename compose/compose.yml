@@ -8,9 +8,9 @@
 #
 #   SUBDOMAIN             e.g. "setback" (prod) or "setback-dev" (dev)
 #   ROOT_DOMAIN           e.g. "eclipse-909.com"
-#   SETBACK_WEBSITE_IMAGE Full image reference for setback_website
+#   SETBACK_WEBSITE_IMAGE Full image reference for setback_api
 #   SETBACK_SERVER_IMAGE  Full image reference for setback_server
-#   DATABASE_URL          MySQL connection string for setback_website
+#   DATABASE_URL          MySQL connection string for setback_api
 #   TRAEFIK_AUTH          htpasswd-format credentials for Traefik dashboard
 #                         (see .env.example for how to generate this)
 #
@@ -37,10 +37,10 @@ name: setbackd
 services:
 
   # ---------------------------------------------------------------------------
-  # setback_website — HTTP server on :8080
+  # setback_api — HTTP server on :8080
   # Accessible at https://${SUBDOMAIN}.${ROOT_DOMAIN}
   # ---------------------------------------------------------------------------
-  setback_website:
+  setback_api:
     image: ${SETBACK_WEBSITE_IMAGE}
     restart: unless-stopped
     env_file:
@@ -126,7 +126,7 @@ services:
     stop_signal: SIGTERM
     stop_grace_period: 6h5m
     depends_on:
-      setback_website:
+      setback_api:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
@@ -147,8 +147,8 @@ services:
 
 networks:
   # Internal network for service-to-service communication.
-  # setback_server → setback_website communication uses this network directly
-  # (e.g. http://setback_website:8080/api/...) without going through Traefik.
+  # setback_server → setback_api communication uses this network directly
+  # (e.g. http://setback_api:8080/api/...) without going through Traefik.
   proxy:
 
   # Dokploy's shared network — required for Traefik label routing.

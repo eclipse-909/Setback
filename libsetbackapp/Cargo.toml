@@ -1,0 +1,23 @@
+[package]
+name = "libsetbackapp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+const_format.workspace = true
+dioxus = { workspace = true, features = ["fullstack"] }
+postcard.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+tracing.workspace = true
+
+# This library needs to target WASM so don't just throw dependencies in here
+
+[features]
+default = ["client"]
+client = [] # turn off client feature for server
+test-dep = []
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

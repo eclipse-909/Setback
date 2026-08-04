@@ -1,13 +1,9 @@
-#[cfg(not(feature = "gpui"))]
 use {
-	libsetback::{Bid, Card, GameSetup, SmallVec, GameEvent},
-	std::io::Write
+	libsetback::{*, ssp::Ssp},
+	std::io::Write,
+	tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel}
 };
 
-#[cfg(feature = "gpui")]
-fn main() {panic!("disable the gpui feature to run this example")}
-
-#[cfg(not(feature = "gpui"))]
 #[tokio::main]
 async fn main() {
 	let log_path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/logs/singleplayer.log"));
@@ -20,10 +16,14 @@ async fn main() {
 		.compact()
 		.init();
 	
-	let (cancel_token, mut event_subscriber, prompt_responder) = GameSetup::new_singleplayer(String::from("example"))
-		.init()
-		.expect("Game cannot start in invalid state")
-		.spawn_singleplayer();
+	let (event_emitter, mut event_subscriber) = unbounded_channel();
+	let (prompt_responder, event_response_rx) = unbounded_channel();
+	tokio::spawn(
+		GameSetup::new_singleplayer(String::from("example"))
+			.init()
+			.expect("Game cannot start in invalid state")
+			.run_singleplayer(event_emitter, event_response_rx)
+	);
 	let mut my_hand = SmallVec::new();
 	let mut my_idx = u8::MAX;
 	let mut input_buf = String::new();
@@ -98,15 +98,34 @@ async fn main() {
 			GameEvent::RoundScores(round_scores) => println!("{round_scores:?}"),
 			GameEvent::GameOver => {
 				println!("Game Over! Thanks for playing!");
-				return cancel_token.cancel()
 			}
 		}
 	}
 }
 
-#[cfg(not(feature = "gpui"))]
 fn readln(buf: &mut String) {
 	buf.clear();
 	_ = std::io::stdin().read_line(buf).expect("Failed to read line from stdin");
 	buf.trim().to_string().clone_into(buf);
+}
+
+impl EventEmitter for UnboundedSender<GameEvent> {
+	fn send(&self, event: GameEvent) -> Result<(), Error> {
+		self.send(event).map_err(|_| Error::Unknown)
+	}
+}
+impl EventResponseReceiver for UnboundedReceiver<GameEvent> {
+	async fn recv(&mut self) -> Result<GameEvent, Error> {
+		self.recv().await.ok_or(Error::Unknown)
+	}
+}
+impl EventSubscriber for UnboundedReceiver<GameEvent> {
+	async fn recv(&mut self) -> Result<GameEvent, Error> {
+		self.recv().await.ok_or(Error::Unknown)
+	}
+}
+impl PromptResponder for UnboundedSender<GameEvent> {
+	fn send(&self, event: GameEvent) -> Result<(), Error> {
+		self.send(event).map_err(|_| Error::Unknown)
+	}
 }

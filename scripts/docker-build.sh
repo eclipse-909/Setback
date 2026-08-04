@@ -41,6 +41,6 @@ setback_docker_build_and_push() {
 
 #                             <package>         <port>
 setback_docker_build_and_push "setback_server"  "42069" &
-setback_docker_build_and_push "setback_website" "8080"  &
+setback_docker_build_and_push "setback_api" "8080"  &
 
 wait

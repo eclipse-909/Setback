@@ -3,38 +3,6 @@ use {
 	serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant},
 	std::cell::SyncUnsafeCell,
 };
-#[cfg(not(feature = "gpui"))]
-use tokio::sync::mpsc::UnboundedSender;
-
-#[derive(Debug)]
-#[cfg(feature = "gpui")]
-pub struct GpuiEventEmitter;
-#[cfg(feature = "gpui")]
-impl gpui::EventEmitter<GameEvent> for GpuiEventEmitter {}
-
-#[cfg(feature = "gpui")]
-pub struct GameEventEmitter(pub gpui::Entity<GpuiEventEmitter>, pub gpui::AsyncApp);
-
-#[cfg(not(feature = "gpui"))]
-pub struct GameEventEmitter(pub(crate) UnboundedSender<GameEvent>);
-
-impl GameEventEmitter {
-	#[cfg(feature = "gpui")]
-	pub fn send(&mut self, event: GameEvent) {
-		self.0.update(&mut self.1, |_,cx| cx.emit(event)).unwrap();
-	}
-
-	#[cfg(not(feature = "gpui"))]
-	pub fn send(&self, event: GameEvent) {
-		self.0.send(event).unwrap();
-	}
-}
-
-impl std::fmt::Debug for GameEventEmitter {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "GameEventEmitter")
-	}
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Player {
@@ -149,7 +117,7 @@ impl Clone for Player {
 				#[cfg(feature = "client")]
 				PlayerType::HumanPlayer { username, ready } => PlayerType::HumanPlayer { username: username.clone(), ready: *ready },
 				PlayerType::Ai{..} => PlayerType::Ai { account_id: 0 },
-				_ => unreachable_unchecked!("Variant should not be cloned: {:?}", self),
+				_ => unreachable!("Variant should not be cloned: {:?}", self),
 			}),
 			hand: SmallVec::new(),
 			team_id: self.team_id,

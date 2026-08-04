@@ -160,7 +160,7 @@ impl Card {
 	}
 
 	/// returns 0 of hearts, which is an invalid card that must not be used in the game.
-	pub(crate) const fn zero() -> Self {
+	pub const fn zero() -> Self {
 		Self {number: 0, suit: Suit::Hearts}
 	}
 
@@ -305,9 +305,9 @@ impl Comparison {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Team {
 	//the cards the team collects after winning a turn
-	pub(crate) pile: SmallVec<Card, PILE_SIZE>,
+	pub pile: SmallVec<Card, PILE_SIZE>,
 	//score of the game
-	pub(crate) score: i8,
+	pub score: i8,
 }
 
 impl Team {

@@ -2,7 +2,7 @@
 .env*
 /*/.env*
 
-# editors
+# editors - these can be removed if multiple contributors use the same editor
 /.idea
 /.zed
 /.vscode

@@ -28,7 +28,7 @@ run-server:
 	docker compose -f compose/compose.local.yml up -d --build
 	xdg-open http://localhost:8080/ # Traefik dashboard
 	xdg-open http://localhost:8081  # phpmyadmin
-	xdg-open https://localhost      # setback_website
+	xdg-open https://localhost      # setback_api
 
 # generate self-signed certificates (necessary for running setbackd locally)
 gencerts:

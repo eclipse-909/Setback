@@ -1,7 +1,5 @@
-#[cfg(not(feature = "gpui"))]
 use std::fs;
 
-#[cfg(not(feature = "gpui"))]
 #[tokio::test]
 async fn test_ai_only() {
 	let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/logs/ai_only.log"));
@@ -14,9 +12,8 @@ async fn test_ai_only() {
 		.compact()
 		.init();
 	
-	let (cancel_token, _, _) = libsetback::GameSetup::new_ai_only()
+	libsetback::GameSetup::new_ai_only()
 		.init()
 		.expect("Game cannot start in invalid state")
-		.spawn_singleplayer();
-	cancel_token.cancelled().await;
+		.run_singleplayer().await;
 }

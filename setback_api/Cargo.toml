@@ -1,5 +1,5 @@
 [package]
-name = "setback_website"
+name = "setback_api"
 version = "0.1.0"
 edition = "2024"
 
@@ -11,7 +11,7 @@ futures-util.workspace = true
 http.workspace = true
 jsonwebtoken.workspace = true
 lazy_static.workspace = true
-libsetback.workspace = true
+libsetback = { path = "../libsetback" }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

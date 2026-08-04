@@ -8,44 +8,13 @@
 )]
 
 mod arena;
-mod connection;
-mod constants;
-mod error;
-mod items;
-mod models;
-mod player;
 mod runtime;
-pub mod sdp;
-mod setup;
-mod small_vec;
 mod state;
-pub mod ssp;
-
-
-#[cfg(feature = "gpui")]
-mod global;
-
-pub(crate) use {
-	player::*,
-	setup::*,
-};
+mod server;
 
 pub use {
 	arena::*,
-	connection::{setback_api, SetbackClient, ClientConnection},
-	constants::*,
-	error::Error,
-	items::*,
-	models::*,
-	player::GameEventEmitter,
-	runtime::{GameState, GameLoopHandle},
-	setup::GameSetup,
-	small_vec::*,
+	libsetbackapp::*,
+	server::*,
 	state::*,
-};
-
-#[cfg(feature = "gpui")]
-pub use {
-	global::*,
-	player::GpuiEventEmitter
 };

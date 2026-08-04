@@ -6,7 +6,7 @@
 #
 # Access points:
 #   localhost:80    → redirects to localhost:443
-#   localhost:443   → setback_website (HTTPS)
+#   localhost:443   → setback_api (HTTPS)
 #   localhost:42069 → setback_server (TCP TLS)
 #   localhost:8080  → Traefik dashboard (insecure, no auth)
 #   localhost:8081  → phpMyAdmin (direct port, plain HTTP)
@@ -29,7 +29,7 @@ services:
       - proxy
     ports:
       - "127.0.0.1:80:80"       # HTTP (redirects to HTTPS)
-      - "127.0.0.1:443:443"     # HTTPS — setback_website
+      - "127.0.0.1:443:443"     # HTTPS — setback_api
       - "127.0.0.1:42069:42069" # TCP TLS — setback_server game port
       - "127.0.0.1:8080:8080"   # Traefik dashboard
     volumes:
@@ -65,14 +65,14 @@ services:
       - "--metrics.prometheus=true"
 
   # ---------------------------------------------------------------------------
-  # setback_website — HTTP server on :8080, serves frontend + public API
+  # setback_api — HTTP server on :8080, serves frontend + public API
   # ---------------------------------------------------------------------------
-  setback_website:
+  setback_api:
     build:
       context: .
       args:
         PROFILE: debug
-        PACKAGE: setback_website
+        PACKAGE: setback_api
         PORT: 8080
     restart: unless-stopped
     environment:
@@ -96,7 +96,7 @@ services:
 
       # --- HTTPS router (main) ---
       # PathPrefix(`/`) matches all requests on this entrypoint regardless of hostname.
-      # This works locally because port 443 is exclusively for setback_website.
+      # This works locally because port 443 is exclusively for setback_api.
       - "traefik.http.routers.website-local-secure.entrypoints=websecure"
       - "traefik.http.routers.website-local-secure.rule=PathPrefix(`/`)"
       - "traefik.http.routers.website-local-secure.tls=true"
@@ -140,7 +140,7 @@ services:
     stop_signal: SIGTERM
     stop_grace_period: 6h
     depends_on:
-      setback_website:
+      setback_api:
         condition: service_healthy
     labels:
       - "traefik.enable=true"

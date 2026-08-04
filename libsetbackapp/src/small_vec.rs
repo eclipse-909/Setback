@@ -1,5 +1,4 @@
 use {
-	crate::unreachable_unchecked,
 	std::{
 		marker::PhantomData,
 		mem::{MaybeUninit, ManuallyDrop},
@@ -94,8 +93,7 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 					index - new_index,
 				);
 			} else {
-				debug_assert!(index != new_index, "index and new_index should not be the same.");
-				unreachable_unchecked!();
+				assert!(index != new_index, "index and new_index should not be the same.");
 			}
 			ptr_new_index.write(item);
 		}
@@ -162,7 +160,7 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 				}
 			}
 		}
-		unreachable_unchecked!("Item must be known to be in the array");
+		panic!("Item must be known to be in the array");
 	}
 
 	pub const fn pop(&mut self) -> T {
@@ -352,7 +350,7 @@ impl<'de, T: Deserialize<'de>, const CAPACITY: usize> Visitor<'de> for SmallVecV
 				size,
 				&const_format_args!("{CAPACITY}")
 					.as_str()
-					.unwrap_or_else(|| unreachable_unchecked!("Rust stdlib guaranteed this wouldn't happen"))
+					.unwrap_or_else(|| unreachable!("Rust stdlib guaranteed this wouldn't happen"))
 			));
 		}
 		let mut values = SmallVec::new();

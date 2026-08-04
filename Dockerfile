@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# Dockerfile for setback_server and setback_website
+# Dockerfile for setback_server and setback_api
 # Usage: See ./scripts/docker-build.sh
 
 # =============================================================================

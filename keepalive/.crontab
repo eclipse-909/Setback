@@ -1,4 +1,0 @@
-# Runs keepalive every 3 days at 12:00.
-# Run `crontab -e` to edit user's crontab. Then add this line:
-
-0 12 */3 * * /path/to/keepalive >> /var/log/keepalive.log 2>&1

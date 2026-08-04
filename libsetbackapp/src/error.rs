@@ -20,7 +20,7 @@ pub enum Error {
 	AlreadyConnected,
 	TimedOut,
 	ServerError,
-	DevError,
+	LogicError,
 	ServerDown,
 	Disconnected,
 	GamesAtCapacity,
@@ -50,7 +50,7 @@ impl Display for Error {
 				Error::AlreadyConnected => "Can't join server, this account is already connected. If this is a mistake, please change your password immediately!",
 				Error::TimedOut => "Request timed out.",
 				Error::ServerError => "Internal server error.",
-				Error::DevError => "Local game error. Please report this.",
+				Error::LogicError => "Logical error. Please report this.",
 				Error::ServerDown => "The server is down. Please try again later.",
 				Error::Disconnected => "Disconnected. Please reconnect.",
 				Error::GamesAtCapacity => "Cannot create a new game. Please try again later.",
@@ -70,7 +70,7 @@ impl From<reqwest::Error> for Error {
 	fn from(value: reqwest::Error) -> Self {
 		match value.status().map(|o| o.as_u16()) {
 			Some(401) => Error::Unauthenticated,
-			_ => Error::DevError,
+			_ => Error::LogicError,
 		}
 	}
 }
@@ -83,28 +83,4 @@ impl From<std::io::Error> for Error {
 			_ => Error::NetworkError
 		}
 	}
-}
-
-/// With debug_assertions this expands to `panic!()`.
-///
-/// Without debug_assertions this expands to `unsafe {std::hint::unreachable_unchecked()}`.
-///
-/// ## Safety
-/// Without debug_assertions, this will cause undefined behavior if this statement is reached.
-#[cfg(debug_assertions)]
-#[macro_export]
-macro_rules! unreachable_unchecked {
-	($($arg:tt)*) => {panic!($($arg)*)};
-}
-
-/// With debug_assertions this expands to `unreachable!()`.
-///
-/// Without debug_assertions this expands to `unsafe {std::hint::unreachable_unchecked()}`.
-///
-/// ## Safety
-/// Without debug_assertions, this will cause undefined behavior if this statement is reached.
-#[cfg(not(debug_assertions))]
-#[macro_export]
-macro_rules! unreachable_unchecked {
-	($($arg:tt)*) => {unsafe {std::hint::unreachable_unchecked()}};
 }

@@ -1,2 +1,2 @@
 # Setback Library
-This is a static library crate that supplies the other crates with shared data types and functions.
+This library extends [Setback App Library](../libsetbackapp/README.md) by providing runtime and server functionality.

@@ -45,7 +45,7 @@ impl ChainId {
 	/// If called on [Self::None] in debug mode. Undefined behavior in release mode
 	pub const fn get_id(&self) -> u32 {
 		match self {
-			Self::None => unreachable_unchecked!("Chain id should have an id"),
+			Self::None => panic!("Chain id should have an id"),
 			Self::EndOfChain(id) => *id,
 			Self::ExpectResponse(id) => *id,
 		}

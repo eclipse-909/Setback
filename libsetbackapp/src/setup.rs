@@ -157,7 +157,7 @@ impl GameSetup {
 				#[cfg(not(feature = "client"))]
 				PlayerType::HumanEmpty {..} => num_human_empty += 1,
 				PlayerType::Ai {..} => num_ai += 1,
-				_ => unreachable_unchecked!("PlayerType should be one of SingleplayerSelf, HumanConnection, HumanEmpty, or Ai"),
+				_ => unreachable!("PlayerType should be one of SingleplayerSelf, HumanConnection, HumanEmpty, or Ai"),
 			});
 		#[cfg(all(feature = "client", not(feature = "test-dep")))]
 		if num_singleplayer != 1 || self.0.players.len() - 1 != num_ai {

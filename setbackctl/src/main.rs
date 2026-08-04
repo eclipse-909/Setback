@@ -4,7 +4,7 @@ use {
 	std::os::unix::net::UnixDatagram
 };
 
-/// CLI controller for Setback processes (setbackd, setback_website, and setback_server)
+/// CLI controller for Setback processes (setbackd, setback_api, and setback_server)
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -54,8 +54,8 @@ enum Command {
 
 #[derive(Subcommand)]
 enum Service {
-	/// The setback_website API
-	Website,
+	/// The setback_api
+	Api,
 	/// The setbackd daemon
 	Daemon,
 	/// A setback_server

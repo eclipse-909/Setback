@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 libc.workspace = true
-libsetback.workspace = true
+libsetback = { path = "../libsetback" }
 rand.workspace = true
 reqwest.workspace = true
 scc.workspace = true

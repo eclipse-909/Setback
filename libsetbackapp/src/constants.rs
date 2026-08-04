@@ -1,4 +1,7 @@
-use crate::Version;
+use {
+	crate::Version,
+	const_format::formatcp,
+};
 
 // setup
 
@@ -21,7 +24,28 @@ pub const PILE_SIZE: usize = const {
 
 // api
 
-macro_rules! api { ($path:literal) => {concat!("http://setback_website:8080/api/", $path)}; }
+const SETBACK_DOMAIN: &str = match option_env!("SETBACK_DOMAIN") {
+	Some(d) => d,
+	None => "localhost",
+};
+const SETBACK_ENV: &str = {
+	match option_env!("SETBACK_PROD") {
+		Some(var) => {
+			let var = var.as_bytes();
+			if var.len() == 1 && var[0] == b'1' {
+				"prod"
+			} else {
+				"dev"
+			}
+		}
+		None => "dev",
+	}
+};
+macro_rules! api {
+	($path:literal) => {
+		formatcp!("https://{SETBACK_DOMAIN}/{SETBACK_ENV}/{}", $path)
+	};
+}
 pub const URL_API_LOGIN: &str = api!("login");
 pub const URL_API_LOGOUT: &str = api!("logout");
 pub const URL_API_USERNAME: &str = api!("username");
@@ -30,10 +54,12 @@ pub const URL_API_REPORT_PLAYER: &str = api!("report");
 pub const TEST_AUTH_TOKEN: &str = "test";
 /// points to prod by default
 pub const DEFAULT_SETBACK_DNS_NAME: &str = "setback.eclipse-909.com";
+pub const APPLICATION_OCTET_STREAM: &str = "application/octet-stream";
 
 // server
 
 pub const SETBACK_SERVER_PORT: u16 = 42069;
+pub const URL_SERVER_WS: &str = formatcp!("wss://{SETBACK_DOMAIN}/{SETBACK_ENV}");
 pub const SSP_VERSION: Version = Version {major: 0, minor: 1, patch: 0};
 pub const SDP_VERSION: Version = Version {major: 0, minor: 1, patch: 0};
 /// Maximum number of games to be sent in a request over the network
@@ -51,7 +77,7 @@ pub const MAX_GAMES: usize = 10_000;
 macro_rules! runtime_dir {($path:literal) => {concat!("/run/setback/", $path)};}
 // `run/setback/daemon` and `run/setback/website` will be deleted by systemd when those services stop.
 pub const SETBACKD_UNIX_SOCKET: &str = runtime_dir!("daemon/setbackd.sock");
-pub const SETBACK_WEBSITE_UNIX_SOCKET: &str = runtime_dir!("website/setback_website.sock");
+pub const SETBACK_WEBSITE_UNIX_SOCKET: &str = runtime_dir!("website/setback_api.sock");
 pub const SETBACKCTL_UNIX_SOCKET: &str = runtime_dir!("setbackctl.sock");
 pub fn setback_server_unix_socket(pid: i32) -> String { format!(runtime_dir!("setback_server-{}.sock"), pid) }
 pub const KEYRING_SERVICE: &str = "service-keyring-eclipse-909-setback";
