@@ -11,7 +11,7 @@ futures-util.workspace = true
 http.workspace = true
 jsonwebtoken.workspace = true
 lazy_static.workspace = true
-libsetback = { path = "../libsetback" }
+libsetback.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

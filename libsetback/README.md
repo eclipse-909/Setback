@@ -1,2 +1,2 @@
-# Setback Library
-This library extends [Setback App Library](../libsetbackapp/README.md) by providing runtime and server functionality.
+# Setback App Library
+This library contains basic types and functions shared across all packages.

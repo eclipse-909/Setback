@@ -36,7 +36,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - traefik_logs:/var/log/traefik
       - ./traefik/traefik.local.yml:/etc/traefik/traefik.yml:ro
-      - ./certs:/etc/traefik/certs:ro
+      - ./compose/certs:/etc/traefik/certs:ro
     command:
       # EntryPoints
       - "--entrypoints.web.address=:80"

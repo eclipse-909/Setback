@@ -36,7 +36,7 @@ pub enum PlayerType {
 	/// When the future completes, the HumanConnection variant is restored.
 	#[serde(skip_deserializing)]
 	#[cfg(not(feature = "client"))]
-	HumanConnection {conn: ClientConnection} = 2,
+	HumanConnection {conn: Box<ClientConnection>} = 2,
 	/// This variant has 2 uses:
 	/// 1. The server serializes a HumanConnection into this variant when sending data to clients.
 	///    The clients only need to know the username and ready state.
@@ -75,7 +75,7 @@ impl Player {
 	}
 
 	#[cfg(not(feature = "client"))]
-	pub const fn new_host_connected(conn: ClientConnection, team_id: u8) -> Self {
+	pub const fn new_host_connected(conn: Box<ClientConnection>, team_id: u8) -> Self {
 		Self {
 			player_type: SyncUnsafeCell::new(PlayerType::HumanConnection {conn}),
 			hand: SmallVec::new(),
@@ -111,11 +111,15 @@ impl Clone for Player {
 			// We just need readonly access
 			match unsafe { &*self.player_type.get() } {
 				#[cfg(not(feature = "client"))]
-				PlayerType::HumanConnection {conn: ClientConnection {
-					username, ready, ..
-				}} => PlayerType::HumanPlayer { username: username.clone(), ready: *ready },
+				PlayerType::HumanConnection {conn} => PlayerType::HumanPlayer {
+					username: conn.username.clone(),
+					ready: conn.ready
+				},
 				#[cfg(feature = "client")]
-				PlayerType::HumanPlayer { username, ready } => PlayerType::HumanPlayer { username: username.clone(), ready: *ready },
+				PlayerType::HumanPlayer { username, ready } => PlayerType::HumanPlayer {
+					username: username.clone(),
+					ready: *ready
+				},
 				PlayerType::Ai{..} => PlayerType::Ai { account_id: 0 },
 				_ => unreachable!("Variant should not be cloned: {:?}", self),
 			}),
@@ -152,7 +156,7 @@ impl Serialize for PlayerType {
 				"HumanEmpty",
 			),
 			#[cfg(not(feature = "client"))]
-			PlayerType::HumanConnection { conn: ClientConnection { username, ready, ..} } => {
+			PlayerType::HumanConnection { conn } => {
 				let mut state = Serializer::serialize_struct_variant(
 					serializer,
 					PLAYER_TYPE,
@@ -160,8 +164,8 @@ impl Serialize for PlayerType {
 					"HumanPlayer",
 					2
 				)?;
-				SerializeStructVariant::serialize_field(&mut state, "username", username)?;
-				SerializeStructVariant::serialize_field(&mut state, "ready", ready)?;
+				SerializeStructVariant::serialize_field(&mut state, "username", &conn.username)?;
+				SerializeStructVariant::serialize_field(&mut state, "ready", &conn.ready)?;
 				state.end()
 			}
 			#[cfg(feature = "client")]

@@ -1,0 +1,95 @@
+/* ==========================================================================
+   SETBACK — Design Tokens
+   A classic card-table theme: green baize, dark walnut, brass/gold foil.
+   ========================================================================== */
+
+:root {
+  /* ---- UI Scale --------------------------------------------------------
+     Everything in the system is sized in rem. Changing --ui-scale (done by
+     the Settings > Video slider) changes the root font-size, which scales
+     the entire interface uniformly. */
+  --ui-scale: 1;
+
+  /* ---- Color: Felt (surfaces / backgrounds) --------------------------- */
+  --felt-900: #052620;
+  --felt-800: #0b4a3c;
+  --felt-700: #146651;
+  --felt-600: #1c7d63;
+
+  /* ---- Color: Wood (frames / chrome) ----------------------------------- */
+  --wood-900: #1c1108;
+  --wood-800: #2c1a0f;
+  --wood-700: #3b2415;
+  --wood-600: #573320;
+  --wood-500: #6b4423;
+
+  /* ---- Color: Gold / Brass foil (accents, borders, focus) -------------- */
+  --gold-900: #7a5f2c;
+  --gold-700: #a4813d;
+  --gold-500: #c9a24b;
+  --gold-300: #e8c874;
+  --gold-100: #f6e3ab;
+
+  /* ---- Color: Ink / Text ------------------------------------------------ */
+  --cream-100: #f5ecd9;
+  --cream-300: #e4d6b8;
+  --cream-500: #c9bfa8;
+  --cream-700: #948a72;
+  --ink-900: #17110a;
+
+  /* ---- Color: Suits / semantic ------------------------------------------ */
+  --suit-red: #a3372f;
+  --suit-red-bright: #cf4b3f;
+  --suit-black: #191512;
+  --success: #4f8b5b;
+  --danger: #a3372f;
+  --danger-bright: #cf4b3f;
+
+  /* ---- Overlays ---------------------------------------------------------- */
+  --overlay-scrim: rgba(5, 10, 8, 0.72);
+  --shadow-deep: rgba(0, 0, 0, 0.55);
+
+  /* ---- Typography --------------------------------------------------------
+     Display: Playfair Display — the engraved / signage feel for titles.
+     Body:    Poppins — clean, legible UI face for controls & copy.
+     Mono:    IBM Plex Mono — printed scorecard / keycap / code feel. */
+  --font-display: 'Playfair Display', 'Georgia', serif;
+  --font-body: 'Poppins', 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+
+  /* ---- Type scale (rem, respects --ui-scale via html font-size) -------- */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.6rem;
+  --text-2xl: 2.1rem;
+  --text-3xl: 3rem;
+
+  /* ---- Spacing ------------------------------------------------------------ */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  /* ---- Radius --------------------------------------------------------------- */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 22px;
+  --radius-pill: 999px;
+
+  /* ---- Shadows / elevation ---------------------------------------------------- */
+  --shadow-panel: 0 24px 60px var(--shadow-deep), 0 2px 0 rgba(255,255,255,0.03) inset;
+  --shadow-raised: 0 3px 0 var(--gold-900), 0 6px 14px rgba(0,0,0,0.45);
+  --shadow-raised-active: 0 1px 0 var(--gold-900), 0 2px 6px rgba(0,0,0,0.4);
+
+  /* ---- Motion --------------------------------------------------------------- */
+  --ease-table: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --dur-fast: 120ms;
+  --dur-med: 220ms;
+  --dur-slow: 420ms;
+}

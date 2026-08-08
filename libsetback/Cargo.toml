@@ -3,26 +3,33 @@ name = "libsetback"
 version = "0.1.0"
 edition = "2024"
 
+# This library needs to target WASM so don't just throw dependencies in here
 [dependencies]
+const_format.workspace = true
 futures.workspace = true
-libsetbackapp = { path = "../libsetbackapp", default-features = false }
 postcard.workspace = true
 rand.workspace = true
 reqwest.workspace = true
-scc.workspace = true
 serde.workspace = true
-tokio.workspace = true
-tokio-tungstenite.workspace = true
-tokio-util.workspace = true
 tracing.workspace = true
+tokio = { version = "1.53.1", features = ["sync"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
+gloo-net.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+scc.workspace = true
+tokio-tungstenite.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
 
 [dev-dependencies]
 trybuild.workspace = true
-libsetbackapp = { path = "../libsetbackapp", default-features = false }
 tracing-subscriber.workspace = true
 
 [features]
-client = ["libsetbackapp/client"] # turn off client feature for server
+client = [] # turn off client feature for server
 test-dep = []
 
 [[example]]
@@ -31,7 +38,7 @@ required-features = ["client"]
 
 [[test]]
 name = "ai_only"
-required-features = ["client", "test-dep"]
+required-features = ["client"]
 
 [lints.clippy]
 undocumented_unsafe_blocks = "deny"

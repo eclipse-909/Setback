@@ -3,8 +3,7 @@
 
 This mono-repo contains the source code for all Setback programs, server and client side. See the READMEs below for more detail on each workspace.
 
-- [libsetback](libsetback/README.md) – Library for shared code for runtime and server functionality.
-- [libsetbackapp](libsetbackapp/README.md) – Library for shared code for all packages.
+- [libsetback](libsetback/README.md) – Library for shared code for all packages.
 - [setback](setback/README.md) – Setback game client.
 - [setback_server](setback_server/README.md) – Dedicated game server to host multiplayer games.
 - [setback_api](setback_api/README.md) – Website and public API.

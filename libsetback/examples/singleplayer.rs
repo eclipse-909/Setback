@@ -1,5 +1,5 @@
 use {
-	libsetback::{*, ssp::Ssp},
+	libsetback::*,
 	std::io::Write,
 	tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel}
 };
@@ -18,6 +18,8 @@ async fn main() {
 	
 	let (event_emitter, mut event_subscriber) = unbounded_channel();
 	let (prompt_responder, event_response_rx) = unbounded_channel();
+	let event_emitter = Sender(event_emitter);
+	let event_response_rx = Receiver(event_response_rx);
 	tokio::spawn(
 		GameSetup::new_singleplayer(String::from("example"))
 			.init()
@@ -109,23 +111,15 @@ fn readln(buf: &mut String) {
 	buf.trim().to_string().clone_into(buf);
 }
 
-impl EventEmitter for UnboundedSender<GameEvent> {
+struct Sender(UnboundedSender<GameEvent>);
+struct Receiver(UnboundedReceiver<GameEvent>);
+impl EventEmitter for Sender {
 	fn send(&self, event: GameEvent) -> Result<(), Error> {
-		self.send(event).map_err(|_| Error::Unknown)
+		self.0.send(event).map_err(|_| Error::Unknown)
 	}
 }
-impl EventResponseReceiver for UnboundedReceiver<GameEvent> {
+impl EventResponseReceiver for Receiver {
 	async fn recv(&mut self) -> Result<GameEvent, Error> {
-		self.recv().await.ok_or(Error::Unknown)
-	}
-}
-impl EventSubscriber for UnboundedReceiver<GameEvent> {
-	async fn recv(&mut self) -> Result<GameEvent, Error> {
-		self.recv().await.ok_or(Error::Unknown)
-	}
-}
-impl PromptResponder for UnboundedSender<GameEvent> {
-	fn send(&self, event: GameEvent) -> Result<(), Error> {
-		self.send(event).map_err(|_| Error::Unknown)
+		self.0.recv().await.ok_or(Error::Unknown)
 	}
 }

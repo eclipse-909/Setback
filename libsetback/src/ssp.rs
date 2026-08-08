@@ -1,6 +1,7 @@
 use {
 	crate::*,
 	serde::{Deserialize, Serialize},
+	std::io::Write,
 };
 
 ///Setback Server Protocol
@@ -12,58 +13,64 @@ pub struct Ssp {
 	/// Only the server uses this internally.
 	#[serde(skip)]
 	pub src_id: u32,
-	/// Chaining is how the program knows which responses go to which requests.
-	pub chain_id: ChainId,
+	/// Correlation is how the program knows which responses go to which requests
+	/// and whether it needs to respond or expect a response.
+	pub correlation_id: CorrelationId,
 	/// The actual data being sent.
 	pub payload: Payload,
 }
 
 impl Ssp {
-	pub const fn new(payload: Payload, chain_id: ChainId) -> Self {
+	pub const fn new(payload: Payload, correlation_id: CorrelationId) -> Self {
 		Self {
 			version: SSP_VERSION,
 			src_id: 0,
-			chain_id,
+			correlation_id,
 			payload,
 		}
+	}
+	
+	pub const fn request(payload: Payload, correlation_id: u32) -> Self {
+		Self::new(payload, CorrelationId::request(correlation_id))
+	}
+	pub const fn response(payload: Payload, correlation_id: u32) -> Self {
+		Self::new(payload, CorrelationId::response(correlation_id))
+	}
+	pub const fn event(payload: Payload) -> Self {
+		Self::new(payload, CorrelationId::event())
+	}
+	
+	pub fn encode<W: Write>(&self, w: W) -> Result<(), Error> {
+		postcard::to_io(self, w).map_err(|_| Error::BadEncoding)?;
+		Ok(())
+	}
+	
+	pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
+		postcard::from_bytes(bytes).map_err(|_| Error::BadEncoding)
 	}
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone, Copy)]
-pub enum ChainId {
-	/// The message isn't part of a chain
-	None,
-	/// The message is part of a chain but doesn't expect further messages
-	EndOfChain(u32),
-	/// The message expects you to respond to this chain
-	ExpectResponse(u32),
+pub struct CorrelationId {
+	pub id: u32,
+	pub end: bool
 }
 
-impl ChainId {
-	/// Gets the u32 id of the chain.
-	/// ## Panics
-	/// If called on [Self::None] in debug mode. Undefined behavior in release mode
-	pub const fn get_id(&self) -> u32 {
-		match self {
-			Self::None => panic!("Chain id should have an id"),
-			Self::EndOfChain(id) => *id,
-			Self::ExpectResponse(id) => *id,
-		}
+impl CorrelationId {
+	pub const fn request(id: u32) -> Self {
+		Self { id, end: false }
 	}
-
-	/// Essentially maps this to an Optional u32
-	pub const fn try_get_id(&self) -> Option<u32> {
-		match self {
-			Self::None => None,
-			Self::EndOfChain(id) => Some(*id),
-			Self::ExpectResponse(id) => Some(*id),
-		}
+	pub const fn response(id: u32) -> Self {
+		Self { id, end: true }
+	}
+	pub const fn event() -> Self {
+		Self { id: 0, end: false }
 	}
 }
 
-// Request - client sends message to server.
+// Request - client sends message to server and gets a response.
 // Response - server sends message to client in response to a request.
-// Spontaneous - server sends message to client without request.
+// Spontaneous - server sends message to client and client may or may not need to respond.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum Payload {
 	/// Client ---Authenticate--> Server<br>
@@ -81,13 +88,13 @@ pub enum Payload {
 	Disconnected { player_idx: u8 },
 	/// Client <--Disconnect--- Server<br>
 	/// Spontaneous<br><br>
-	/// Informs you when another player reconnects and provides the index of that player.
+	/// Informs you when another player reconnects and provides the index and username of that player.
 	Reconnected { player_idx: u8, username: String },
 	/// Client ---Any--> Server<br>
 	/// Client <--Ack--- Server<br>
 	/// Response only<br><br>
 	/// If a request doesn't respond with useful data, the server will send back Ack as a signal that everything is ok.
-	/// If the client sends Ack to the server, the server will never respond even if the ChainId is ExpectResponse.
+	/// If the client sends Ack to the server, the server will never respond even if the CorrelationId.end is false.
 	Ack,
 	/// Client ---Any--> Server<br>
 	/// Client <--Err--- Server<br>
@@ -101,17 +108,17 @@ pub enum Payload {
 	/// Client ---CreateGame--> Server<br>
 	/// Client <--Game--- Server<br>
 	/// Request only<br><br>
-	/// Client creates game. An empty string password implies a public game. Anything else is a private game.
+	/// Client creates game. An empty string password creates a public game. Anything else is a private game.
 	CreateGame { password: String },
 	/// Client ---JoinGame--> Server<br>
 	/// Client <--Game--- Server<br>
 	/// Request only<br><br>
-	/// Client requests to join game. An empty string password implies a public game. Anything else is a private game.
+	/// Client requests to join game.
 	JoinGame { code: u32, password: String },
 	/// Client ---RejoinGame--> Server<br>
 	/// Client <--Snapshot--- Server<br>
 	/// Request only<br><br>
-	/// Client requests to rejoin game. An empty string password implies a public game. Anything else is a private game.
+	/// Client requests to rejoin game.
 	/// This is only used if the client has disconnected from an ongoing game and wants to rejoin.
 	RejoinGame { code: u32, password: String },
 	/// Client ---CreateGame--> Server<br>
@@ -133,7 +140,7 @@ pub enum Payload {
 	/// Client ---RejoinGame--> Server<br>
 	/// Client <--Snapshot--- Server<br>
 	/// Response only<br><br>
-	/// Client requests to rejoin game. An empty string password implies a public game. Anything else is a private game.
+	/// Client requests to rejoin game.
 	/// This is only used if the client has disconnected from an ongoing game and wants to rejoin.
 	Snapshot(Box<GameState>, SmallVec<Card, CARDS_PER_PLAYER>),
 	/// Client ---SearchGames--> Server<br>
@@ -149,13 +156,13 @@ pub enum Payload {
 	/// Client ---UpdatePlayerTeam--> Server<br>
 	/// Client <--Ack--- Server<br>
 	/// Other-Clients <--UpdatePlayerTeam--- Server<br>
-	/// Request and response<br>
+	/// Request and response<br><br>
 	/// The host or a player can update the team of that player.
 	UpdatePlayerTeam { player_idx: u8, team: u8 },
 	/// Host-Client ---UpdatePlayerType--> Server<br>
 	/// Host-Client <--Ack--- Server<br>
 	/// Other-Clients <--UpdatePlayerType--- Server<br>
-	/// Request and response<br>
+	/// Request and response<br><br>
 	/// The host can update whether a player is a human or not.
 	/// This either results in turning a bot into an empty human slot
 	/// or kicking a player
@@ -199,7 +206,7 @@ pub enum Payload {
 	/// Client ---GameEvent--> Server<br>
 	/// Client <--Ack--- Server<br>
 	/// Server-request and client-response<br><br>
-	/// The server emits these events to the client. The client usually needs to respond to these.
+	/// The server emits these events to the client. The client sometimes needs to respond to these.
 	/// If the client responds to a prompt with invalid data, the prompt will be resent either until
 	/// the client provides valid data or there is an error.
 	GameEvent(GameEvent),
@@ -207,5 +214,7 @@ pub enum Payload {
 	/// Client <--Ack--- Server<br>
 	/// Request only<br><br>
 	/// The player may report a human player in multiplayer.
+	/// This is done in game rather than through the public API to prevent
+	/// players from spam reporting other players.
 	ReportPlayer(ReportPlayerRequest),
 }

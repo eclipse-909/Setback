@@ -1,6 +1,6 @@
 # security
-.env*
-/*/.env*
+*.env*
+*.pem
 
 # editors - these can be removed if multiple contributors use the same editor
 /.idea
@@ -8,12 +8,12 @@
 /.vscode
 
 # generated
-/certs
+*/certs
 /setback/settings.json
 /setback/usr.crd
 /target
-/*/logs
+*/logs
 
 # scratch space
-/tmp
-/*.bak
+*/tmp
+*.bak

@@ -19,8 +19,12 @@ impl Display for Version {
 }
 
 impl Version {
-	pub const fn is_compatible(&self, other: Self) -> bool {
-		self.major == other.major
+	pub const fn check_compatible(&self, other: Self) -> Result<(), Error> {
+		if self.major == other.major {
+			Ok(())
+		} else {
+			Err(Error::BadVersion)
+		}
 	}
 }
 
@@ -224,6 +228,26 @@ index: 0-based index of card in hand
 			_ => None,
 		}
 	}
+	
+	/// Returns the number 2..=10 or J/Q/K/A or panics if not 2..=14
+	pub const fn num_small(num: u8) -> &'static str {
+		match num {
+			2 => "2",
+			3 => "3",
+			4 => "4",
+			5 => "5",
+			6 => "6",
+			7 => "7",
+			8 => "8",
+			9 => "9",
+			10 => "10",
+			11 => "J",
+			12 => "Q",
+			13 => "K",
+			14 => "A",
+			_ => panic!("number not allowed for card"),
+		}
+	}
 }
 
 impl std::fmt::Debug for Card {
@@ -260,6 +284,24 @@ pub enum Suit {
 	Clubs,
 	Diamonds,
 	Spades,
+}
+
+impl Suit {
+	pub const fn as_icon(self) -> char {
+		match self {
+			Suit::Hearts => '♥',
+			Suit::Clubs => '♣',
+			Suit::Diamonds => '♦',
+			Suit::Spades => '♠',
+		}
+	}
+	
+	pub const fn is_red(self) -> bool {
+		match self {
+			Suit::Hearts | Suit::Diamonds => true,
+			Suit::Clubs | Suit::Spades => false,
+		}
+	}
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]

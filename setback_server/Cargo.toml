@@ -4,12 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-libc.workspace = true
-libsetback = { path = "../libsetback" }
-rand.workspace = true
+libsetback.workspace = true
 reqwest.workspace = true
-scc.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

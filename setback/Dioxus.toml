@@ -1,21 +1,22 @@
 [application]
 
 [web.app]
-
-# HTML title tag content
 title = "Setback"
+base_path = "game"
 
-# include `assets` in web platform
 [web.resource]
-
-# Additional CSS style files
 style = []
-
-# Additional JavaScript files
 script = []
 
 [web.resource.dev]
-
-# Javascript code file
-# serve: [dev-server] only
 script = []
+
+#[[web.proxy]]
+#backend can be set to dev environment for testing in dev
+#backend = "https://setback.eclipse-909.com/dev/"
+
+[web.https]
+enabled = true
+mkcert = true
+key_path = "./certs/key.pem"
+cert_path = "./certs/cert.pem"

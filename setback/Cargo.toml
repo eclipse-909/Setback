@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-dioxus.workspace = true
-libsetbackapp = { path = "../libsetbackapp" }
+dioxus = { workspace = true, features = ["router"] }
+libsetback = { path = "../libsetback", features = ["client"] }
 
 [features]
 default = ["desktop"]

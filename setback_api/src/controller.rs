@@ -45,6 +45,8 @@ pub async fn api_username(
 	todo!()
 }
 
+//TODO this endpoint should be private.
+// Only the server should be able to call this.
 pub async fn api_report(
 	Extension(user): Extension<User>,
 	Json(req): Json<ReportPlayerRequest>,

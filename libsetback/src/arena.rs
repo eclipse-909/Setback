@@ -1,4 +1,5 @@
 use {
+	crate::PAGE_SIZE,
 	std::{
 		alloc::{AllocError, Allocator, Layout},
 		cell::{Cell, UnsafeCell},
@@ -9,8 +10,6 @@ use {
 	},
 	tracing::debug,
 };
-
-const PAGE_SIZE: usize = 4096;
 
 /// Arena allocator which grows dynamically as you allocate more to it.
 /// All memory is freed when the Arena is dropped or cleared, and drop is called on each item allocated.

@@ -1,4 +1,7 @@
-use std::fs;
+use {
+	std::fs,
+	libsetback::*
+};
 
 #[tokio::test]
 async fn test_ai_only() {
@@ -12,8 +15,21 @@ async fn test_ai_only() {
 		.compact()
 		.init();
 	
-	libsetback::GameSetup::new_ai_only()
+	GameSetup::new_ai_only()
 		.init()
 		.expect("Game cannot start in invalid state")
-		.run_singleplayer().await;
+		.run_singleplayer(Empty, Empty).await;
+}
+
+struct Empty;
+
+impl EventEmitter for Empty {
+	fn send(&self, _event: GameEvent) -> Result<(), Error> {
+		Err(Error::LogicError)
+	}
+}
+impl EventResponseReceiver for Empty {
+	async fn recv(&mut self) -> Result<GameEvent, Error> {
+		Err(Error::LogicError)
+	}
 }

@@ -1,6 +1,17 @@
-//! The components module contains all shared components for our app. Components are the building blocks of dioxus apps.
-//! They can be used to defined common UI elements like buttons, forms, and modals. In this template, we define a Hero
-//! component  to be used in our app.
+mod main_menu;
+mod card_chip;
+mod game_list_item;
+mod info_tooltip;
+mod keybind_row;
+mod modal;
+mod panel;
+mod player_node;
+mod slider;
+mod tabs;
+mod text_input;
+mod toast;
+mod toggle;
 
-mod hero;
-pub use hero::Hero;
+pub use {
+	main_menu::MainMenu,
+};

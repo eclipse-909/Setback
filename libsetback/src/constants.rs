@@ -3,7 +3,7 @@ use {
 	const_format::formatcp,
 };
 
-// setup
+// game setup
 
 pub const JACK: u8 = 11;
 pub const QUEEN: u8 = 12;
@@ -22,28 +22,19 @@ pub const PILE_SIZE: usize = const {
 	s
 };
 
-// api
+// client
 
-const SETBACK_DOMAIN: &str = match option_env!("SETBACK_DOMAIN") {
+/// usually setback.eclipse-909.com or localhost
+//noinspection RsReplaceMatchExpr
+const SETBACK_PROXY: &str = match option_env!("SETBACK_PROXY") {
 	Some(d) => d,
 	None => "localhost",
 };
-const SETBACK_ENV: &str = {
-	match option_env!("SETBACK_PROD") {
-		Some(var) => {
-			let var = var.as_bytes();
-			if var.len() == 1 && var[0] == b'1' {
-				"prod"
-			} else {
-				"dev"
-			}
-		}
-		None => "dev",
-	}
-};
+const SETBACK_PROD: bool = matches!(option_env!("SETBACK_PROD"), Some(var) if var.len() == 1 && var.as_bytes()[0] == b'1');
+const SETBACK_ENV: &str = if SETBACK_PROD { "prod" } else { "dev" };
 macro_rules! api {
 	($path:literal) => {
-		formatcp!("https://{SETBACK_DOMAIN}/{SETBACK_ENV}/{}", $path)
+		formatcp!("https://{SETBACK_PROXY}/{SETBACK_ENV}/{}", $path)
 	};
 }
 pub const URL_API_LOGIN: &str = api!("login");
@@ -52,14 +43,12 @@ pub const URL_API_USERNAME: &str = api!("username");
 pub const URL_API_RENEW: &str = api!("renew");
 pub const URL_API_REPORT_PLAYER: &str = api!("report");
 pub const TEST_AUTH_TOKEN: &str = "test";
-/// points to prod by default
-pub const DEFAULT_SETBACK_DNS_NAME: &str = "setback.eclipse-909.com";
 pub const APPLICATION_OCTET_STREAM: &str = "application/octet-stream";
 
 // server
 
 pub const SETBACK_SERVER_PORT: u16 = 42069;
-pub const URL_SERVER_WS: &str = formatcp!("wss://{SETBACK_DOMAIN}/{SETBACK_ENV}");
+pub const URL_SERVER_WS: &str = formatcp!("wss://{SETBACK_PROXY}/{SETBACK_ENV}");
 pub const SSP_VERSION: Version = Version {major: 0, minor: 1, patch: 0};
 pub const SDP_VERSION: Version = Version {major: 0, minor: 1, patch: 0};
 /// Maximum number of games to be sent in a request over the network
@@ -68,7 +57,7 @@ pub const MAX_GAME_LIST: u8 = 127;
 pub const NETWORK_TIMEOUT: u64 = 4;
 pub const DEFAULT_TURN_TIME: u8 = 30;
 pub const MAX_TURN_TIME_SERVER: u8 = 120;
-pub const PAGE_SIZE: usize = 4096;
+pub const PAGE_SIZE: usize = 0x1000;
 pub const MAX_CLIENTS: usize = 10_000;
 pub const MAX_GAMES: usize = 10_000;
 

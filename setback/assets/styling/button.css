@@ -1,0 +1,107 @@
+/* ==========================================================================
+   Component: Button
+   Base class .btn + variant modifiers (.btn--primary, .btn--ghost, ...)
+   and size modifiers (.btn--lg, .btn--md, .btn--sm, .btn--icon).
+   ========================================================================== */
+
+.btn {
+  --btn-bg: var(--wood-600);
+  --btn-bg-hover: var(--wood-500);
+  --btn-border: var(--gold-700);
+  --btn-fg: var(--cream-100);
+  --btn-shadow: var(--gold-900);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  font-family: var(--font-body);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--btn-border);
+  background: linear-gradient(180deg, var(--btn-bg-hover), var(--btn-bg));
+  color: var(--btn-fg);
+  box-shadow: 0 3px 0 var(--btn-shadow), 0 6px 14px rgba(0,0,0,0.45);
+  transition: transform var(--dur-fast) var(--ease-table),
+              box-shadow var(--dur-fast) var(--ease-table),
+              background var(--dur-fast) var(--ease-table);
+  padding: 0.9em 1.8em;
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+
+.btn:hover { background: linear-gradient(180deg, var(--btn-bg-hover), var(--wood-700)); transform: translateY(-1px); }
+.btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--btn-shadow), 0 2px 6px rgba(0,0,0,0.4);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 3px 0 var(--btn-shadow), 0 6px 14px rgba(0,0,0,0.3);
+}
+
+/* ---- Variants ------------------------------------------------------ */
+
+.btn--primary {
+  --btn-bg: #8a6420;
+  --btn-bg-hover: var(--gold-500);
+  --btn-border: var(--gold-300);
+  --btn-fg: var(--ink-900);
+  --btn-shadow: var(--gold-900);
+  background: linear-gradient(180deg, var(--gold-300), var(--gold-500));
+}
+.btn--primary:hover { background: linear-gradient(180deg, var(--gold-100), var(--gold-300)); }
+
+.btn--ghost {
+  background: transparent;
+  border-color: var(--gold-700);
+  box-shadow: none;
+}
+.btn--ghost:hover { background: rgba(201, 162, 75, 0.12); transform: none; }
+.btn--ghost:active { transform: translateY(1px); }
+
+.btn--danger {
+  --btn-bg: #7a241d;
+  --btn-bg-hover: var(--danger-bright);
+  --btn-border: #e07268;
+  --btn-shadow: #5c1a15;
+  background: linear-gradient(180deg, var(--danger-bright), var(--danger));
+}
+
+.btn--link {
+  background: none;
+  border: none;
+  box-shadow: none;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--gold-300);
+  padding: 0.3em 0.2em;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+.btn--link:hover { color: var(--gold-100); transform: none; }
+
+/* ---- Sizes ----------------------------------------------------------- */
+
+.btn--lg { padding: 1.1em 2.6em; font-size: var(--text-lg); border-radius: var(--radius-lg); }
+.btn--md { padding: 0.85em 1.8em; font-size: var(--text-md); }
+.btn--sm { padding: 0.55em 1.2em; font-size: var(--text-sm); border-radius: var(--radius-sm); }
+
+.btn--full { width: 100%; }
+
+.btn--icon {
+  padding: 0.6em;
+  width: 2.6em;
+  height: 2.6em;
+  border-radius: var(--radius-pill);
+}
+.btn--icon svg { width: 1.1em; height: 1.1em; }
+
+.btn svg { width: 1em; height: 1em; flex-shrink: 0; }

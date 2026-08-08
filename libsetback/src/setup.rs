@@ -66,7 +66,7 @@ impl GameSetup {
 	}
 	
 	#[cfg(not(feature = "client"))]
-	pub fn new_multiplayer(host: ClientConnection) -> Self {
+	pub fn new_multiplayer(host: Box<ClientConnection>) -> Self {
 		info!("Creating multiplayer game");
 		let host = Player::new_host_connected(host, 0);
 		let mut setup_data = Self::new();
@@ -107,7 +107,7 @@ impl GameSetup {
 
 	/// Makes this player type a networked client.
 	#[cfg(not(feature = "client"))]
-	pub fn set_client(&mut self, index: u8, conn: ClientConnection) {
+	pub fn set_client(&mut self, index: u8, conn: Box<ClientConnection>) {
 		info!("Setting empty human at index {index} to connected human client");
 		let pt = self.0.players[index].player_type.get_mut();
 		debug_assert!(
@@ -155,7 +155,7 @@ impl GameSetup {
 				#[cfg(not(feature = "client"))]
 				PlayerType::HumanConnection {..} => num_human_connection += 1,
 				#[cfg(not(feature = "client"))]
-				PlayerType::HumanEmpty {..} => num_human_empty += 1,
+				PlayerType::HumanEmpty => num_human_empty += 1,
 				PlayerType::Ai {..} => num_ai += 1,
 				_ => unreachable!("PlayerType should be one of SingleplayerSelf, HumanConnection, HumanEmpty, or Ai"),
 			});
