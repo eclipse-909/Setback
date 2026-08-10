@@ -6,8 +6,9 @@ edition = "2024"
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
 libsetback = { path = "../libsetback", features = ["client"] }
+uuid.workspace = true
 
 [features]
 default = ["desktop"]
-web = ["dioxus/web"]
+web = ["dioxus/web", "uuid/js"]
 desktop = ["dioxus/desktop"]

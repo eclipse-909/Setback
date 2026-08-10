@@ -1,19 +1,14 @@
 use {
-	axum::{
-		extract::Request,
-		http::StatusCode,
-		middleware::Next,
-		response::IntoResponse
-	},
-	libsetback::{SSP_VERSION, DNS_NAME, Version},
+	axum::{extract::Request, http::StatusCode, middleware::Next, response::IntoResponse},
+	libsetback::{SETBACK_PROXY, SSP_VERSION, Version},
 	serde::{Deserialize, Serialize},
 	tower_cookies::{
-		Cookies, Cookie,
+		Cookie, Cookies,
 		cookie::{
 			Key, SameSite,
-			time::{Duration, UtcDateTime, OffsetDateTime},
+			time::{Duration, OffsetDateTime, UtcDateTime},
 		},
-	}
+	},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -34,24 +29,27 @@ impl AuthToken {
 	pub fn new(account_id: u32, username: String) -> Self {
 		Self {
 			expires: (UtcDateTime::now() + Duration::days(7)).unix_timestamp(),
-			user: User {account_id, username},
+			user: User {
+				account_id,
+				username,
+			},
 			version: SSP_VERSION,
 		}
 	}
-	
+
 	pub fn insert(&self, cookies: &mut Cookies, key: &Key) -> Result<(), StatusCode> {
 		let Ok(token) = serde_json::to_string(self) else {
 			return Err(StatusCode::INTERNAL_SERVER_ERROR);
 		};
 		let cookie = Cookie::build((http::header::AUTHORIZATION.as_str(), token))
-			.domain(DNS_NAME)
+			.domain(SETBACK_PROXY)
 			.path("/")
 			.secure(true)
 			.http_only(true)
 			.same_site(SameSite::Strict)
 			.expires(Some(
 				OffsetDateTime::from_unix_timestamp(self.expires)
-					.map_err(|_| StatusCode::UNAUTHORIZED)?
+					.map_err(|_| StatusCode::UNAUTHORIZED)?,
 			))
 			.build();
 		cookies.private(key).add(cookie);
@@ -72,7 +70,10 @@ pub async fn middleware_auth(cookies: Cookies, mut req: Request, next: Next) -> 
 		Some(k) => k,
 		None => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
 	};
-	let decrypted = match cookies.private(key).get(http::header::AUTHORIZATION.as_str()) {
+	let decrypted = match cookies
+		.private(key)
+		.get(http::header::AUTHORIZATION.as_str())
+	{
 		Some(c) => c,
 		None => return StatusCode::UNAUTHORIZED.into_response(),
 	};
@@ -84,7 +85,7 @@ pub async fn middleware_auth(cookies: Cookies, mut req: Request, next: Next) -> 
 	if UtcDateTime::now().unix_timestamp() >= auth_token.expires {
 		return StatusCode::UNAUTHORIZED.into_response();
 	}
-	
+
 	req.extensions_mut().insert(auth_token.user);
 	next.run(req).await
 }

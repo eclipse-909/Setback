@@ -1,7 +1,4 @@
-use {
-	std::fs,
-	libsetback::*
-};
+use {libsetback::*, std::fs};
 
 #[tokio::test]
 async fn test_ai_only() {
@@ -14,11 +11,12 @@ async fn test_ai_only() {
 		.with_level(true)
 		.compact()
 		.init();
-	
+
 	GameSetup::new_ai_only()
 		.init()
 		.expect("Game cannot start in invalid state")
-		.run_singleplayer(Empty, Empty).await;
+		.run_singleplayer(Empty, Empty)
+		.await;
 }
 
 struct Empty;

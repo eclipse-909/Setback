@@ -11,5 +11,13 @@ This mono-repo contains the source code for all Setback programs, server and cli
 
 The Setback game client aims to be cross-platform. Primarily targeting desktop and web, and maybe expanding to mobile.
 
-The backend services use docker compose to run the server and website. Collectively the backend is often referred to as setbackd in this project. Dokploy is used to deploy the 
-backend to the cloud.
+The backend services use docker compose to run the server and website. Collectively the backend is often referred to as setbackd in this project. Dokploy is used to deploy the backend to the cloud.
+
+## Developer Setup
+The following should be installed
+* [Rust](https://rust-lang.org/tools/install/)
+  * Nightly compiler
+  * [Tarpaulin](https://github.com/xd009642/tarpaulin#installation)
+* [Just](https://just.systems/man/en/installation.html)
+* [Dioxus CLI and system dependencies]([https://dioxuslabs.com/learn/0.7/tutorial/tooling](https://dioxuslabs.com/learn/0.7/getting_started/))
+* [Docker](https://docs.docker.com/engine/install/)

@@ -4,7 +4,15 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
-*, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -khtml-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
 
 html {
   /* UI scale lives here: the whole app is sized in rem off this value. */
@@ -13,12 +21,13 @@ html {
 
 body {
   margin: 0;
-  min-height: 100vh;
+  /*min-height: 100vh;*/
+  height: 100%;
   font-family: var(--font-body);
   color: var(--cream-100);
   background: var(--felt-800);
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  overflow: hidden;
 }
 
 /* Felt table backdrop: diamond quilt texture + vignette, used on every screen */

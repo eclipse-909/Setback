@@ -1,22 +1,31 @@
-use dioxus::prelude::*;
-
-const PLAYER_NODE_CSS: Asset = asset!("/assets/styling/player-node.css");
+use {crate::components::*, dioxus::prelude::*};
 
 #[derive(Props, PartialEq, Clone)]
 pub struct PlayerNodeProps {
 	node_type: PlayerNodeType,
+	#[props(default)]
 	editable: bool,
+	#[props(default)]
 	removable: bool,
 }
 
 #[derive(PartialEq, Clone)]
 pub enum PlayerNodeType {
-	Player { name: String, role: PlayerNodeRole, team: u8, is_you: bool },
-	Empty
+	Player {
+		name: String,
+		role: PlayerNodeRole,
+		team: u8,
+		is_you: bool,
+	},
+	Empty,
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
-pub enum PlayerNodeRole { Host, Player, Bot }
+pub enum PlayerNodeRole {
+	Host,
+	Player,
+	Bot,
+}
 
 #[component]
 pub fn PlayerNode(props: PlayerNodeProps) -> Element {
@@ -32,7 +41,12 @@ pub fn PlayerNode(props: PlayerNodeProps) -> Element {
 		}
 	};
 	let node = match props.node_type {
-		PlayerNodeType::Player { name, role, team, is_you } => {
+		PlayerNodeType::Player {
+			name,
+			role,
+			team,
+			is_you,
+		} => {
 			let editable = if props.editable { "is-editable" } else { "" };
 			let role = format!("{role:?}");
 			let is_you = if is_you { "is-you" } else { "" };
@@ -47,19 +61,19 @@ pub fn PlayerNode(props: PlayerNodeProps) -> Element {
 					if props.removable {{rm_btn}}
 				}
 			}
-		},
+		}
 		PlayerNodeType::Empty => rsx! {
 			div { class: "player-node is-empty",
 				div { class: "player-node__avatar", "?" }
 				div { class: "player-node__name", "Open Seat" }
 				if props.removable {{rm_btn}}
 			}
-		}
+		},
 	};
-	
+
 	rsx! {
 		document::Link { rel: "stylesheet", href: PLAYER_NODE_CSS }
-		
+
 		{node}
 	}
 }

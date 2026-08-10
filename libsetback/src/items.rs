@@ -1,5 +1,5 @@
 use {
-	crate::{SmallVec, constants::*, setup::*, Error},
+	crate::{Error, SmallVec, constants::*, setup::*},
 	serde::{Deserialize, Serialize},
 	std::fmt::{Display, Formatter},
 };
@@ -32,8 +32,8 @@ impl Version {
 /// and would always refer to libsetback when we might want it to refer to dependent packages.
 #[macro_export]
 macro_rules! pkg_version {
-    () => {
-        const {
+	() => {
+		const {
 			// Thanks Rust for not having 1st class support for compile time code execution.
 			// Now I have to manually parse the string because str methods aren't const.
 
@@ -83,9 +83,13 @@ macro_rules! pkg_version {
 				}
 				bufs_idx += 1;
 			}
-			Version { major: nums[0], minor: nums[1], patch: nums[2] }
+			Version {
+				major: nums[0],
+				minor: nums[1],
+				patch: nums[2],
+			}
 		}
-    };
+	};
 }
 
 #[repr(u8)]
@@ -119,8 +123,7 @@ impl Bid {
 		}
 	}
 
-	pub const BID_INPUT_FMT: &str =
-r"
+	pub const BID_INPUT_FMT: &str = r"
 0..5, pass, override
 ";
 
@@ -152,10 +155,22 @@ impl Card {
 			let mut deck = SmallVec::new();
 			let mut number = 2;
 			while number <= ACE {
-				deck.push(Card { suit: Suit::Hearts, number });
-				deck.push(Card { suit: Suit::Clubs, number });
-				deck.push(Card { suit: Suit::Diamonds, number });
-				deck.push(Card { suit: Suit::Spades, number });
+				deck.push(Card {
+					suit: Suit::Hearts,
+					number,
+				});
+				deck.push(Card {
+					suit: Suit::Clubs,
+					number,
+				});
+				deck.push(Card {
+					suit: Suit::Diamonds,
+					number,
+				});
+				deck.push(Card {
+					suit: Suit::Spades,
+					number,
+				});
 				number += 1;
 			}
 			assert!(deck.len() == DECK_SIZE as u8);
@@ -165,11 +180,13 @@ impl Card {
 
 	/// returns 0 of hearts, which is an invalid card that must not be used in the game.
 	pub const fn zero() -> Self {
-		Self {number: 0, suit: Suit::Hearts}
+		Self {
+			number: 0,
+			suit: Suit::Hearts,
+		}
 	}
 
-	pub const CARD_INPUT_FMT: &str =
-r"
+	pub const CARD_INPUT_FMT: &str = r"
 <number> <suit>
 <number> of <suit>
 <index>
@@ -188,20 +205,24 @@ index: 0-based index of card in hand
 		let string = string.to_lowercase();
 		let strings: Vec<&str> = string.split(' ').collect();
 		match strings.len() {
-			1 => if let Ok(idx) = strings[1].parse::<u8>() {
-				return Some(Err(idx));
-			},
-			2 => return Some(Ok(Card {
-				number: Self::parse_num_string(strings[0])?,
-				suit: Self::parse_suit_string(strings[1])?
-			})),
+			1 => {
+				if let Ok(idx) = strings[1].parse::<u8>() {
+					return Some(Err(idx));
+				}
+			}
+			2 => {
+				return Some(Ok(Card {
+					number: Self::parse_num_string(strings[0])?,
+					suit: Self::parse_suit_string(strings[1])?,
+				}));
+			}
 			3 => {
 				if strings[1].trim() != "of" {
 					return None;
 				}
 				return Some(Ok(Card {
 					number: Self::parse_num_string(strings[0])?,
-					suit: Self::parse_suit_string(strings[2])?
+					suit: Self::parse_suit_string(strings[2])?,
 				}));
 			}
 			_ => {}
@@ -215,7 +236,13 @@ index: 0-based index of card in hand
 			"q" | "queen" => Some(QUEEN),
 			"k" | "king" => Some(KING),
 			"a" | "ace" => Some(ACE),
-			_ => string.parse::<u8>().ok().and_then(|n| if !(2..=14).contains(&n) {None} else {Some(n)}),
+			_ => string.parse::<u8>().ok().and_then(|n| {
+				if !(2..=14).contains(&n) {
+					None
+				} else {
+					Some(n)
+				}
+			}),
 		}
 	}
 
@@ -228,7 +255,7 @@ index: 0-based index of card in hand
 			_ => None,
 		}
 	}
-	
+
 	/// Returns the number 2..=10 or J/Q/K/A or panics if not 2..=14
 	pub const fn num_small(num: u8) -> &'static str {
 		match num {
@@ -295,7 +322,7 @@ impl Suit {
 			Suit::Spades => '♠',
 		}
 	}
-	
+
 	pub const fn is_red(self) -> bool {
 		match self {
 			Suit::Hearts | Suit::Diamonds => true,
@@ -379,17 +406,28 @@ pub struct RoundScores {
 /// In multiplayer, the TCP stream will receive [ssp] messages from the server, which may contain these events.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum GameEvent {
-	Init {idx: u8},
+	Init {
+		idx: u8,
+	},
 	/// Index player bid the amount
-	PlayerBid { idx: u8, bid: Bid },
+	PlayerBid {
+		idx: u8,
+		bid: Bid,
+	},
 	/// Index player played the card
-	PlayerPlayedCard { idx: u8, card: Card },
+	PlayerPlayedCard {
+		idx: u8,
+		card: Card,
+	},
 	/// This should only be sent to the player whose turn it is.
 	PromptBid(Option<Error>),
 	/// This should only be sent to the player whose turn it is.
 	PromptCard(Option<Error>),
 	/// Deal the hand to the player.
-	DealCards { hand: SmallVec<Card, CARDS_PER_PLAYER>, idx: u8 },
+	DealCards {
+		hand: SmallVec<Card, CARDS_PER_PLAYER>,
+		idx: u8,
+	},
 	/// The round is over, and the scores of the round are given for each team
 	RoundScores(RoundScores),
 	GameOver,

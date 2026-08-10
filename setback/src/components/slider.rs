@@ -1,35 +1,42 @@
-use dioxus::prelude::*;
-
-const SLIDER_CSS: Asset = asset!("/assets/styling/slider.css");
+use {crate::components::*, dioxus::prelude::*, uuid::Uuid};
 
 #[derive(Props, PartialEq, Clone)]
 pub struct SliderProps {
-    label: String,
-    id: String,
-    max: u8,
-    min: u8,
-    value: u8,
+	max: u8,
+	min: u8,
+	value: u8,
+	step: u8,
+	#[props(default)]
+	percentage: bool,
+	children: Element,
 }
 
 #[component]
 pub fn Slider(props: SliderProps) -> Element {
-    rsx! {
-        document::Link { rel: "stylesheet", href: SLIDER_CSS }
-        
-        div { class: "slider-field panel-like",
-            div { class: "slider-field__head",
-                label { r#for: "{props.id}", "{props.label}" }
-                span { class: "slider-field__value", id: "{props.id}Val", "{props.value}%" }
-            }
-            input {
-                class: "slider",
-                id: "{props.id}",
-                max: "{props.max}",
-                min: "{props.min}",
-                r#type: "range",
-                style: "--fill:{props.value}%",
-                value: "{props.value}",
-            }
-        }
-    }
+	let percentage = if props.percentage { "%" } else { "" };
+	let fill =
+		(props.value as f32 - props.min as f32) / (props.max as f32 - props.min as f32) * 100.;
+	let input_uuid = Uuid::new_v4().to_string();
+	let input_id = input_uuid.as_str();
+	rsx! {
+		document::Link { rel: "stylesheet", href: SLIDER_CSS }
+
+		div { class: "slider-field",
+			div { class: "slider-field__head",
+				label { r#for: input_id, {props.children} }
+				span { class: "slider-field__value", id: "{input_id}-val", "{props.value}{percentage}" }
+			}
+			input {
+				class: "slider",
+				"data-value-suffix": percentage,
+				"data-value-target": "#{input_id}-val",
+				id: input_id,
+				max: "{props.max}",
+				min: "{props.min}",
+				r#type: "range",
+				style: "--fill:{fill}%",
+				value: "{props.value}",
+			}
+		}
+	}
 }

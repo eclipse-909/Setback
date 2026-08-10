@@ -1,15 +1,18 @@
-use dioxus::prelude::*;
-
-const TOAST_CSS: Asset = asset!("/assets/styling/toast.css");
+use {crate::components::*, dioxus::prelude::*};
 
 #[derive(Props, PartialEq, Clone)]
 pub struct ToastProps {
 	msg: String,
+	#[props(default)]
 	toast_type: ToastType,
 }
 
-#[derive(PartialEq, Clone, Copy)]
-pub enum ToastType { Success, Error }
+#[derive(PartialEq, Clone, Copy, Default)]
+pub enum ToastType {
+	#[default]
+	Success,
+	Error,
+}
 
 impl ToastType {
 	const fn as_class(self) -> &'static str {
@@ -23,8 +26,8 @@ impl ToastType {
 #[component]
 pub fn Toast(props: ToastProps) -> Element {
 	rsx! {
-        document::Link { rel: "stylesheet", href: TOAST_CSS }
-        
+		document::Link { rel: "stylesheet", href: TOAST_CSS }
+
 		div { class: "toast {props.toast_type.as_class()}",
 			svg {
 				class: "toast__icon",
@@ -37,5 +40,14 @@ pub fn Toast(props: ToastProps) -> Element {
 			}
 			span { "{props.msg}" }
 		}
+	}
+}
+
+#[component]
+pub fn ToastRegion() -> Element {
+	rsx! {
+		document::Link { rel: "stylesheet", href: TOAST_CSS }
+
+		div { class: "toast-region" }
 	}
 }

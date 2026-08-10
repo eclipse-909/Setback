@@ -1,7 +1,4 @@
-use dioxus::prelude::*;
-
-const GAME_LIST_ITEM_CSS: Asset = asset!("/assets/styling/game-list-item.css");
-const BUTTON_CSS: Asset = asset!("/assets/styling/button.css");
+use {crate::components::*, dioxus::prelude::*};
 
 #[derive(Props, PartialEq, Clone)]
 pub struct GameListItemProps {
@@ -18,11 +15,15 @@ pub struct GameListItemProps {
 
 #[component]
 pub fn GameListItem(props: GameListItemProps) -> Element {
-	let teams = if props.std_team_mode { "Standard" } else { "Custom" };
+	let teams = if props.std_team_mode {
+		"Standard"
+	} else {
+		"Custom"
+	};
 	rsx! {
 		document::Link { rel: "stylesheet", href: GAME_LIST_ITEM_CSS }
 		document::Link { rel: "stylesheet", href: BUTTON_CSS }
-		
+
 		div { class: "game-list-item",
 			span { class: "game-list-item__suit",
 				"♠" // TODO use random suit or make suit mean something
@@ -38,7 +39,7 @@ pub fn GameListItem(props: GameListItemProps) -> Element {
 				}
 			}
 			span { class: "game-list-item__players", "{props.num_players}/{props.max_players}" }
-			button { class: "btn btn--primary btn--sm", "Join" }
+			Btn { size: BtnSize::Sm, variant: BtnVariant::Primary, "Join" }
 		}
 	}
 }

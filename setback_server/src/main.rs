@@ -38,19 +38,19 @@ fn main() {
 		.init();
 
 	let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+		.enable_all()
+		.build()
+		.unwrap();
 
-	let api = setback_api()
-		.unwrap_or_else(|| crash!("Could not connect to setback public api."));
+	let api = setback_api().unwrap_or_else(|| crash!("Could not connect to setback public api."));
 
 	// Create tcp listener, and setup communication loops for unix socket and tcp listener
 	rt.block_on(async move {
 		let tcp_stream = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
 			.await
 			.unwrap_or_else(crash!("Could not bind tcp listener. Error: {}", e));
-		let port = tcp_stream.local_addr()
+		let port = tcp_stream
+			.local_addr()
 			.unwrap_or_else(crash!("Could not get tcp listener port. Error: {}", e))
 			.port();
 
@@ -73,7 +73,7 @@ async fn listen_tcp_socket(listener: TcpListener, api: Client, state: Arc<State>
 					client.spawn_read_loop_for_server(state.clone());
 				}
 			}
-			Err(e) => warn!("Could not accept client. Error: {e}")
+			Err(e) => warn!("Could not accept client. Error: {e}"),
 		}
 	}
 }

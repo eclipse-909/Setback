@@ -1,28 +1,33 @@
-use dioxus::prelude::*;
-
-const TOGGLE_CSS: Asset = asset!("/assets/styling/toggle.css");
+use {crate::components::*, dioxus::prelude::*};
 
 #[derive(Props, PartialEq, Clone)]
 pub struct ToggleProps {
-    checked: bool,
-    label: String,
-    description: String,
+	#[props(default)]
+	checked: bool,
+	#[props(default)]
+	label: String,
+	#[props(default)]
+	description: String,
 }
 
 #[component]
 pub fn Toggle(props: ToggleProps) -> Element {
-    rsx! {
-        document::Link { rel: "stylesheet", href: TOGGLE_CSS }
-        
-        label { class: "toggle",
-            input { checked: "{props.checked}", r#type: "checkbox" }
-            span { class: "toggle__track",
-                span { class: "toggle__thumb" }
-            }
-            span { class: "toggle__label",
-                "{props.label}"
-                small { "{props.description}" }
-            }
-        }
-    }
+	rsx! {
+		document::Link { rel: "stylesheet", href: TOGGLE_CSS }
+
+		label { class: "toggle",
+			input { checked: "{props.checked}", r#type: "checkbox" }
+			span { class: "toggle__track",
+				span { class: "toggle__thumb" }
+			}
+			if !props.label.is_empty() {
+				span { class: "toggle__label",
+					"{props.label}"
+					if !props.description.is_empty() {
+						small { "{props.description}" }
+					}
+				}
+			}
+		}
+	}
 }

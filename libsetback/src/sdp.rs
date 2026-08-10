@@ -28,13 +28,11 @@ impl Sdp {
 	}
 
 	pub fn serialize<'b>(&self, buf: &'b mut [u8]) -> Result<&'b mut [u8], Error> {
-		postcard::to_slice_cobs(self, buf)
-			.map_err(|_| Error::BadEncoding)
+		postcard::to_slice_cobs(self, buf).map_err(|_| Error::BadEncoding)
 	}
 
 	pub fn deserialize(buf: &mut [u8]) -> Result<Self, Error> {
-		postcard::from_bytes_cobs(buf)
-			.map_err(|_| Error::BadEncoding)
+		postcard::from_bytes_cobs(buf).map_err(|_| Error::BadEncoding)
 	}
 }
 

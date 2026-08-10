@@ -1,7 +1,7 @@
 use {
 	crate::*,
 	serde::{Deserialize, Serialize},
-	tracing::{info, error, warn}
+	tracing::{error, info, warn},
 };
 
 /// Setup data is created modified when setting up a game.
@@ -43,7 +43,7 @@ impl GameSetup {
 			players: SmallVec::new(),
 		})
 	}
-	
+
 	pub fn new_ai_only() -> Self {
 		info!("Creating AI only game");
 		let mut setup_data = Self::new();
@@ -59,19 +59,19 @@ impl GameSetup {
 		let sp_self = Player::new_singleplayer_self(0, username);
 		let mut setup_data = Self::new();
 		setup_data.0.players.push(sp_self);
-		for _ in 0..MAX_PLAYERS-1 {
+		for _ in 0..MAX_PLAYERS - 1 {
 			setup_data.add_ai();
 		}
 		setup_data
 	}
-	
+
 	#[cfg(not(feature = "client"))]
 	pub fn new_multiplayer(host: Box<ClientConnection>) -> Self {
 		info!("Creating multiplayer game");
 		let host = Player::new_host_connected(host, 0);
 		let mut setup_data = Self::new();
 		setup_data.0.players.push(host);
-		for _ in 0..MAX_PLAYERS-1 {
+		for _ in 0..MAX_PLAYERS - 1 {
 			setup_data.add_ai();
 		}
 		setup_data
@@ -79,23 +79,30 @@ impl GameSetup {
 
 	pub fn add_ai(&mut self) {
 		info!("Adding AI player");
-		self.0.players.push(Player::new_ai(self.0.players.len() & 1));
+		self.0
+			.players
+			.push(Player::new_ai(self.0.players.len() & 1));
 	}
-	
+
 	#[cfg(not(feature = "client"))]
 	pub fn add_human(&mut self) {
 		info!("Adding human player");
-		self.0.players.push(Player::new_human_empty(self.0.players.len() & 1));
+		self.0
+			.players
+			.push(Player::new_human_empty(self.0.players.len() & 1));
 	}
 
 	/// Updates a player's status as AI or human.
 	#[cfg(not(feature = "client"))]
 	pub fn update_human(&mut self, index: u8, is_human: bool) {
-		info!("Setting player at index {index} to {}", if is_human {"empty human"} else {"AI"});
+		info!(
+			"Setting player at index {index} to {}",
+			if is_human { "empty human" } else { "AI" }
+		);
 		*self.0.players[index].player_type.get_mut() = if is_human {
 			PlayerType::HumanEmpty
 		} else {
-			PlayerType::Ai {account_id: 0}
+			PlayerType::Ai { account_id: 0 }
 		};
 	}
 
@@ -114,7 +121,7 @@ impl GameSetup {
 			matches!(pt, PlayerType::HumanEmpty),
 			"Player must be an empty human slot before setting a client connection"
 		);
-		*pt = PlayerType::HumanConnection {conn};
+		*pt = PlayerType::HumanConnection { conn };
 	}
 
 	/// Initializes a game loop that hasn't started yet.
@@ -134,7 +141,10 @@ impl GameSetup {
 		// * at least 2 HumanConnection
 		// * remainder are Ai or HumanConnection
 		if self.0.players.len() < MIN_PLAYERS {
-			warn!("Not enough players - got {}, need {MIN_PLAYERS}", self.0.players.len());
+			warn!(
+				"Not enough players - got {}, need {MIN_PLAYERS}",
+				self.0.players.len()
+			);
 			return Err(self);
 		}
 		#[cfg(feature = "client")]
@@ -151,13 +161,15 @@ impl GameSetup {
 			// We have exclusive access to self
 			.for_each(|p| match unsafe { &*p.player_type.get() } {
 				#[cfg(feature = "client")]
-				PlayerType::SingleplayerSelf {..} => num_singleplayer += 1,
+				PlayerType::SingleplayerSelf { .. } => num_singleplayer += 1,
 				#[cfg(not(feature = "client"))]
-				PlayerType::HumanConnection {..} => num_human_connection += 1,
+				PlayerType::HumanConnection { .. } => num_human_connection += 1,
 				#[cfg(not(feature = "client"))]
 				PlayerType::HumanEmpty => num_human_empty += 1,
-				PlayerType::Ai {..} => num_ai += 1,
-				_ => unreachable!("PlayerType should be one of SingleplayerSelf, HumanConnection, HumanEmpty, or Ai"),
+				PlayerType::Ai { .. } => num_ai += 1,
+				_ => unreachable!(
+					"PlayerType should be one of SingleplayerSelf, HumanConnection, HumanEmpty, or Ai"
+				),
 			});
 		#[cfg(all(feature = "client", not(feature = "test-dep")))]
 		if num_singleplayer != 1 || self.0.players.len() - 1 != num_ai {
@@ -170,21 +182,20 @@ impl GameSetup {
 			return Err(self);
 		}
 		#[cfg(not(feature = "client"))]
-		if num_human_connection < 2 || num_human_empty == 0 || self.0.players.len() - num_human_connection != num_ai {
+		if num_human_connection < 2
+			|| num_human_empty == 0
+			|| self.0.players.len() - num_human_connection != num_ai
+		{
 			error!(
 				"Incorrect player configuration - empty humans: {}, connected humans: {}, AIs: {}",
 				num_human_empty, num_human_connection, num_ai
 			);
 			return Err(self);
 		}
-		
+
 		// normalize team numbers so there are no gaps
-		let mut team_ids: SmallVec<u8, MAX_PLAYERS> = self
-			.0
-			.players
-			.iter()
-			.map(|p| p.team_id)
-			.collect();
+		let mut team_ids: SmallVec<u8, MAX_PLAYERS> =
+			self.0.players.iter().map(|p| p.team_id).collect();
 		team_ids.sort();
 		team_ids.dedup();
 		let mut team_id_map = [0; MAX_PLAYERS];

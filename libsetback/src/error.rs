@@ -1,9 +1,9 @@
 use {
+	serde::{Deserialize, Serialize},
 	std::{
 		fmt::{Display, Formatter},
-		io::ErrorKind
+		io::ErrorKind,
 	},
-	serde::{Deserialize, Serialize},
 };
 
 #[repr(u8)]
@@ -37,7 +37,8 @@ impl std::error::Error for Error {}
 impl Display for Error {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(
-			f, "{}",
+			f,
+			"{}",
 			match self {
 				Error::Unknown => "An unknown error occurred. Please report this.",
 				Error::BadEnvVar => "Environment variable is not set. Please set it and try again.",
@@ -47,7 +48,8 @@ impl Display for Error {
 				Error::BadVersion => "Incompatible version. Please update the game.",
 				Error::BadProtocol => "Unexpected protocol.",
 				Error::Unauthenticated => "Unauthenticated. Please log in.",
-				Error::AlreadyConnected => "Can't join server, this account is already connected. If this is a mistake, please change your password immediately!",
+				Error::AlreadyConnected =>
+					"Can't join server, this account is already connected. If this is a mistake, please change your password immediately!",
 				Error::TimedOut => "Request timed out.",
 				Error::ServerError => "Internal server error.",
 				Error::LogicError => "Logical error. Please report this.",
@@ -80,7 +82,7 @@ impl From<std::io::Error> for Error {
 		match value.kind() {
 			ErrorKind::ConnectionAborted => Error::Disconnected,
 			ErrorKind::TimedOut => Error::TimedOut,
-			_ => Error::NetworkError
+			_ => Error::NetworkError,
 		}
 	}
 }

@@ -1,16 +1,12 @@
-use dioxus::prelude::*;
-
-const MODAL_CSS: Asset = asset!("/assets/styling/modal.css");
-const BUTTON_CSS: Asset = asset!("/assets/styling/button.css");
-const PANEL_CSS: Asset = asset!("/assets/styling/panel.css");
+use {crate::components::*, dioxus::prelude::*};
 
 #[component]
 pub fn Modal(children: Element) -> Element {
 	rsx! {
-        document::Link { rel: "stylesheet", href: MODAL_CSS }
-        document::Link { rel: "stylesheet", href: BUTTON_CSS }
-        document::Link { rel: "stylesheet", href: PANEL_CSS }
-        
+		document::Link { rel: "stylesheet", href: MODAL_CSS }
+		document::Link { rel: "stylesheet", href: BUTTON_CSS }
+		document::Link { rel: "stylesheet", href: PANEL_CSS }
+
 		div { class: "modal-overlay", hidden: "false", id: "tableMenuModal",
 			div {
 				aria_labelledby: "tableMenuTitle",

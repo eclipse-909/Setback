@@ -1,15 +1,11 @@
-use {
-	clap::{Parser, Subcommand},
-	libsetback::{SDP_VERSION, sdp::*, SETBACKCTL_UNIX_SOCKET, SETBACK_WEBSITE_UNIX_SOCKET},
-	std::os::unix::net::UnixDatagram
-};
+use clap::{Parser, Subcommand};
 
 /// CLI controller for Setback processes (setbackd, setback_api, and setback_server)
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
 	#[command(subcommand)]
-    command: Option<Command>,
+	command: Option<Command>,
 }
 
 #[derive(Subcommand)]

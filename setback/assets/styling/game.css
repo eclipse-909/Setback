@@ -1,0 +1,88 @@
+body { overflow: hidden; }
+.game-table {
+	position: relative;
+	height: 100vh;
+	width: 100vw;
+	display: grid;
+	grid-template-rows: 1fr auto;
+}
+
+.game-hud {
+	position: absolute;
+	top: var(--space-4);
+	left: var(--space-4);
+	right: var(--space-4);
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	z-index: 5;
+}
+.game-hud__score {
+	font-family: var(--font-mono);
+	background: rgba(0,0,0,0.35);
+	border: 1px solid var(--gold-700);
+	border-radius: var(--radius-md);
+	padding: var(--space-2) var(--space-4);
+	color: var(--gold-100);
+	font-size: var(--text-sm);
+}
+
+.seats {
+	position: relative;
+	flex: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.seat {
+	position: absolute;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--space-2);
+}
+.seat--top { top: var(--space-7); left: 50%; transform: translateX(-50%); }
+.seat--left { left: var(--space-7); top: 50%; transform: translateY(-50%); }
+.seat--right { right: var(--space-7); top: 50%; transform: translateY(-50%); }
+
+.seat__avatar {
+	width: 3.4rem; height: 3.4rem;
+	border-radius: 50%;
+	background: radial-gradient(circle at 35% 30%, var(--felt-600), var(--felt-800));
+	border: 2px solid var(--gold-700);
+	display: flex; align-items: center; justify-content: center;
+	font-family: var(--font-display); font-weight: 800; color: var(--gold-100);
+}
+.seat.is-turn .seat__avatar { border-color: var(--gold-300); box-shadow: 0 0 0 4px rgba(232,200,116,0.25); }
+.seat__name { font-size: var(--text-sm); color: var(--cream-100); }
+.seat__hand { display: flex; }
+.seat__hand .card-chip--back { margin-left: -1.9rem; }
+.seat__hand .card-chip--back:first-child { margin-left: 0; }
+
+.trick-area {
+	display: flex;
+	gap: var(--space-3);
+	align-items: center;
+	justify-content: center;
+}
+.trick-area .card-chip { margin: 0 -0.4rem; }
+
+.my-hand-bar {
+	position: relative;
+	z-index: 4;
+	display: flex;
+	justify-content: center;
+	padding: var(--space-4) var(--space-4) var(--space-6);
+	background: linear-gradient(0deg, rgba(0,0,0,0.4), transparent);
+}
+.my-hand-bar .card-chip {
+	margin-left: -1.4rem;
+}
+.my-hand-bar .card-chip:first-child { margin-left: 0; }
+
+.table-menu-btn {
+	position: absolute;
+	top: var(--space-4);
+	right: var(--space-4);
+}

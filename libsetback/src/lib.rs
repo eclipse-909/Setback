@@ -4,7 +4,7 @@
 	const_format_args,
 	sync_unsafe_cell,
 	allocator_api,
-	unsafe_cell_access,
+	unsafe_cell_access
 )]
 
 mod arena;
@@ -27,21 +27,9 @@ mod server_net;
 mod server_rt;
 
 pub use {
-	arena::*,
-	client::*,
-	constants::*,
-	error::*,
-	items::*,
-	models::*,
-	player::*,
-	runtime::*,
-	setup::*,
-	small_vec::*,
-	ws::*,
+	arena::*, client::*, constants::*, error::*, items::*, models::*, player::*, runtime::*,
+	setup::*, small_vec::*, ws::*,
 };
 
 #[cfg(not(feature = "client"))]
-pub use {
-	server_net::*,
-	server_rt::*,
-};
+pub use {server_net::*, server_rt::*};

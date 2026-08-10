@@ -4,9 +4,9 @@ use {
 		alloc::{AllocError, Allocator, Layout},
 		cell::{Cell, UnsafeCell},
 		marker::PhantomData,
+		mem::MaybeUninit,
 		ops::Deref,
 		ptr::{self, NonNull},
-		mem::MaybeUninit,
 	},
 	tracing::debug,
 };
@@ -29,7 +29,7 @@ impl<'arena> Arena<'arena> {
 				tail: UnsafeCell::new(None),
 				offset: Cell::new(0),
 				cap: 0,
-			}
+			},
 		}
 	}
 
@@ -43,7 +43,7 @@ impl<'arena> Arena<'arena> {
 				tail: UnsafeCell::new(Some(new_mem_chunk(bytes))),
 				offset: Cell::new(0),
 				cap: bytes,
-			}
+			},
 		}
 	}
 
@@ -66,7 +66,9 @@ impl<'arena> Arena<'arena> {
 impl<'arena> Deref for Arena<'arena> {
 	type Target = ArenaAlloc<'arena>;
 	#[inline(always)]
-	fn deref(&self) -> &Self::Target { &self.allocator }
+	fn deref(&self) -> &Self::Target {
+		&self.allocator
+	}
 }
 
 /// The allocator used for [Arena]. This struct is wrapped by [Arena] to hide implementation details and unnecessary functions.
@@ -89,12 +91,13 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 		// Get the layout alignment to insert padding before the actual location of the object
 		let remainder = self.offset.get() % layout.align();
 		if remainder != 0 {
-			self.offset.set(self.offset.get() + (layout.align() - remainder));
+			self.offset
+				.set(self.offset.get() + (layout.align() - remainder));
 		}
 
 		// SAFETY:
 		// We aren't accessing self.tail anywhere else
-		match unsafe {self.tail.as_mut_unchecked()} {
+		match unsafe { self.tail.as_mut_unchecked() } {
 			Some(tail) => {
 				// If the space needed for this allocation is greater than the amount of memory we have...
 				if self.offset.get() + layout.size() > tail.len() {
@@ -110,7 +113,7 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 					});
 					// SAFETY:
 					// We aren't accessing self.head anywhere else
-					match unsafe {self.head.as_mut_unchecked()} {
+					match unsafe { self.head.as_mut_unchecked() } {
 						Some(head) => {
 							let mut curr = head;
 							loop {
@@ -144,9 +147,10 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 						.as_mut()
 						.unwrap_unchecked()
 						.as_mut_ptr()
-						.add(self.offset.get())
-				).cast(),
-				layout.size()
+						.add(self.offset.get()),
+				)
+				.cast(),
+				layout.size(),
 			)
 		};
 		self.offset.set(self.offset.get() + layout.size());

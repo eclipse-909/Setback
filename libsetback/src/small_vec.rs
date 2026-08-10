@@ -1,15 +1,15 @@
 use {
-	std::{
-		marker::PhantomData,
-		mem::{MaybeUninit, ManuallyDrop},
-		ops::{Index, IndexMut},
-		fmt
-	},
 	serde::{
 		Deserialize, Deserializer, Serialize, Serializer,
+		de::{SeqAccess, Visitor},
 		ser::SerializeSeq,
-		de::{SeqAccess, Visitor}
-	}
+	},
+	std::{
+		fmt,
+		marker::PhantomData,
+		mem::{ManuallyDrop, MaybeUninit},
+		ops::{Index, IndexMut},
+	},
 };
 
 /// SmallVec is an array that lives on the stack. It uses familiar vector operations for changing the length at runtime.
@@ -23,24 +23,35 @@ pub struct SmallVec<T, const CAPACITY: usize> {
 	len: u8,
 }
 
-impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
+impl<T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 	#[allow(clippy::new_without_default)]
 	pub const fn new() -> Self {
-		const {assert!(CAPACITY <= u8::MAX as usize, "CAPACITY must be less than 256");}
+		const {
+			assert!(
+				CAPACITY <= u8::MAX as usize,
+				"CAPACITY must be less than 256"
+			);
+		}
 		Self {
 			arr: MaybeUninit::uninit().transpose(),
-			len: 0
+			len: 0,
 		}
 	}
 
 	#[inline(always)]
-	pub const fn len(&self) -> u8 { self.len }
-	
-	#[inline(always)]
-	pub const fn cap(&self) -> u8 { CAPACITY as u8 }
+	pub const fn len(&self) -> u8 {
+		self.len
+	}
 
 	#[inline(always)]
-	pub const fn is_empty(&self) -> bool { self.len == 0 }
+	pub const fn cap(&self) -> u8 {
+		CAPACITY as u8
+	}
+
+	#[inline(always)]
+	pub const fn is_empty(&self) -> bool {
+		self.len == 0
+	}
 
 	/// ## Safety
 	/// self must not be full
@@ -49,7 +60,7 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		debug_assert!(len < CAPACITY, "Index out of bounds");
 		// SAFETY:
 		// array bounds check is skipped in release mode
-		unsafe {(*self.arr.as_mut_ptr().add(len)).write(val)};
+		unsafe { (*self.arr.as_mut_ptr().add(len)).write(val) };
 		self.len += 1;
 	}
 
@@ -60,7 +71,12 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		debug_assert!(a < self.len && b < self.len, "Index out of bounds.");
 		// SAFETY:
 		// array bounds check is skipped in release mode
-		unsafe {std::ptr::swap(self.arr.as_mut_ptr().add(a as usize), self.arr.as_mut_ptr().add(b as usize))};
+		unsafe {
+			std::ptr::swap(
+				self.arr.as_mut_ptr().add(a as usize),
+				self.arr.as_mut_ptr().add(b as usize),
+			)
+		};
 	}
 
 	/// Takes an element out from index and reinserts it at new_index, shifting elements in between if necessary.
@@ -70,7 +86,10 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		let len = self.len as usize;
 		let index = index as usize;
 		let new_index = new_index as usize;
-		debug_assert!(len <= CAPACITY && index <= len && new_index <= len, "Index out of bounds");
+		debug_assert!(
+			len <= CAPACITY && index <= len && new_index <= len,
+			"Index out of bounds"
+		);
 		let ptr = self.arr.as_mut_ptr();
 		// SAFETY:
 		// trust me bro (don't actually trust me bro)
@@ -80,20 +99,15 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 			let item = ptr_index.read();
 			if index < new_index {
 				// shift left
-				std::ptr::copy(
-					ptr.add(index + 1),
-					ptr_index,
-					new_index - index,
-				);
+				std::ptr::copy(ptr.add(index + 1), ptr_index, new_index - index);
 			} else if index > new_index {
 				// shift right
-				std::ptr::copy(
-					ptr_new_index,
-					ptr.add(new_index + 1),
-					index - new_index,
-				);
+				std::ptr::copy(ptr_new_index, ptr.add(new_index + 1), index - new_index);
 			} else {
-				assert!(index != new_index, "index and new_index should not be the same.");
+				assert!(
+					index != new_index,
+					"index and new_index should not be the same."
+				);
 			}
 			ptr_new_index.write(item);
 		}
@@ -104,14 +118,19 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 	/// - self and other must not overlap
 	/// - self.len + other.len must be <= CAPACITY
 	pub const fn append<const N: usize>(&mut self, other: &mut SmallVec<T, N>) {
-		debug_assert!(self.len + other.len <= CAPACITY as u8, "Index out of bounds");
+		debug_assert!(
+			self.len + other.len <= CAPACITY as u8,
+			"Index out of bounds"
+		);
 		// SAFETY:
 		// trust me bro (don't actually trust me bro)
-		unsafe {std::ptr::copy_nonoverlapping(
-			other.arr.as_ptr(),
-			self.arr.as_mut_ptr().add(self.len as usize),
-			other.len as usize
-		)}
+		unsafe {
+			std::ptr::copy_nonoverlapping(
+				other.arr.as_ptr(),
+				self.arr.as_mut_ptr().add(self.len as usize),
+				other.len as usize,
+			)
+		}
 		self.len += other.len;
 		other.len = 0;
 	}
@@ -129,11 +148,7 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 			let ptr_index = self.arr.as_mut_ptr().add(index);
 			let rm = std::ptr::read(ptr_index).assume_init();
 			if index < len - 1 {
-				std::ptr::copy(
-					ptr_index.add(1),
-					ptr_index,
-					len - index - 1,
-				)
+				std::ptr::copy(ptr_index.add(1), ptr_index, len - index - 1)
 			}
 			self.len -= 1;
 			rm
@@ -143,18 +158,17 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 	/// Shifts following elements to the left
 	/// ## Safety
 	/// item must be known to be in the array
-	pub fn remove_item(&mut self, item: T) where T: PartialEq {
+	pub fn remove_item(&mut self, item: T)
+	where
+		T: PartialEq,
+	{
 		for i in 0..self.len {
 			// SAFETY:
 			// trust me bro (don't actually trust me bro)
 			unsafe {
 				let ptr = self.arr.as_mut_ptr().add(i as usize).cast::<T>();
 				if *ptr == item {
-					std::ptr::copy(
-						ptr.add(1),
-						ptr,
-						(self.len - i - 1) as usize,
-					);
+					std::ptr::copy(ptr.add(1), ptr, (self.len - i - 1) as usize);
 					self.len -= 1;
 					return;
 				}
@@ -168,7 +182,7 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		self.len -= 1;
 		// SAFETY:
 		// trust me bro (don't actually trust me bro)
-		unsafe {(*self.arr.as_ptr().add(self.len as usize)).assume_init_read()}
+		unsafe { (*self.arr.as_ptr().add(self.len as usize)).assume_init_read() }
 	}
 
 	/// Removes and returns the last N elements from self.
@@ -202,13 +216,13 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 	pub const fn as_slice(&self) -> &[T] {
 		// SAFETY:
 		// trust me bro (don't actually trust me bro)
-		unsafe {std::slice::from_raw_parts(self.arr.as_ptr().cast(), self.len as usize)}
+		unsafe { std::slice::from_raw_parts(self.arr.as_ptr().cast(), self.len as usize) }
 	}
 
 	pub const fn as_slice_mut(&mut self) -> &mut [T] {
 		// SAFETY:
 		// trust me bro (don't actually trust me bro)
-		unsafe {std::slice::from_raw_parts_mut(self.arr.as_mut_ptr().cast(), self.len as usize)}
+		unsafe { std::slice::from_raw_parts_mut(self.arr.as_mut_ptr().cast(), self.len as usize) }
 	}
 
 	/// Creates 2 slices split at idx, and neither includes idx.
@@ -218,30 +232,49 @@ impl <T, const CAPACITY: usize> SmallVec<T, CAPACITY> {
 		debug_assert!(idx < self.len);
 		// SAFETY:
 		// trust me bro (don't actually trust me bro)
-		unsafe {(
-			std::slice::from_raw_parts_mut(self.arr.as_mut_ptr().cast(), idx as usize),
-			std::slice::from_raw_parts_mut(self.arr.as_mut_ptr().add(idx as usize + 1).cast(), (self.len - idx - 1) as usize)
-		)}
+		unsafe {
+			(
+				std::slice::from_raw_parts_mut(self.arr.as_mut_ptr().cast(), idx as usize),
+				std::slice::from_raw_parts_mut(
+					self.arr.as_mut_ptr().add(idx as usize + 1).cast(),
+					(self.len - idx - 1) as usize,
+				),
+			)
+		}
 	}
 
 	/// Unstable sort
-	pub fn sort(&mut self) where T: Ord {
+	pub fn sort(&mut self)
+	where
+		T: Ord,
+	{
 		self.as_slice_mut().sort_unstable();
 	}
 
-	pub fn dedup(&mut self) where T: PartialEq {
-		if self.len <= 1 {return;}
+	pub fn dedup(&mut self)
+	where
+		T: PartialEq,
+	{
+		if self.len <= 1 {
+			return;
+		}
 		let mut write = 0;
 		for read in 1..self.len {
 			if self[read] != self[write] {
 				write += 1;
-				if read == write {continue;}
+				if read == write {
+					continue;
+				}
 				// SAFETY:
 				// trust me bro (don't actually trust me bro)
 				unsafe {
 					let ptr: *mut T = self.arr.as_mut_ptr().add(write as usize).cast();
 					ptr.drop_in_place();
-					std::ptr::copy_nonoverlapping(self.arr.as_ptr().add(read as usize).cast(), ptr, 1);
+					std::ptr::copy_nonoverlapping(
+						self.arr.as_ptr().add(read as usize).cast(),
+						ptr,
+						1,
+					);
 				}
 			}
 		}
@@ -255,7 +288,7 @@ impl<T, const CAPACITY: usize> IntoIterator for SmallVec<T, CAPACITY> {
 	fn into_iter(self) -> Self::IntoIter {
 		IntoIter {
 			index: 0,
-			small_vec: ManuallyDrop::new(self)
+			small_vec: ManuallyDrop::new(self),
 		}
 	}
 }
@@ -283,7 +316,7 @@ impl<T, const CAPACITY: usize> Index<u8> for SmallVec<T, CAPACITY> {
 		debug_assert!(index < self.len, "Index out of bounds");
 		// SAFETY:
 		// trust me bro (don't actually trust me bro)
-		unsafe {self.arr.get_unchecked(index as usize).assume_init_ref()}
+		unsafe { self.arr.get_unchecked(index as usize).assume_init_ref() }
 	}
 }
 
@@ -292,12 +325,12 @@ impl<T, const CAPACITY: usize> IndexMut<u8> for SmallVec<T, CAPACITY> {
 		debug_assert!(index < self.len, "Index out of bounds");
 		// SAFETY:
 		// trust me bro (don't actually trust me bro)
-		unsafe {self.arr.get_unchecked_mut(index as usize).assume_init_mut()}
+		unsafe { self.arr.get_unchecked_mut(index as usize).assume_init_mut() }
 	}
 }
 
 impl<T, const CAPACITY: usize> FromIterator<T> for SmallVec<T, CAPACITY> {
-	fn from_iter<I: IntoIterator<Item=T>>(iter: I) -> Self {
+	fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
 		let mut vec = Self::new();
 		for item in iter {
 			vec.push(item);
@@ -311,7 +344,7 @@ impl<T, const CAPACITY: usize> Drop for SmallVec<T, CAPACITY> {
 		for i in 0..self.len {
 			// SAFETY:
 			// trust me bro (don't actually trust me bro)
-			unsafe {self.arr.get_unchecked_mut(i as usize).assume_init_drop()};
+			unsafe { self.arr.get_unchecked_mut(i as usize).assume_init_drop() };
 		}
 	}
 }
@@ -332,9 +365,13 @@ impl<'de, T: Deserialize<'de>, const CAPACITY: usize> Deserialize<'de> for Small
 	}
 }
 
-struct SmallVecVisitor<T, const CAPACITY: usize> { _p: PhantomData<[T; CAPACITY]> }
+struct SmallVecVisitor<T, const CAPACITY: usize> {
+	_p: PhantomData<[T; CAPACITY]>,
+}
 
-impl<'de, T: Deserialize<'de>, const CAPACITY: usize> Visitor<'de> for SmallVecVisitor<T, CAPACITY> {
+impl<'de, T: Deserialize<'de>, const CAPACITY: usize> Visitor<'de>
+	for SmallVecVisitor<T, CAPACITY>
+{
 	type Value = SmallVec<T, CAPACITY>;
 
 	fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -343,14 +380,16 @@ impl<'de, T: Deserialize<'de>, const CAPACITY: usize> Visitor<'de> for SmallVecV
 
 	fn visit_seq<B: SeqAccess<'de>>(self, mut seq: B) -> Result<Self::Value, B::Error> {
 		let Some(size) = seq.size_hint() else {
-			return Err(serde::de::Error::custom("SmallVec sequence missing size hint"));
+			return Err(serde::de::Error::custom(
+				"SmallVec sequence missing size hint",
+			));
 		};
 		if size > CAPACITY {
 			return Err(serde::de::Error::invalid_length(
 				size,
 				&const_format_args!("{CAPACITY}")
 					.as_str()
-					.unwrap_or_else(|| unreachable!("Rust stdlib guaranteed this wouldn't happen"))
+					.unwrap_or_else(|| unreachable!("Rust stdlib guaranteed this wouldn't happen")),
 			));
 		}
 		let mut values = SmallVec::new();
@@ -373,10 +412,17 @@ pub struct IntoIter<T, const CAPACITY: usize> {
 impl<T, const CAPACITY: usize> Iterator for IntoIter<T, CAPACITY> {
 	type Item = T;
 	fn next(&mut self) -> Option<Self::Item> {
-		if self.index == self.small_vec.len {return None;}
+		if self.index == self.small_vec.len {
+			return None;
+		}
 		// SAFETY:
 		// trust me bro (don't actually trust me bro)
-		let item = unsafe {self.small_vec.arr.get_unchecked(self.index as usize).assume_init_read()};
+		let item = unsafe {
+			self.small_vec
+				.arr
+				.get_unchecked(self.index as usize)
+				.assume_init_read()
+		};
 		self.index += 1;
 		Some(item)
 	}
@@ -391,7 +437,12 @@ impl<T, const CAPACITY: usize> Drop for IntoIter<T, CAPACITY> {
 		for i in self.index..self.small_vec.len {
 			// SAFETY:
 			// trust me bro (don't actually trust me bro)
-			unsafe {self.small_vec.arr.get_unchecked_mut(i as usize).assume_init_drop()};
+			unsafe {
+				self.small_vec
+					.arr
+					.get_unchecked_mut(i as usize)
+					.assume_init_drop()
+			};
 		}
 	}
 }

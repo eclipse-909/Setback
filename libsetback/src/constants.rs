@@ -1,7 +1,4 @@
-use {
-	crate::Version,
-	const_format::formatcp,
-};
+use {crate::Version, const_format::formatcp};
 
 // game setup
 
@@ -26,15 +23,16 @@ pub const PILE_SIZE: usize = const {
 
 /// usually setback.eclipse-909.com or localhost
 //noinspection RsReplaceMatchExpr
-const SETBACK_PROXY: &str = match option_env!("SETBACK_PROXY") {
+pub const SETBACK_PROXY: &str = match option_env!("SETBACK_PROXY") {
 	Some(d) => d,
 	None => "localhost",
 };
-const SETBACK_PROD: bool = matches!(option_env!("SETBACK_PROD"), Some(var) if var.len() == 1 && var.as_bytes()[0] == b'1');
+const SETBACK_PROD: bool =
+	matches!(option_env!("SETBACK_PROD"), Some(var) if var.len() == 1 && var.as_bytes()[0] == b'1');
 const SETBACK_ENV: &str = if SETBACK_PROD { "prod" } else { "dev" };
 macro_rules! api {
 	($path:literal) => {
-		formatcp!("https://{SETBACK_PROXY}/{SETBACK_ENV}/{}", $path)
+		formatcp!("https://{SETBACK_PROXY}/api/{}", $path)
 	};
 }
 pub const URL_API_LOGIN: &str = api!("login");
@@ -48,9 +46,17 @@ pub const APPLICATION_OCTET_STREAM: &str = "application/octet-stream";
 // server
 
 pub const SETBACK_SERVER_PORT: u16 = 42069;
-pub const URL_SERVER_WS: &str = formatcp!("wss://{SETBACK_PROXY}/{SETBACK_ENV}");
-pub const SSP_VERSION: Version = Version {major: 0, minor: 1, patch: 0};
-pub const SDP_VERSION: Version = Version {major: 0, minor: 1, patch: 0};
+pub const URL_SERVER_WS: &str = formatcp!("wss://{SETBACK_PROXY}");
+pub const SSP_VERSION: Version = Version {
+	major: 0,
+	minor: 1,
+	patch: 0,
+};
+pub const SDP_VERSION: Version = Version {
+	major: 0,
+	minor: 1,
+	patch: 0,
+};
 /// Maximum number of games to be sent in a request over the network
 pub const MAX_GAME_LIST: u8 = 127;
 /// This is the port that setbackd is bound to on the server. This is the port that clients must connect to initially.
@@ -63,10 +69,4 @@ pub const MAX_GAMES: usize = 10_000;
 
 // files
 
-macro_rules! runtime_dir {($path:literal) => {concat!("/run/setback/", $path)};}
-// `run/setback/daemon` and `run/setback/website` will be deleted by systemd when those services stop.
-pub const SETBACKD_UNIX_SOCKET: &str = runtime_dir!("daemon/setbackd.sock");
-pub const SETBACK_WEBSITE_UNIX_SOCKET: &str = runtime_dir!("website/setback_api.sock");
-pub const SETBACKCTL_UNIX_SOCKET: &str = runtime_dir!("setbackctl.sock");
-pub fn setback_server_unix_socket(pid: i32) -> String { format!(runtime_dir!("setback_server-{}.sock"), pid) }
 pub const KEYRING_SERVICE: &str = "service-keyring-eclipse-909-setback";

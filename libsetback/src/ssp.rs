@@ -29,7 +29,7 @@ impl Ssp {
 			payload,
 		}
 	}
-	
+
 	pub const fn request(payload: Payload, correlation_id: u32) -> Self {
 		Self::new(payload, CorrelationId::request(correlation_id))
 	}
@@ -39,12 +39,12 @@ impl Ssp {
 	pub const fn event(payload: Payload) -> Self {
 		Self::new(payload, CorrelationId::event())
 	}
-	
+
 	pub fn encode<W: Write>(&self, w: W) -> Result<(), Error> {
 		postcard::to_io(self, w).map_err(|_| Error::BadEncoding)?;
 		Ok(())
 	}
-	
+
 	pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
 		postcard::from_bytes(bytes).map_err(|_| Error::BadEncoding)
 	}
@@ -53,7 +53,7 @@ impl Ssp {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Clone, Copy)]
 pub struct CorrelationId {
 	pub id: u32,
-	pub end: bool
+	pub end: bool,
 }
 
 impl CorrelationId {

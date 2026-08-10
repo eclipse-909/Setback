@@ -70,27 +70,31 @@ impl GameState {
 		// SAFETY:
 		// we have exclusive access to self
 		let human_idx = unsafe { self.human_idx() };
-		event_emitter.send(GameEvent::Init { idx: human_idx }).unwrap();
-		self.run_event_loop(human_idx, event_emitter, event_response_rx).await;
+		event_emitter
+			.send(GameEvent::Init { idx: human_idx })
+			.unwrap();
+		self.run_event_loop(human_idx, event_emitter, event_response_rx)
+			.await;
 	}
-	
+
 	/// ## Safety
 	/// No mutable pointers to player type must exist.
 	#[cfg(not(feature = "test-dep"))]
 	unsafe fn human_idx(&self) -> u8 {
-		self
-			.setup
+		self.setup
 			.players
 			.iter()
-			.position(|p| matches!(
-				// SAFETY:
-				// No mutable pointers to player type must exist.
-				unsafe {&*p.player_type.get()},
-				PlayerType::SingleplayerSelf {..})
-			)
+			.position(|p| {
+				matches!(
+					// SAFETY:
+					// No mutable pointers to player type must exist.
+					unsafe { &*p.player_type.get() },
+					PlayerType::SingleplayerSelf { .. }
+				)
+			})
 			.unwrap() as u8
 	}
-	
+
 	/// ## Safety
 	/// Not actually unsafe
 	#[cfg(feature = "test-dep")]
@@ -98,7 +102,7 @@ impl GameState {
 		// there is no human player in tests
 		u8::MAX
 	}
-	
+
 	async fn run_event_loop<Ee: EventEmitter, Err: EventResponseReceiver>(
 		mut self,
 		human_idx: u8,
@@ -112,10 +116,12 @@ impl GameState {
 				GameLoopState::DealCards => {
 					self.deal_cards();
 					#[cfg(not(feature = "test-dep"))]
-					event_emitter.send(GameEvent::DealCards {
-						hand: self.setup.players[human_idx].hand.clone(),
-						idx: self.turn_idx
-					}).unwrap();
+					event_emitter
+						.send(GameEvent::DealCards {
+							hand: self.setup.players[human_idx].hand.clone(),
+							idx: self.turn_idx,
+						})
+						.unwrap();
 					loop_state = GameLoopState::Bidding;
 					// no continue because it is currently the dealer's turn and we want the next player to start bidding.
 				}
@@ -127,7 +133,7 @@ impl GameState {
 							match event_response_rx.recv().await {
 								Ok(GameEvent::PlayerBid { bid, .. }) => {
 									if self.validate_bid(bid) {
-										break bid
+										break bid;
 									}
 									bid_err = Some(Error::BadBid);
 								}
@@ -144,7 +150,12 @@ impl GameState {
 					// It feels redundant to let the player know what they just bid,
 					// but this tells the player that their bid was valid.
 					#[cfg(not(feature = "test-dep"))]
-					event_emitter.send(GameEvent::PlayerBid { idx: self.turn_idx, bid }).unwrap();
+					event_emitter
+						.send(GameEvent::PlayerBid {
+							idx: self.turn_idx,
+							bid,
+						})
+						.unwrap();
 					if self.player_bid(bid, &mut loop_state) {
 						continue;
 					}
@@ -157,7 +168,7 @@ impl GameState {
 							match event_response_rx.recv().await {
 								Ok(GameEvent::PlayerPlayedCard { card, .. }) => {
 									if self.validate_card(card) {
-										break card
+										break card;
 									}
 									card_err = Some(Error::BadCard);
 								}
@@ -174,11 +185,18 @@ impl GameState {
 					// It feels redundant to let the player know which card they played,
 					// but this tells the player that their card was valid.
 					#[cfg(not(feature = "test-dep"))]
-					event_emitter.send(GameEvent::PlayerPlayedCard { idx: self.turn_idx, card }).unwrap();
+					event_emitter
+						.send(GameEvent::PlayerPlayedCard {
+							idx: self.turn_idx,
+							card,
+						})
+						.unwrap();
 					match self.player_played_card(card) {
 						PlayedCardResult::RoundOver(round_scores) => {
 							#[cfg(not(feature = "test-dep"))]
-							event_emitter.send(GameEvent::RoundScores(round_scores)).unwrap();
+							event_emitter
+								.send(GameEvent::RoundScores(round_scores))
+								.unwrap();
 							loop_state = GameLoopState::RoundOver;
 							continue;
 						}
@@ -215,13 +233,13 @@ impl GameState {
 			turn_idx
 		}
 	}
-	
+
 	pub fn deal_cards(&mut self) {
 		// reset round-specific data
 		self.turn_idx = self.dealer_idx;
 		self.highest_card = Card::zero();
 		self.highest_bid = Bid::Pass;
-		
+
 		// collect cards and shuffle
 		self.deck.append(&mut self.pile);
 		for player in self.setup.players.iter_mut() {
@@ -231,15 +249,18 @@ impl GameState {
 			self.deck.append(&mut team.pile);
 		}
 		self.deck.as_slice_mut().shuffle(&mut rand::rng());
-		
+
 		// deal cards
 		for player in self.setup.players.iter_mut() {
 			player.hand = self.deck.split();
 		}
 		info!("player {} dealt the cards", self.turn_idx);
-		debug_assert_eq!(self.deck.len(), DECK_SIZE as u8 - (self.setup.players.len() * CARDS_PER_PLAYER as u8));
+		debug_assert_eq!(
+			self.deck.len(),
+			DECK_SIZE as u8 - (self.setup.players.len() * CARDS_PER_PLAYER as u8)
+		);
 	}
-	
+
 	/// Algorithm for deciding how the AI should bid
 	/// Right now this is just an arbitrary mapping,
 	/// and will eventually be replaced with a better AI
@@ -278,20 +299,23 @@ impl GameState {
 			.unwrap();
 		// SAFETY:
 		// Suit is repr(u8) and the array length is the same as the number of suits.
-		(unsafe { std::mem::transmute::<u8, Suit>(index as u8) }, score)
+		(
+			unsafe { std::mem::transmute::<u8, Suit>(index as u8) },
+			score,
+		)
 	}
-	
+
 	/// Uses a card-scoring system, the turn order, and the game score to determine the bid
 	pub fn ai_bid(&self) -> Bid {
 		let (_, points) = self.ai_eval_bid();
 		let mut bid = match points {
-			..=44 => 0,     // pass
-			45..=99 => 1,   // minimum play out of desperation
-			100..=139 => 2, // A + one more good card
-			140..=179 => 3, // A + face card or two + maybe one more
-			180..=219 => 4, // A + K + J + one more good card
-			220.. if self.setup.dealer_override => 5,  // A + K + Q + J + one more good card
-			220.. => 4, // A + K + Q + J + one more good card
+			..=44 => 0,                               // pass
+			45..=99 => 1,                             // minimum play out of desperation
+			100..=139 => 2,                           // A + one more good card
+			140..=179 => 3,                           // A + face card or two + maybe one more
+			180..=219 => 4,                           // A + K + J + one more good card
+			220.. if self.setup.dealer_override => 5, // A + K + Q + J + one more good card
+			220.. => 4,                               // A + K + Q + J + one more good card
 		};
 		// if you are one of the first to bid, maybe bid higher either to force an opponent to outbid when they shouldn't
 		// or to prevent opponents from bidding to try to be the highest bidder
@@ -323,7 +347,7 @@ impl GameState {
 		}
 		Bid::from(bid)
 	}
-	
+
 	///Plays the highest card if this player had the highest bid.
 	///Currently picks a random valid card until a proper AI is implemented.
 	pub fn ai_play_card(&self) -> Card {
@@ -350,13 +374,12 @@ impl GameState {
 		} else {
 			player.hand.clone()
 		};
-	
+
 		//For now I'm gonna get a random card
 		*playable_cards.as_slice().choose(&mut rand::rng()).unwrap()
-		
-	
+
 		//TODO make AI to choose card to play
-	
+
 		/*
 		Factors:
 			legal cards in hand
@@ -371,27 +394,31 @@ impl GameState {
 			who's following trump suit
 			if the pile contains A, J, and/or 2 (or 3 if 2 hasn't been played yet)
 			how many game points are in the pile
-	
+
 		Heuristics:
 			if AI can follow, only allow follow suit or trump suit, else allow all cards
 		*/
 	}
-	
+
 	/// Returns true if valid, false if invalid
 	pub fn validate_bid(&self, bid: Bid) -> bool {
-		bid == Bid::Pass || (bid > self.highest_bid && (bid != Bid::Override || self.setup.dealer_override))
+		bid == Bid::Pass
+			|| (bid > self.highest_bid && (bid != Bid::Override || self.setup.dealer_override))
 	}
-	
+
 	/// Returns true if valid, false if invalid
 	pub fn validate_card(&self, card: Card) -> bool {
-		let has_card = self.setup.players[self.turn_idx].hand.iter().any(|c| *c == card);
+		let has_card = self.setup.players[self.turn_idx]
+			.hand
+			.iter()
+			.any(|c| *c == card);
 		let can_follow = self.setup.players[self.turn_idx].can_follow(self.lead);
 		let is_owner = self.owner_idx == self.turn_idx;
 		let is_lead = card.suit == self.lead;
 		let is_trump = card.suit == self.trump;
 		has_card && (is_lead || is_trump || is_owner || !can_follow)
 	}
-	
+
 	/// The bid must have already been validated because it will be considered the new highest bid.
 	///
 	/// Returns true if bidding should end, and the turn index should not be incremented following this function.
@@ -399,12 +426,17 @@ impl GameState {
 	pub fn player_bid(&mut self, bid: Bid, loop_state: &mut GameLoopState) -> bool {
 		debug_assert!(self.validate_bid(bid));
 		info!("player {} bid {}", self.turn_idx, bid.to_points());
-		if *loop_state == GameLoopState::GameOver { return true; }
+		if *loop_state == GameLoopState::GameOver {
+			return true;
+		}
 		if bid != Bid::Pass {
 			self.highest_bid = bid;
 			self.highest_bidder_idx = self.turn_idx;
 			if (bid == Bid::Four && !self.setup.dealer_override)
-				|| (bid == Bid::Override && self.setup.dealer_override) { return true; }
+				|| (bid == Bid::Override && self.setup.dealer_override)
+			{
+				return true;
+			}
 		}
 		// if all players have bid, end the turn...
 		let should_end = self.turn_idx == self.dealer_idx;
@@ -419,7 +451,7 @@ impl GameState {
 		}
 		should_end
 	}
-	
+
 	/// The card must have already been validated because it will be taken from the player's hand and moved to the pile.
 	///
 	/// Returns Some if card playing for the round should end, and the turn index should not be incremented following this function.
@@ -429,11 +461,11 @@ impl GameState {
 		info!("player {} played the {card:?}", self.turn_idx);
 		self.setup.players[self.turn_idx].hand.remove_item(card);
 		self.pile.push(card);
-		
+
 		// TODO: we can improve gameplay experience by ending a round early when a team is guaranteed to win.
 		// When a team is 1 point away from winning, and they play a card that guarantees them a point at the end of the round,
 		// we can stop the round early. The best example is when a team is 1 point away, and they play the ace.
-		
+
 		if self.owner_idx == self.turn_idx {
 			// if this is the first card played this turn...
 			self.highest_card = card;
@@ -455,7 +487,9 @@ impl GameState {
 			self.turn_idx = self.owner_idx;
 			self.turn_num += 1;
 			// The winning team takes the pile after every turn.
-			self.teams[self.setup.players[self.owner_idx].team_id].pile.append(&mut self.pile);
+			self.teams[self.setup.players[self.owner_idx].team_id]
+				.pile
+				.append(&mut self.pile);
 			if self.turn_num == CARDS_PER_PLAYER as u8 {
 				// if all cards have been played, end the round
 				self.turn_num = 0;
@@ -464,7 +498,7 @@ impl GameState {
 				if self.dealer_idx == self.setup.players.len() {
 					self.dealer_idx = 0;
 				}
-				
+
 				// calculate round scores
 				let mut high_winner_team_id = 0;
 				let mut low_winner_team_id = 0;
@@ -484,9 +518,11 @@ impl GameState {
 							KING => 3,
 							ACE => 4,
 							10 => 10,
-							_ => 0
+							_ => 0,
 						};
-						if card.suit != self.trump { continue; }
+						if card.suit != self.trump {
+							continue;
+						}
 						if card.number > high {
 							high_winner_team_id = team_id as u8;
 							high = card.number;
@@ -539,7 +575,11 @@ impl GameState {
 					high_winner_team_id,
 					low_winner_team_id,
 					jack_winner_team_id,
-					game_winner_team_id: if highest_game == second_highest_game { None } else { Some(game_winner_team_id) },
+					game_winner_team_id: if highest_game == second_highest_game {
+						None
+					} else {
+						Some(game_winner_team_id)
+					},
 					round_team_game_scores,
 					total_team_scores: self.teams.iter().map(|team| team.score).collect(),
 				};
@@ -550,7 +590,7 @@ impl GameState {
 		}
 		PlayedCardResult::None
 	}
-	
+
 	pub fn team_won(&self) -> bool {
 		let mut highest_score = 0;
 		let mut second_highest_score = 0;
@@ -560,7 +600,8 @@ impl GameState {
 				highest_score = team.score;
 			}
 		}
-		highest_score as i16 > self.setup.max_score as i16 && (highest_score > second_highest_score + 1 || !self.setup.win_by_2)
+		highest_score as i16 > self.setup.max_score as i16
+			&& (highest_score > second_highest_score + 1 || !self.setup.win_by_2)
 	}
 }
 

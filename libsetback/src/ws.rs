@@ -13,13 +13,13 @@ mod ws_wasm {
 		futures::{SinkExt, StreamExt},
 		gloo_net::websocket::{Message, futures::WebSocket as Ws},
 	};
-	
+
 	pub type Websocket = Ws;
-	
+
 	pub async fn ws_connect() -> Result<Websocket, Error> {
 		Ws::open(URL_SERVER_WS).map_err(|_| Error::NetworkError)
 	}
-	
+
 	pub async fn ws_send(ws: &mut Websocket, ssp: &Ssp) -> Result<(), Error> {
 		//TODO instead of making (possibly multiple) allocations here
 		// we can probably look into using memory pooling
@@ -29,9 +29,10 @@ mod ws_wasm {
 			.await
 			.map_err(|_| Error::NetworkError)
 	}
-	
+
 	pub async fn ws_next(ws: &mut Websocket) -> Result<Ssp, Error> {
-		let msg = ws.next()
+		let msg = ws
+			.next()
 			.await
 			.ok_or(Error::Disconnected)?
 			.map_err(|_| Error::NetworkError)?;
@@ -48,15 +49,21 @@ mod ws_native {
 		crate::{Error, URL_SERVER_WS, ssp::Ssp},
 		futures::{SinkExt, StreamExt},
 		tokio::net::TcpStream,
-		tokio_tungstenite::{tungstenite::{Bytes, Message}, *},
+		tokio_tungstenite::{
+			tungstenite::{Bytes, Message},
+			*,
+		},
 	};
-	
+
 	pub type Websocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
-	
+
 	pub async fn ws_connect() -> Result<Websocket, Error> {
-		Ok(connect_async(URL_SERVER_WS).await.map_err(|_| Error::NetworkError)?.0)
+		Ok(connect_async(URL_SERVER_WS)
+			.await
+			.map_err(|_| Error::NetworkError)?
+			.0)
 	}
-	
+
 	pub async fn ws_send(ws: &mut Websocket, ssp: &Ssp) -> Result<(), Error> {
 		//TODO instead of making (possibly multiple) allocations here
 		// we can probably look into using memory pooling
@@ -66,9 +73,10 @@ mod ws_native {
 			.await
 			.map_err(|_| Error::NetworkError)
 	}
-	
+
 	pub async fn ws_next(ws: &mut Websocket) -> Result<Ssp, Error> {
-		let msg = ws.next()
+		let msg = ws
+			.next()
 			.await
 			.ok_or(Error::Disconnected)?
 			.map_err(|_| Error::NetworkError)?;

@@ -1,13 +1,18 @@
 use {
 	crate::middleware::User,
-	axum::{Extension, Json},
-	libsetback::{SignupRequest, LoginRequest, LoginResponse, UsernameResponse, ReportPlayerRequest, FeedbackRequest},
-	sqlx::MySqlPool,
-	tower_cookies::{Cookies, cookie::Key},
 	argon2::{
 		Argon2,
-		password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
-	}
+		password_hash::{
+			PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng,
+		},
+	},
+	axum::{Extension, Json},
+	libsetback::{
+		FeedbackRequest, LoginRequest, LoginResponse, ReportPlayerRequest, SignupRequest,
+		UsernameResponse,
+	},
+	sqlx::MySqlPool,
+	tower_cookies::{Cookies, cookie::Key},
 };
 
 type Result<T> = core::result::Result<T, http::StatusCode>;
@@ -39,9 +44,7 @@ pub async fn api_logout(
 }
 
 //TODO: only the server needs this so maybe we should restrict access and not make it public
-pub async fn api_username(
-	Extension(user): Extension<User>,
-) -> Result<Json<UsernameResponse>> {
+pub async fn api_username(Extension(user): Extension<User>) -> Result<Json<UsernameResponse>> {
 	todo!()
 }
 
@@ -61,4 +64,6 @@ pub async fn api_feedback(
 	todo!()
 }
 
-pub async fn api_healthcheck() -> Result<()> {Ok(())}
+pub async fn api_healthcheck() -> Result<()> {
+	Ok(())
+}
