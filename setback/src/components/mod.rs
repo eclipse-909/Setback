@@ -23,6 +23,8 @@ pub use {
 	text_input::*, toast::*, toggle::*,
 };
 
+// CSS
+
 pub const BUTTON_CSS: Asset = asset!("/assets/styling/button.css");
 pub const CARD_CHIP_CSS: Asset = asset!("/assets/styling/card-chip.css");
 pub const DROPDOWN_CSS: Asset = asset!("/assets/styling/dropdown.css");
@@ -39,3 +41,6 @@ pub const TABS_CSS: Asset = asset!("/assets/styling/tabs.css");
 pub const TEXT_INPUT_CSS: Asset = asset!("/assets/styling/text-input.css");
 pub const TOAST_CSS: Asset = asset!("/assets/styling/toast.css");
 pub const TOGGLE_CSS: Asset = asset!("/assets/styling/toggle.css");
+
+// PNG
+

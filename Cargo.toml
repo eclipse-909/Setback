@@ -1,10 +1,10 @@
 [workspace]
 members = [
+	"api",
 	"libsetback",
+	"server",
 	"setback",
-	"setback_api",
-	"setback_server",
-	"setbackctl",
+	"website",
 ]
 resolver = "3"
 

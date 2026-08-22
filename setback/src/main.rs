@@ -1,6 +1,7 @@
 use {crate::screens::*, dioxus::prelude::*};
 
 mod components;
+mod constants;
 mod screens;
 
 const BASE_CSS: Asset = asset!("/assets/styling/base.css");

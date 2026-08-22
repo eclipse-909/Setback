@@ -17,18 +17,25 @@ use {
 
 #[tokio::main]
 async fn main() {
-	let api_routes = Router::new()
-		.route("/logout", get(api_logout))
+	let private_routes = Router::new()
 		.route("/username", get(api_username))
-		.route("/report", post(api_report))
+		.route("/report", post(api_report));
+		// TODO API key middleware
+
+	let account_routes = Router::new()
+		.merge(private_routes)
+		.route("/logout", get(api_logout))
 		.route("/feedback", post(api_feedback))
-		.route_layer(axum::middleware::from_fn(middleware_auth))
+		.route_layer(axum::middleware::from_fn(middleware_auth));
+
+	let api_routes = Router::new()
+		.nest("/account", account_routes)
 		.route("/signup", post(api_signup))
 		.route("/login", post(api_login))
 		.route("/healthcheck", get(api_healthcheck));
 
 	let app = Router::new()
-		.merge(Router::new().nest("/api", api_routes))
+    	.nest("/api", api_routes)
 		.layer(Extension(
 			sqlx::mysql::MySqlPoolOptions::new()
 				.max_connections(8)

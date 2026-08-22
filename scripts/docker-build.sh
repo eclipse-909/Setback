@@ -30,17 +30,17 @@ setback_docker_build_and_push() {
 
 	docker build \
 		--platform linux/arm64 \
-		-t eclipse909/private:"$1"-"$setback_env"-v"$VERSION" \
+		-t eclipse909/private:setback_"$1"-"$setback_env"-v"$VERSION" \
 		--build-arg PROFILE="$cargo_profile" \
-		--build-arg PACKAGE="$1" \
+		--build-arg PACKAGE=setback_"$1" \
 		--build-arg PORT="$2" \
 		.
 
-	docker push eclipse909/private:"$1"-"$setback_env"-v"$VERSION"
+	docker push eclipse909/private:setback_"$1"-"$setback_env"-v"$VERSION"
 }
 
-#                             <package>         <port>
-setback_docker_build_and_push "setback_server"  "42069" &
-setback_docker_build_and_push "setback_api" "8080"  &
+#                             <package> <port>
+setback_docker_build_and_push "server"  "42069" &
+setback_docker_build_and_push "api"     "8080"  &
 
 wait

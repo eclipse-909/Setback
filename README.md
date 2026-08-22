@@ -3,11 +3,11 @@
 
 This mono-repo contains the source code for all Setback programs, server and client side. See the READMEs below for more detail on each workspace.
 
+- [api](api/README.md) – REST API with public and private endpoints.
 - [libsetback](libsetback/README.md) – Library for shared code for all packages.
+- [server](server/README.md) – Dedicated game server to host multiplayer games.
 - [setback](setback/README.md) – Setback game client.
-- [setback_server](setback_server/README.md) – Dedicated game server to host multiplayer games.
-- [setback_api](setback_api/README.md) – Website and public API.
-- [setbackctl](setbackctl/README.md) – Controller for setbackd.
+- [website](website/README.md) – Frontend website for Setback and account management.
 
 The Setback game client aims to be cross-platform. Primarily targeting desktop and web, and maybe expanding to mobile.
 

@@ -37,9 +37,9 @@ macro_rules! api {
 }
 pub const URL_API_LOGIN: &str = api!("login");
 pub const URL_API_LOGOUT: &str = api!("logout");
-pub const URL_API_USERNAME: &str = api!("username");
-pub const URL_API_RENEW: &str = api!("renew");
-pub const URL_API_REPORT_PLAYER: &str = api!("report");
+pub const URL_API_RENEW: &str = api!("account/renew");
+pub const URL_API_USERNAME: &str = api!("account/username");
+pub const URL_API_REPORT_PLAYER: &str = api!("account/report");
 pub const TEST_AUTH_TOKEN: &str = "test";
 pub const APPLICATION_OCTET_STREAM: &str = "application/octet-stream";
 
