@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setback — Table</title>
+<link rel="stylesheet" href="../css/variables.css">
+<link rel="stylesheet" href="../css/base.css">
+<link rel="stylesheet" href="../components/button/button.css">
+<link rel="stylesheet" href="../components/card-chip/card-chip.css">
+<link rel="stylesheet" href="../components/modal/modal.css">
+<link rel="stylesheet" href="../components/panel/panel.css">
+<style>
+  body { overflow: hidden; }
+  .game-table {
+    position: relative;
+    height: 100vh;
+    width: 100vw;
+    display: grid;
+    grid-template-rows: 1fr auto;
+  }
+
+  .game-hud {
+    position: absolute;
+    top: var(--space-4);
+    left: var(--space-4);
+    right: var(--space-4);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    z-index: 5;
+  }
+  .game-hud__score {
+    font-family: var(--font-mono);
+    background: rgba(0,0,0,0.35);
+    border: 1px solid var(--gold-700);
+    border-radius: var(--radius-md);
+    padding: var(--space-2) var(--space-4);
+    color: var(--gold-100);
+    font-size: var(--text-sm);
+  }
+
+  .seats {
+    position: relative;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .seat {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .seat--top { top: var(--space-7); left: 50%; transform: translateX(-50%); }
+  .seat--left { left: var(--space-7); top: 50%; transform: translateY(-50%); }
+  .seat--right { right: var(--space-7); top: 50%; transform: translateY(-50%); }
+
+  .seat__avatar {
+    width: 3.4rem; height: 3.4rem;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--felt-600), var(--felt-800));
+    border: 2px solid var(--gold-700);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-weight: 800; color: var(--gold-100);
+  }
+  .seat.is-turn .seat__avatar { border-color: var(--gold-300); box-shadow: 0 0 0 4px rgba(232,200,116,0.25); }
+  .seat__name { font-size: var(--text-sm); color: var(--cream-100); }
+  .seat__hand { display: flex; }
+  .seat__hand .card-chip--back { margin-left: -1.9rem; }
+  .seat__hand .card-chip--back:first-child { margin-left: 0; }
+
+  .trick-area {
+    display: flex;
+    gap: var(--space-3);
+    align-items: center;
+    justify-content: center;
+  }
+  .trick-area .card-chip { margin: 0 -0.4rem; }
+
+  .my-hand-bar {
+    position: relative;
+    z-index: 4;
+    display: flex;
+    justify-content: center;
+    padding: var(--space-4) var(--space-4) var(--space-6);
+    background: linear-gradient(0deg, rgba(0,0,0,0.4), transparent);
+  }
+  .my-hand-bar .card-chip {
+    margin-left: -1.4rem;
+  }
+  .my-hand-bar .card-chip:first-child { margin-left: 0; }
+
+  .table-menu-btn {
+    position: absolute;
+    top: var(--space-4);
+    right: var(--space-4);
+  }
+</style>
+</head>
+<body>
+<div class="table-backdrop"></div>
+
+<div class="game-table">
+
+  <div class="game-hud">
+    <div class="game-hud__score">We: 14&nbsp;&nbsp;|&nbsp;&nbsp;They: 9&nbsp;&nbsp;·&nbsp;&nbsp;Playing to 21</div>
+    <button class="btn btn--ghost btn--icon" aria-label="Table menu" data-modal-open="tableMenuModal">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+    </button>
+  </div>
+
+  <div class="seats">
+    <div class="seat seat--top">
+      <span class="seat__name">Deacon</span>
+      <div class="seat__avatar">D</div>
+      <div class="seat__hand">
+        <div class="card-chip card-chip--sm card-chip--back"></div>
+        <div class="card-chip card-chip--sm card-chip--back"></div>
+        <div class="card-chip card-chip--sm card-chip--back"></div>
+      </div>
+    </div>
+    <div class="seat seat--left is-turn">
+      <div class="seat__avatar">M</div>
+      <span class="seat__name">Maribel</span>
+      <div class="seat__hand">
+        <div class="card-chip card-chip--sm card-chip--back"></div>
+        <div class="card-chip card-chip--sm card-chip--back"></div>
+        <div class="card-chip card-chip--sm card-chip--back"></div>
+      </div>
+    </div>
+    <div class="seat seat--right">
+      <div class="seat__avatar">R</div>
+      <span class="seat__name">Ridge</span>
+      <div class="seat__hand">
+        <div class="card-chip card-chip--sm card-chip--back"></div>
+        <div class="card-chip card-chip--sm card-chip--back"></div>
+        <div class="card-chip card-chip--sm card-chip--back"></div>
+      </div>
+    </div>
+
+    <div class="trick-area">
+      <div class="card-chip card-chip--red"><span class="card-chip__pip">♥</span></div>
+      <div class="card-chip"><span class="card-chip__pip">♠</span></div>
+    </div>
+  </div>
+
+  <div class="my-hand-bar">
+    <div class="card-chip card-chip--red card-chip--interactive"><span class="card-chip__corner">A<br>♥</span><span class="card-chip__pip">♥</span></div>
+    <div class="card-chip card-chip--interactive"><span class="card-chip__corner">K<br>♣</span><span class="card-chip__pip">♣</span></div>
+    <div class="card-chip card-chip--red card-chip--interactive"><span class="card-chip__corner">Q<br>♦</span><span class="card-chip__pip">♦</span></div>
+    <div class="card-chip card-chip--interactive"><span class="card-chip__corner">J<br>♠</span><span class="card-chip__pip">♠</span></div>
+    <div class="card-chip card-chip--interactive"><span class="card-chip__corner">9<br>♣</span><span class="card-chip__pip">♣</span></div>
+    <div class="card-chip card-chip--red card-chip--interactive"><span class="card-chip__corner">4<br>♥</span><span class="card-chip__pip">♥</span></div>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="tableMenuModal" hidden>
+  <div class="modal panel panel--sm" role="dialog" aria-modal="true" aria-labelledby="tableMenuTitle">
+    <button class="modal__close" aria-label="Close" data-modal-close>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+    <div class="panel__inner">
+      <div class="panel__header">
+        <h2 class="panel__title" id="tableMenuTitle">Table Menu</h2>
+      </div>
+      <div class="panel__body stack gap-3">
+        <a class="btn btn--md btn--full" href="settings.html">Settings</a>
+        <a class="btn btn--danger btn--md btn--full" href="../index.html">Leave Table</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../js/app.js"></script>
+</body>
+</html>

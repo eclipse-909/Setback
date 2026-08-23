@@ -1,0 +1,44 @@
+/* ==========================================================================
+   Component: Tabs
+   .tabs > .tabs__list > .tabs__tab[.is-active]
+   .tabs__panel[hidden] holds the content for each tab (match via data-tab)
+   ========================================================================== */
+
+.tabs__list {
+  display: flex;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--gold-900);
+  margin-bottom: var(--space-5);
+}
+
+.tabs__tab {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--cream-500);
+  font-family: var(--font-body);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: var(--text-sm);
+  padding: var(--space-3) var(--space-4);
+  position: relative;
+  transition: color var(--dur-fast) var(--ease-table);
+}
+
+.tabs__tab:hover { color: var(--cream-100); }
+
+.tabs__tab.is-active { color: var(--gold-300); }
+
+.tabs__tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: var(--space-3);
+  right: var(--space-3);
+  bottom: -1px;
+  height: 2px;
+  background: var(--gold-300);
+  box-shadow: 0 0 8px var(--gold-500);
+}
+
+.tabs__panel[hidden] { display: none; }

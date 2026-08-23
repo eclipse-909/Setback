@@ -1,0 +1,53 @@
+/* ==========================================================================
+   Component: Text Input / Field
+   .field > (label.field__label, input.text-input, .field__hint)
+   ========================================================================== */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.field__label {
+  font-size: var(--text-sm);
+  color: var(--cream-500);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.text-input {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  color: var(--cream-100);
+  background: var(--wood-900);
+  border: 1px solid var(--gold-900);
+  border-radius: var(--radius-sm);
+  padding: 0.85em 1em;
+  transition: border-color var(--dur-fast) var(--ease-table), box-shadow var(--dur-fast) var(--ease-table);
+}
+
+.text-input::placeholder { color: var(--cream-700); }
+
+.text-input:hover { border-color: var(--gold-700); }
+
+.text-input:focus {
+  outline: none;
+  border-color: var(--gold-300);
+  box-shadow: 0 0 0 3px rgba(232, 200, 116, 0.18);
+}
+
+.text-input--code {
+  font-family: var(--font-mono);
+  letter-spacing: 0.35em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.text-input.has-error { border-color: var(--suit-red-bright); }
+
+.field__hint { font-size: var(--text-xs); color: var(--cream-700); }
+.field__hint--error { color: var(--suit-red-bright); }

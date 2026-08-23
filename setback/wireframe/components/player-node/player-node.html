@@ -1,0 +1,58 @@
+<!--
+  Component: Player Node
+  Normally positioned absolutely (left/top set inline as percentages by the
+  lobby's ellipse-layout script). Shown here in static flow for reference.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Player Node</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="player-node.css">
+<style>
+  .app-shell { flex-direction: row; gap: 2rem; flex-wrap: wrap; }
+  .demo-slot { position: relative; width: 9.25rem; height: 8rem; }
+  .demo-slot .player-node { left: 50%; top: 50%; }
+</style>
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+
+  <div class="demo-slot">
+    <div class="player-node is-you is-editable">
+      <div class="player-node__avatar">Y</div>
+      <div class="player-node__name">You</div>
+      <div class="player-node__tags">
+        <span class="player-node__tag player-node__tag--host">Host</span>
+      </div>
+      <span class="player-node__team player-node__team--1">Team 1</span>
+    </div>
+  </div>
+
+  <div class="demo-slot">
+    <div class="player-node is-editable">
+      <div class="player-node__avatar">B</div>
+      <div class="player-node__name">Sunny Byte</div>
+      <div class="player-node__tags">
+        <span class="player-node__tag player-node__tag--bot">Bot</span>
+      </div>
+      <span class="player-node__team player-node__team--2 is-clickable">Team 2</span>
+      <button class="player-node__remove" aria-label="Remove seat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="demo-slot">
+    <div class="player-node is-empty">
+      <div class="player-node__avatar">?</div>
+      <div class="player-node__name">Open Seat</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

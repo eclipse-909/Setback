@@ -12,11 +12,11 @@ rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 tracing.workspace = true
-tokio = { version = "1.53.1", features = ["sync"] }
+tokio = { workspace = true, features = ["sync"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-getrandom = { version = "0.4.3", features = ["wasm_js"] }
-gloo-net.workspace = true
+getrandom.workspace = true
+gloo.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 scc.workspace = true

@@ -1,0 +1,36 @@
+<!--
+  Component: Slider
+  JS sets the --fill custom property (percentage) on input so the gold
+  track fills up to the thumb. Also updates the numeric readout.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Slider</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="slider.css">
+<style>.app-shell{align-items:flex-start;} .panel-like{width:20rem;}</style>
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+  <div class="slider-field panel-like">
+    <div class="slider-field__head">
+      <label for="masterVol">Master Volume</label>
+      <span class="slider-field__value" id="masterVolVal">80%</span>
+    </div>
+    <input class="slider" type="range" id="masterVol" min="0" max="100" value="80" style="--fill:80%">
+  </div>
+</div>
+<script>
+  const input = document.getElementById('masterVol');
+  const val = document.getElementById('masterVolVal');
+  input.addEventListener('input', () => {
+    input.style.setProperty('--fill', input.value + '%');
+    val.textContent = input.value + '%';
+  });
+</script>
+</body>
+</html>

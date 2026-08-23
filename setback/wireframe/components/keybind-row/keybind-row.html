@@ -1,0 +1,51 @@
+<!--
+  Component: Keybind Row
+  Clicking the keycap button starts listening for the next keydown and
+  writes it into the cap. The reset button restores data-default.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Keybind Row</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="../button/button.css">
+<link rel="stylesheet" href="keybind-row.css">
+<style>.app-shell{align-items:flex-start;} .demo{width:24rem;}</style>
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+  <div class="demo">
+    <div class="keybind-row" data-default="P">
+      <span class="keybind-row__action">Pass</span>
+      <div class="keybind-row__controls">
+        <button class="keycap" type="button">P</button>
+        <button class="keybind-row__reset" type="button" aria-label="Reset to default">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  document.querySelectorAll('.keybind-row').forEach(row => {
+    const cap = row.querySelector('.keycap');
+    const reset = row.querySelector('.keybind-row__reset');
+    cap.addEventListener('click', () => {
+      cap.textContent = '...';
+      cap.classList.add('is-listening');
+      const onKey = (e) => {
+        e.preventDefault();
+        cap.textContent = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+        cap.classList.remove('is-listening');
+        window.removeEventListener('keydown', onKey);
+      };
+      window.addEventListener('keydown', onKey);
+    });
+    reset.addEventListener('click', () => { cap.textContent = row.dataset.default; });
+  });
+</script>
+</body>
+</html>

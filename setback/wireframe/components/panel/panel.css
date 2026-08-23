@@ -1,0 +1,70 @@
+/* ==========================================================================
+   Component: Panel
+   A wood-framed, brass-inlaid tray — the primary surface for menu content.
+   Modifiers: .panel--sm .panel--md (default) .panel--lg .panel--wide
+   ========================================================================== */
+
+.panel {
+  --panel-max: 30rem;
+  position: relative;
+  width: 100%;
+  max-width: var(--panel-max);
+  background: linear-gradient(180deg, var(--wood-700), var(--wood-800));
+  border: 1px solid var(--wood-900);
+  border-radius: var(--radius-lg);
+  padding: var(--space-2);
+  box-shadow: var(--shadow-panel);
+}
+
+/* Inner felt inset */
+.panel__inner {
+  background: radial-gradient(ellipse at 50% -20%, var(--felt-700), var(--felt-800) 70%);
+  border: 1px solid var(--gold-900);
+  border-radius: calc(var(--radius-lg) - 6px);
+  padding: var(--space-6) var(--space-6);
+  box-shadow: inset 0 2px 12px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(232,200,116,0.08);
+}
+
+/* Corner brass rivets — the signature ornament, present on every panel */
+.panel::before, .panel::after,
+.panel__inner::before, .panel__inner::after {
+  content: '';
+  position: absolute;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--gold-100), var(--gold-700) 70%, var(--gold-900));
+  box-shadow: 0 1px 2px rgba(0,0,0,0.6);
+}
+.panel::before { top: 0.6rem; left: 0.6rem; }
+.panel::after { top: 0.6rem; right: 0.6rem; }
+.panel__inner::before { bottom: 0.6rem; left: -0.05rem; }
+.panel__inner::after { bottom: 0.6rem; right: -0.05rem; }
+
+.panel--sm { --panel-max: 22rem; }
+.panel--md { --panel-max: 30rem; }
+.panel--lg { --panel-max: 42rem; }
+.panel--wide { --panel-max: 60rem; }
+
+.panel__header {
+  text-align: center;
+  margin-bottom: var(--space-5);
+}
+.panel__title {
+  font-size: var(--text-xl);
+  color: var(--gold-100);
+}
+.panel__subtitle {
+  margin-top: var(--space-1);
+  color: var(--cream-500);
+  font-size: var(--text-sm);
+}
+
+.panel__body { display: flex; flex-direction: column; gap: var(--space-4); }
+
+.panel__footer {
+  margin-top: var(--space-6);
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+}

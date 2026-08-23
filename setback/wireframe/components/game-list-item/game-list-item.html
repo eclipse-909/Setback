@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Game List Item</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="../button/button.css">
+<link rel="stylesheet" href="game-list-item.css">
+<style>.app-shell{align-items:flex-start;} .demo{width:28rem; display:flex; flex-direction:column; gap:0.75rem;}</style>
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+  <div class="demo">
+    <div class="game-list-item">
+      <span class="game-list-item__suit">♠</span>
+      <div class="game-list-item__info">
+        <div class="game-list-item__name">Ridge's Table</div>
+        <div class="game-list-item__meta"><span>Standard rules</span><span>To 21</span></div>
+      </div>
+      <span class="game-list-item__players">3/4</span>
+      <button class="btn btn--primary btn--sm">Join</button>
+    </div>
+    <div class="game-list-item">
+      <span class="game-list-item__suit game-list-item__suit--black">♣</span>
+      <div class="game-list-item__info">
+        <div class="game-list-item__name">Front Porch Pitch</div>
+        <div class="game-list-item__meta"><span>Cutthroat</span><span>To 11</span></div>
+      </div>
+      <span class="game-list-item__players is-full">4/4</span>
+      <button class="btn btn--ghost btn--sm" disabled>Full</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

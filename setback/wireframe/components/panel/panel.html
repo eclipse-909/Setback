@@ -1,0 +1,38 @@
+<!--
+  Component: Panel
+  A wood-framed felt tray. Structure:
+  .panel > .panel__inner > (.panel__header, .panel__body, .panel__footer)
+  Size modifiers: .panel--sm .panel--md .panel--lg .panel--wide
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Panel</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="../button/button.css">
+<link rel="stylesheet" href="panel.css">
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+  <div class="panel panel--md">
+    <div class="panel__inner">
+      <div class="panel__header">
+        <p class="eyebrow">Table Talk</p>
+        <h2 class="panel__title">Panel Title</h2>
+        <p class="panel__subtitle">A short supporting line goes here.</p>
+      </div>
+      <div class="panel__body">
+        <p style="color: var(--cream-300);">Panel content — forms, lists, or copy live here.</p>
+      </div>
+      <div class="panel__footer">
+        <button class="btn btn--ghost btn--md">Back</button>
+        <button class="btn btn--primary btn--md">Continue</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

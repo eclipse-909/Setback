@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setback</title>
+<link rel="stylesheet" href="css/variables.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="components/button/button.css">
+<link rel="stylesheet" href="components/card-chip/card-chip.css">
+</head>
+<body>
+<div class="table-backdrop"></div>
+
+<main class="app-shell">
+  <div class="screen">
+
+    <!-- Logo mark: fanned card chips + wordmark -->
+    <div class="logo-mark">
+      <div class="logo-mark__cards" aria-hidden="true">
+        <div class="card-chip card-chip--red"><span class="card-chip__pip">♥</span></div>
+        <div class="card-chip"><span class="card-chip__pip">♠</span></div>
+        <div class="card-chip card-chip--red"><span class="card-chip__pip">♦</span></div>
+      </div>
+      <h1 class="logo-mark__title">Setback</h1>
+      <p class="logo-mark__tagline">Auction &middot; Pitch &middot; Set</p>
+    </div>
+
+    <nav class="menu-stack" aria-label="Main menu">
+      <a class="btn btn--primary btn--lg btn--full" href="screens/lobby.html?context=single&role=host">Singleplayer</a>
+      <a class="btn btn--primary btn--lg btn--full" href="screens/multiplayer.html">Multiplayer</a>
+      <a class="btn btn--md btn--full" href="screens/settings.html">Settings</a>
+      <button class="btn btn--ghost btn--md btn--full" id="exitBtn" type="button">Exit Game</button>
+    </nav>
+
+    <p class="footer-note">Setback &middot; v0.1.0</p>
+  </div>
+</main>
+
+<script src="js/app.js"></script>
+<script>
+  // Exit Game has no destination yet — left as a stub per spec.
+  document.getElementById('exitBtn').addEventListener('click', () => {
+    console.log('Exit Game clicked — no-op placeholder.');
+  });
+</script>
+</body>
+</html>

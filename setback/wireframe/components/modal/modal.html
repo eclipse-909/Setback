@@ -1,0 +1,47 @@
+<!--
+  Component: Modal
+  Structure: .modal-overlay[hidden] > .modal.panel > .panel__inner
+  Toggle visibility by adding/removing the `hidden` attribute on the overlay.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Modal</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="../button/button.css">
+<link rel="stylesheet" href="../panel/panel.css">
+<link rel="stylesheet" href="modal.css">
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+  <button class="btn btn--primary btn--md" onclick="document.getElementById('demoModal').hidden=false">Open Modal</button>
+</div>
+
+<div class="modal-overlay" id="demoModal" hidden>
+  <div class="modal panel panel--sm" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <button class="modal__close" aria-label="Close" onclick="document.getElementById('demoModal').hidden=true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+    <div class="panel__inner">
+      <div class="panel__header">
+        <p class="eyebrow">Private Table</p>
+        <h2 class="panel__title" id="modalTitle">Enter Password</h2>
+      </div>
+      <div class="panel__body">
+        <input class="text-input" type="password" placeholder="Table password">
+        <p class="modal__field-error"></p>
+      </div>
+      <div class="panel__footer">
+        <button class="btn btn--ghost btn--md" onclick="document.getElementById('demoModal').hidden=true">Cancel</button>
+        <button class="btn btn--primary btn--md">Join</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<link rel="stylesheet" href="../text-input/text-input.css">
+</body>
+</html>

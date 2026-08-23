@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setback — Host a Table</title>
+<link rel="stylesheet" href="../css/variables.css">
+<link rel="stylesheet" href="../css/base.css">
+<link rel="stylesheet" href="../css/layout.css">
+<link rel="stylesheet" href="../components/button/button.css">
+<link rel="stylesheet" href="../components/panel/panel.css">
+<link rel="stylesheet" href="../components/text-input/text-input.css">
+</head>
+<body>
+<div class="table-backdrop"></div>
+<a class="btn btn--ghost btn--icon back-button" href="multiplayer.html" aria-label="Back">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+</a>
+
+<main class="app-shell">
+  <div class="screen">
+    <div class="top-bar">
+      <h1 class="top-bar__title">Host a Table</h1>
+    </div>
+
+    <div class="panel panel--md">
+      <div class="panel__inner">
+        <div class="panel__header">
+          <p class="eyebrow">Deal Yourself In</p>
+          <h2 class="panel__title">Table Visibility</h2>
+        </div>
+        <div class="panel__body">
+
+          <div class="option-grid" data-option-group id="visibilityGroup">
+            <div class="option-card is-selected" data-visibility="public">
+              <span class="option-card__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg>
+              </span>
+              <span class="option-card__title">Public</span>
+              <span class="option-card__desc">Anyone can find and join your table</span>
+            </div>
+            <div class="option-card" data-visibility="private">
+              <span class="option-card__icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+              </span>
+              <span class="option-card__title">Private</span>
+              <span class="option-card__desc">Only players with the code &amp; password can join</span>
+            </div>
+          </div>
+
+          <div class="field" id="passwordField" hidden>
+            <label class="field__label" for="hostPassword">Set a Password</label>
+            <input class="text-input" type="password" id="hostPassword" placeholder="Choose a table password">
+            <p class="field__hint">Players will need this, plus the table code, to join.</p>
+          </div>
+
+        </div>
+        <div class="panel__footer">
+          <a class="btn btn--ghost btn--md" href="multiplayer.html">Cancel</a>
+          <a class="btn btn--primary btn--md" href="lobby.html?context=multi&amp;role=host">Start Table</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="../js/app.js"></script>
+<script>
+  const group = document.getElementById('visibilityGroup');
+  const passwordField = document.getElementById('passwordField');
+  group.addEventListener('click', (e) => {
+    const card = e.target.closest('.option-card');
+    if (!card) return;
+    passwordField.hidden = card.dataset.visibility !== 'private';
+  });
+</script>
+</body>
+</html>

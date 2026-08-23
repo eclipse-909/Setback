@@ -1,0 +1,146 @@
+/* ==========================================================================
+   SETBACK — Shared Layout
+   Pieces reused across multiple screens: the top bar (back + title),
+   the logo mark, and the ambient card-fan decoration.
+   ========================================================================== */
+
+/* ---- Back button (fixed, identical position on every screen) ---------- */
+
+.back-button {
+  position: fixed;
+  top: var(--space-5);
+  left: var(--space-5);
+  z-index: 30;
+}
+
+/* ---- Top bar: title truly centered regardless of trailing content ----- */
+
+.top-bar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  width: 100%;
+  max-width: var(--topbar-max, 30rem);
+  margin: 0 auto var(--space-5);
+}
+
+.top-bar__title {
+  grid-column: 2;
+  text-align: center;
+  font-size: var(--text-lg);
+  color: var(--gold-100);
+  white-space: nowrap;
+}
+
+.top-bar__trailing {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.top-bar__spacer { grid-column: 3; }
+
+/* ---- Logo mark (main menu) -------------------------------------------- */
+
+.logo-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: var(--space-7);
+}
+
+.logo-mark__cards {
+  position: relative;
+  height: 6.4rem;
+  width: 9rem;
+  margin-bottom: var(--space-4);
+}
+.logo-mark__cards .card-chip {
+  position: absolute;
+  top: 0;
+  left: 50%;
+}
+.logo-mark__cards .card-chip:nth-child(1) { transform: translateX(-50%) rotate(-16deg) translateX(-1.1rem); }
+.logo-mark__cards .card-chip:nth-child(2) { transform: translateX(-50%) rotate(0deg) translateY(-0.3rem); z-index: 2; box-shadow: 0 10px 22px rgba(0,0,0,0.55), inset 0 0 0 3px rgba(255,255,255,0.5); }
+.logo-mark__cards .card-chip:nth-child(3) { transform: translateX(-50%) rotate(16deg) translateX(1.1rem); }
+
+.logo-mark__title {
+  font-size: var(--text-3xl);
+  letter-spacing: 0.06em;
+  background: linear-gradient(180deg, var(--gold-100), var(--gold-500));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 3px 2px rgba(0,0,0,0.5));
+}
+
+.logo-mark__tagline {
+  margin-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--gold-700);
+}
+
+/* ---- Menu button stack -------------------------------------------------- */
+
+.menu-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 20rem;
+}
+
+/* ---- Option cards (host public/private, join public/private) ----------- */
+
+.option-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  width: 100%;
+}
+@media (max-width: 32rem) {
+  .option-grid { grid-template-columns: 1fr; }
+}
+
+.option-card {
+  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--gold-900);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-table), transform var(--dur-fast) var(--ease-table), background var(--dur-fast) var(--ease-table);
+}
+.option-card:hover { border-color: var(--gold-500); background: rgba(0,0,0,0.32); transform: translateY(-2px); }
+.option-card:active { transform: translateY(0); }
+
+.option-card__icon {
+  width: 2.4rem;
+  height: 2.4rem;
+  color: var(--gold-300);
+}
+.option-card__icon svg { width: 100%; height: 100%; }
+
+.option-card__title { font-family: var(--font-display); font-size: var(--text-lg); color: var(--cream-100); }
+.option-card__desc { font-size: var(--text-sm); color: var(--cream-700); }
+
+.option-card.is-selected { border-color: var(--gold-300); background: rgba(232,200,116,0.08); }
+
+/* ---- Footer note (version / connection status placeholders) ------------- */
+
+.footer-note {
+  margin-top: var(--space-6);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--cream-700);
+  letter-spacing: 0.08em;
+}

@@ -4,12 +4,6 @@
    ========================================================================== */
 
 :root {
-  /* ---- UI Scale --------------------------------------------------------
-     Everything in the system is sized in rem. Changing --ui-scale (done by
-     the Settings > Video slider) changes the root font-size, which scales
-     the entire interface uniformly. */
-  --ui-scale: 1;
-
   /* ---- Color: Felt (surfaces / backgrounds) --------------------------- */
   --felt-900: #052620;
   --felt-800: #0b4a3c;

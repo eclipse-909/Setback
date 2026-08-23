@@ -1,4 +1,48 @@
-use {crate::components::*, dioxus::prelude::*, libsetback::*};
+use {
+	crate::{UI_SCALE, components::*},
+	dioxus::prelude::*,
+	libsetback::*,
+};
+
+//TODO these values need to be loaded from the user's saved settings
+// rather than given a hard-coded initial value.
+
+static FS_TOGGLE: GlobalSignal<bool> = Signal::global(|| false);
+// ui scale is a global signal in main.rs
+
+static MASTER_VOL: GlobalSignal<u8> = Signal::global(|| 100);
+static MUSIC_VOL: GlobalSignal<u8> = Signal::global(|| 100);
+static FX_VOL: GlobalSignal<u8> = Signal::global(|| 100);
+
+// character keys are HEAP ALLOCATED STRINGS usually with only ONE character
+// so we have to do all this shit to setup keybinds
+const KEY_PASS_DEFAULT: fn() -> Key = || Key::Character(String::from("p"));
+const KEY_BID2_DEFAULT: fn() -> Key = || Key::Character(String::from("2"));
+const KEY_BID3_DEFAULT: fn() -> Key = || Key::Character(String::from("3"));
+const KEY_BID4_DEFAULT: fn() -> Key = || Key::Character(String::from("4"));
+const KEY_BID_OVERRIDE_DEFAULT: fn() -> Key = || Key::Character(String::from("4"));
+const KEY_PLAY_CARD1_DEFAULT: fn() -> Key = || Key::Character(String::from("1"));
+const KEY_PLAY_CARD2_DEFAULT: fn() -> Key = || Key::Character(String::from("2"));
+const KEY_PLAY_CARD3_DEFAULT: fn() -> Key = || Key::Character(String::from("3"));
+const KEY_PLAY_CARD4_DEFAULT: fn() -> Key = || Key::Character(String::from("4"));
+const KEY_PLAY_CARD5_DEFAULT: fn() -> Key = || Key::Character(String::from("5"));
+const KEY_PLAY_CARD6_DEFAULT: fn() -> Key = || Key::Character(String::from("6"));
+const KEY_TOGGLE_SETTINGS_DEFAULT: Key = Key::Escape;
+
+static KEY_PASS: GlobalSignal<Key> = Signal::global(KEY_PASS_DEFAULT);
+static KEY_BID2: GlobalSignal<Key> = Signal::global(KEY_BID2_DEFAULT);
+static KEY_BID3: GlobalSignal<Key> = Signal::global(KEY_BID3_DEFAULT);
+static KEY_BID4: GlobalSignal<Key> = Signal::global(KEY_BID4_DEFAULT);
+static KEY_BID_OVERRIDE: GlobalSignal<Key> = Signal::global(KEY_BID_OVERRIDE_DEFAULT);
+static KEY_PLAY_CARD1: GlobalSignal<Key> = Signal::global(KEY_PLAY_CARD1_DEFAULT);
+static KEY_PLAY_CARD2: GlobalSignal<Key> = Signal::global(KEY_PLAY_CARD2_DEFAULT);
+static KEY_PLAY_CARD3: GlobalSignal<Key> = Signal::global(KEY_PLAY_CARD3_DEFAULT);
+static KEY_PLAY_CARD4: GlobalSignal<Key> = Signal::global(KEY_PLAY_CARD4_DEFAULT);
+static KEY_PLAY_CARD5: GlobalSignal<Key> = Signal::global(KEY_PLAY_CARD5_DEFAULT);
+static KEY_PLAY_CARD6: GlobalSignal<Key> = Signal::global(KEY_PLAY_CARD6_DEFAULT);
+static KEY_TOGGLE_SETTINGS: GlobalSignal<Key> = Signal::global(|| KEY_TOGGLE_SETTINGS_DEFAULT);
+
+static REMEMBER_LOGIN: GlobalSignal<bool> = Signal::global(|| true);
 
 #[derive(Props, PartialEq, Clone)]
 pub struct SettingsProps {
@@ -28,7 +72,11 @@ pub fn SettingsPanel(props: SettingsProps) -> Element {
 								"Display Mode"
 								small { "Play in fullscreen or a windowed frame" }
 							}
-							Toggle { label: "Fullscreen" }
+							Toggle {
+								label: if FS_TOGGLE() {"Fullscreen"} else {"Windowed"},
+								checked: FS_TOGGLE(),
+								oninput: move |checked| *FS_TOGGLE.write() = checked,
+							}
 						}
 						div {
 							class: "settings-row",
@@ -36,9 +84,10 @@ pub fn SettingsPanel(props: SettingsProps) -> Element {
 							Slider {
 								max: 150,
 								min: 75,
-								value: 100,
+								value: (UI_SCALE() * 100.) as u8,
 								step: 5,
 								percentage: true,
+								oninput: move |value| *UI_SCALE.write() = value as f32 / 100.,
 
 								"UI Scale"
 								br {}
@@ -54,25 +103,31 @@ pub fn SettingsPanel(props: SettingsProps) -> Element {
 							Slider {
 								max: 100,
 								min: 0,
-								value: 100,
+								value: MASTER_VOL(),
 								step: 1,
 								percentage: true,
+								oninput: move |value| *MASTER_VOL.write() = value,
+
 								"Master Volume"
 							}
 							Slider {
 								max: 100,
 								min: 0,
-								value: 100,
+								value: MUSIC_VOL(),
 								step: 1,
 								percentage: true,
+								oninput: move |value| *MUSIC_VOL.write() = value,
+
 								"Music Volume"
 							}
 							Slider {
 								max: 100,
 								min: 0,
-								value: 100,
+								value: FX_VOL(),
 								step: 1,
 								percentage: true,
+								oninput: move |value| *FX_VOL.write() = value,
+
 								"Effects Volume"
 							}
 						}
@@ -83,65 +138,65 @@ pub fn SettingsPanel(props: SettingsProps) -> Element {
 							p { class: "keybind-group-title", "Bidding & Turn Actions" }
 							KeybindRow {
 								action: KeyAction::Pass,
-								default_key: "P",
-								curr_key: "P"
+								default_key: KEY_PASS_DEFAULT(),
+								sig: KEY_PASS.signal(),
 							}
 							KeybindRow {
 								action: KeyAction::Bid2,
-								default_key: "2",
-								curr_key: "2"
+								default_key: KEY_BID2_DEFAULT(),
+								sig: KEY_BID2.signal(),
 							}
 							KeybindRow {
 								action: KeyAction::Bid3,
-								default_key: "3",
-								curr_key: "3"
+								default_key: KEY_BID3_DEFAULT(),
+								sig: KEY_BID3.signal(),
 							}
 							KeybindRow {
 								action: KeyAction::Bid4,
-								default_key: "4",
-								curr_key: "4"
+								default_key: KEY_BID4_DEFAULT(),
+								sig: KEY_BID4.signal(),
 							}
 							KeybindRow {
 								action: KeyAction::OverrideBid,
-								default_key: "4",
-								curr_key: "4"
+								default_key: KEY_BID_OVERRIDE_DEFAULT(),
+								sig: KEY_BID_OVERRIDE.signal(),
 							}
 							p { class: "keybind-group-title", "Playing Cards" }
 							KeybindRow {
 								action: KeyAction::PlayCard1,
-								default_key: "1",
-								curr_key: "1"
+								default_key: KEY_PLAY_CARD1_DEFAULT(),
+								sig: KEY_PLAY_CARD1.signal(),
 							}
 							KeybindRow {
 								action: KeyAction::PlayCard2,
-								default_key: "2",
-								curr_key: "2"
+								default_key: KEY_PLAY_CARD2_DEFAULT(),
+								sig: KEY_PLAY_CARD2.signal(),
 							}
 							KeybindRow {
 								action: KeyAction::PlayCard3,
-								default_key: "3",
-								curr_key: "3"
+								default_key: KEY_PLAY_CARD3_DEFAULT(),
+								sig: KEY_PLAY_CARD3.signal(),
 							}
 							KeybindRow {
 								action: KeyAction::PlayCard4,
-								default_key: "4",
-								curr_key: "4"
+								default_key: KEY_PLAY_CARD4_DEFAULT(),
+								sig: KEY_PLAY_CARD4.signal(),
 							}
 							KeybindRow {
 								action: KeyAction::PlayCard5,
-								default_key: "5",
-								curr_key: "5"
+								default_key: KEY_PLAY_CARD5_DEFAULT(),
+								sig: KEY_PLAY_CARD5.signal(),
 							}
 							KeybindRow {
 								action: KeyAction::PlayCard6,
-								default_key: "6",
-								curr_key: "6"
+								default_key: KEY_PLAY_CARD6_DEFAULT(),
+								sig: KEY_PLAY_CARD6.signal(),
 							}
 							p { class: "keybind-group-title", "Interface" }
 							KeybindRow {
 								action: KeyAction::ToggleSettings,
-								default_key: "esc",
-								curr_key: "esc"
+								default_key: KEY_TOGGLE_SETTINGS_DEFAULT,
+								sig: KEY_TOGGLE_SETTINGS.signal(),
 							}
 						}
 					},
@@ -156,7 +211,9 @@ pub fn SettingsPanel(props: SettingsProps) -> Element {
 								Btn {
 									variant: BtnVariant::Danger,
 									size: BtnSize::Sm,
-									//TODO onclick leave game
+									onclick: move |_| {
+										// TODO leave game
+									},
 									"Leave Game"
 								}
 							}
@@ -170,13 +227,19 @@ pub fn SettingsPanel(props: SettingsProps) -> Element {
 							div { class: "settings-row",
 								span { class: "settings-row__label",
 									"Website"
-									small { "Visit our website in a new tab" }
+									small {
+										if cfg!(target_family = "wasm") {
+											"Visit our website in a new tab"
+										} else {
+											"Visit our website in the browser"
+										}
+									}
 								}
-								Btn {
-									variant: BtnVariant::Link,
+								AnchorBtn {
 									size: BtnSize::Sm,
-									//TODO onclick open site
-									"setback.eclipse-909.com"
+									href: "https://eclipse-909.com",
+									target: "_blank",
+									"https://eclipse-909.com"
 								}
 							}
 							div { class: "settings-row",
@@ -184,7 +247,9 @@ pub fn SettingsPanel(props: SettingsProps) -> Element {
 									"Remember Login"
 									small { "Stay signed in on this device" }
 								}
-								Toggle {}
+								Toggle {
+									oninput: move |checked| *REMEMBER_LOGIN.write() = checked
+								}
 							}
 							div { class: "settings-row",
 								span { class: "settings-row__label",
@@ -194,7 +259,9 @@ pub fn SettingsPanel(props: SettingsProps) -> Element {
 								Btn {
 									variant: BtnVariant::Danger,
 									size: BtnSize::Sm,
-									//TODO onclick logout
+									onclick: move |_| {
+										//TODO logout
+									},
 									"Log Out"
 								}
 							}

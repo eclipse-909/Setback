@@ -1,4 +1,8 @@
-use {crate::components::*, dioxus::prelude::*, libsetback::*};
+use {
+	crate::{components::*, *},
+	dioxus::prelude::*,
+	libsetback::*
+};
 
 const GAME_CSS: Asset = asset!("/assets/styling/game.css");
 
@@ -148,13 +152,15 @@ pub fn Game() -> Element {
 					}
 					div { class: "panel__body stack gap-3",
 						a {
+							// TODO this needs to open settings in a modal
 							class: "btn btn--md btn--full",
 							href: "settings.html",
 							"Settings"
 						}
-						a {
-							class: "btn btn--danger btn--md btn--full",
-							href: "../index.html",
+						LinkBtn {
+							to: Route::MainMenu,
+							variant: BtnVariant::Danger,
+							full: true,
 							"Leave Table"
 						}
 					}

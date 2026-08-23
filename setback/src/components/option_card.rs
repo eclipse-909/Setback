@@ -40,25 +40,26 @@ pub fn OptionCard(props: OptionCardProps) -> Element {
 		span { class: "option-card__title", "{props.title}" }
 		span { class: "option-card__desc", "{props.description}" }
 	};
+	let is_selected = if props.selected { "is-selected" } else { "" };
 	rsx! {
 		document::Link { rel: "stylesheet", href: OPTION_CARD_CSS }
 
 		if let Some(route) = props.to {
 			Link {
-				class: "option-card",
+				class: "option-card {is_selected}",
 				to: route,
 				{inner}
 			}
 		} else if let Some(callback) = props.onclick {
 			button {
-				class: "option-card",
+				class: "option-card {is_selected}",
 				r#type: "button",
 				onclick: move |evt| {callback.call(evt);},
 				{inner}
 			}
 		} else {
 			div {
-				class: "option-card is-selected",
+				class: "option-card {is_selected}",
 				"data-visibility": "{props.title}",
 				{inner}
 			}

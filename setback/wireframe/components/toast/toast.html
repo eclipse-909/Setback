@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Toast</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="../button/button.css">
+<link rel="stylesheet" href="toast.css">
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+  <button class="btn btn--danger btn--md" id="fireToast">Trigger error toast</button>
+</div>
+<div class="toast-region" id="toastRegion"></div>
+<script>
+  document.getElementById('fireToast').addEventListener('click', () => {
+    const region = document.getElementById('toastRegion');
+    const toast = document.createElement('div');
+    toast.className = 'toast toast--error';
+    toast.innerHTML = `<svg class="toast__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><span>Incorrect game code or password.</span>`;
+    region.appendChild(toast);
+    setTimeout(() => {
+      toast.classList.add('is-leaving');
+      setTimeout(() => toast.remove(), 250);
+    }, 3200);
+  });
+</script>
+</body>
+</html>

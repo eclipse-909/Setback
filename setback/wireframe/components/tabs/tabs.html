@@ -1,0 +1,48 @@
+<!--
+  Component: Tabs
+  Click handler toggles .is-active on the tab and shows the matching
+  .tabs__panel via data-tab / data-panel matching.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Tabs</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="../panel/panel.css">
+<link rel="stylesheet" href="tabs.css">
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+  <div class="panel panel--lg">
+    <div class="panel__inner">
+      <div class="tabs" id="demoTabs">
+        <div class="tabs__list" role="tablist">
+          <button class="tabs__tab is-active" data-tab="video" role="tab">Video</button>
+          <button class="tabs__tab" data-tab="audio" role="tab">Audio</button>
+          <button class="tabs__tab" data-tab="keybinds" role="tab">Keybinds</button>
+          <button class="tabs__tab" data-tab="account" role="tab">Account</button>
+        </div>
+        <div class="tabs__panel" data-panel="video">Video settings content…</div>
+        <div class="tabs__panel" data-panel="audio" hidden>Audio settings content…</div>
+        <div class="tabs__panel" data-panel="keybinds" hidden>Keybinds settings content…</div>
+        <div class="tabs__panel" data-panel="account" hidden>Account settings content…</div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  const tabs = document.getElementById('demoTabs');
+  tabs.querySelectorAll('.tabs__tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.querySelectorAll('.tabs__tab').forEach(t => t.classList.remove('is-active'));
+      tabs.querySelectorAll('.tabs__panel').forEach(p => p.hidden = true);
+      tab.classList.add('is-active');
+      tabs.querySelector(`.tabs__panel[data-panel="${tab.dataset.tab}"]`).hidden = false;
+    });
+  });
+</script>
+</body>
+</html>

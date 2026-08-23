@@ -1,0 +1,118 @@
+/* ==========================================================================
+   Component: Player Node
+   A seat card positioned absolutely around the lobby's player ellipse
+   (positioning itself is set inline per-instance via left/top %).
+   States: .is-you .is-editable .is-selected .is-empty
+   ========================================================================== */
+
+.player-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 9.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.8rem 0.6rem 0.65rem;
+  background: linear-gradient(180deg, rgba(0,0,0,0.4), rgba(0,0,0,0.55));
+  border: 1px solid var(--gold-900);
+  border-radius: var(--radius-md);
+  text-align: center;
+  transition: border-color var(--dur-fast) var(--ease-table),
+              box-shadow var(--dur-fast) var(--ease-table),
+              transform var(--dur-fast) var(--ease-table);
+}
+
+.player-node.is-you { border-color: var(--gold-500); }
+
+.player-node.is-editable { cursor: pointer; }
+.player-node.is-editable:hover { border-color: var(--gold-500); }
+
+.player-node.is-selected {
+  border-color: var(--gold-100);
+  box-shadow: 0 0 0 3px rgba(232, 200, 116, 0.32);
+  transform: translate(-50%, -50%) translateY(-3px);
+}
+
+.player-node.is-empty { border-style: dashed; opacity: 0.65; }
+.player-node.is-empty .player-node__name { font-style: italic; color: var(--cream-700); font-weight: 400; }
+
+.player-node__avatar {
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--felt-600), var(--felt-800));
+  border: 1px solid var(--gold-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-display);
+  font-weight: 800;
+  color: var(--gold-100);
+}
+.player-node.is-empty .player-node__avatar { color: var(--cream-700); border-style: dashed; }
+
+.player-node__name {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--cream-100);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.player-node__tags {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.player-node__tag {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.18em 0.55em;
+  border-radius: var(--radius-pill);
+  background: rgba(255,255,255,0.08);
+  color: var(--cream-500);
+  border: 1px solid transparent;
+}
+.player-node__tag--host { color: var(--gold-100); background: rgba(232,200,116,0.16); border-color: var(--gold-700); }
+.player-node__tag--bot { color: var(--cream-300); }
+
+.player-node__team {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.18em 0.6em;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  cursor: default;
+}
+.player-node__team--1 { background: rgba(163,55,47,0.35); color: #f4d2ce; }
+.player-node__team--2 { background: rgba(20,102,81,0.4); color: #cdeee0; }
+/* TODO add up to 8 different team colors */
+.player-node__team.is-clickable { cursor: pointer; }
+.player-node__team.is-clickable:hover { filter: brightness(1.2); }
+
+.player-node__remove {
+  position: absolute;
+  top: -0.5rem;
+  right: -0.5rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 50%;
+  background: var(--danger);
+  border: 1px solid #e07268;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+.player-node__remove svg { width: 0.6rem; height: 0.6rem; }

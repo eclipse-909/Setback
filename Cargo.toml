@@ -31,7 +31,8 @@ dirs = "6.0.0"
 dotenvy = "0.15.7"
 futures = "0.3.33"
 futures-util = "0.3.33"
-gloo-net = "0.7.0"
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
+gloo = { version = "0.12.0", default-features = false, features = ["net", "timers"] }
 http = "1.5.0"
 image = { version = "0.25.10", features = ["gif"] }
 jsonwebtoken = { version = "11.0.0", features = ["rust_crypto"] }

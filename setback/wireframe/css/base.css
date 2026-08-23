@@ -1,0 +1,130 @@
+/* ==========================================================================
+   SETBACK — Base
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Poppins:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  /* UI scale lives here: the whole app is sized in rem off this value. */
+  font-size: calc(16px * var(--ui-scale));
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font-body);
+  color: var(--cream-100);
+  background: var(--felt-800);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* Felt table backdrop: diamond quilt texture + vignette, used on every screen */
+.table-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-color: var(--felt-800);
+  background-image:
+    radial-gradient(ellipse at 50% -10%, rgba(255,255,255,0.05), transparent 55%),
+    radial-gradient(ellipse at 50% 110%, rgba(0,0,0,0.55), transparent 60%),
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.025) 0 2px, transparent 2px 34px),
+    repeating-linear-gradient(-45deg, rgba(0,0,0,0.05) 0 2px, transparent 2px 34px);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  color: var(--cream-100);
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+
+p { margin: 0; }
+
+a { color: inherit; text-decoration: none; }
+
+button {
+  font-family: inherit;
+  color: inherit;
+}
+
+ul { list-style: none; margin: 0; padding: 0; }
+
+::selection {
+  background: var(--gold-500);
+  color: var(--ink-900);
+}
+
+/* Focus ring — consistent, visible, on-theme */
+:focus-visible {
+  outline: 2px solid var(--gold-300);
+  outline-offset: 3px;
+  border-radius: var(--radius-sm);
+}
+
+/* Scrollbars, styled to match wood/gold chrome */
+* { scrollbar-width: thin; scrollbar-color: var(--gold-700) var(--wood-800); }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: var(--wood-800); }
+*::-webkit-scrollbar-thumb { background: var(--gold-700); border-radius: var(--radius-pill); }
+
+/* ---- Layout helpers ------------------------------------------------------ */
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+}
+
+.screen {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--gold-300);
+}
+
+.divider-suit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--gold-700);
+  width: 100%;
+  margin: var(--space-4) 0;
+}
+.divider-suit::before,
+.divider-suit::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-700), transparent);
+}
+.divider-suit span { font-size: var(--text-md); letter-spacing: 0.2em; }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Utility stack/row */
+.stack { display: flex; flex-direction: column; }
+.row { display: flex; flex-direction: row; align-items: center; }
+.gap-1 { gap: var(--space-1); } .gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); } .gap-4 { gap: var(--space-4); }
+.gap-5 { gap: var(--space-5); }

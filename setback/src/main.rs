@@ -1,8 +1,8 @@
 use {crate::screens::*, dioxus::prelude::*};
 
 mod components;
-mod constants;
 mod screens;
+mod platform;
 
 const BASE_CSS: Asset = asset!("/assets/styling/base.css");
 const LAYOUT_CSS: Asset = asset!("/assets/styling/layout.css");
@@ -17,13 +17,14 @@ fn main() {
 #[component]
 fn App() -> Element {
 	rsx! {
-		meta { charset: "UTF-8" }
+		document::Meta { charset: "UTF-8" }
 		document::Link { rel: "icon", href: FAVICON }
 		document::Link { rel: "stylesheet", href: VARIABLES_CSS }
 		document::Link { rel: "stylesheet", href: BASE_CSS }
 		document::Link { rel: "stylesheet", href: LAYOUT_CSS }
 
-		div { class: "table-backdrop" }
+		style { r#":root {{ --ui-scale: {UI_SCALE}; }}"# }
+		div { class: "table-backdrop"}
 		Router::<Route> {}
 	}
 }
@@ -47,3 +48,8 @@ enum Route {
 	#[route("/settings")]
 	Settings,
 }
+
+/** Everything in the system is sized in rem. Changing --ui-scale (done by
+the Settings > Video slider) changes the root font-size, which scales
+the entire interface uniformly. */
+pub static UI_SCALE: GlobalSignal<f32> = Signal::global(|| 1.);

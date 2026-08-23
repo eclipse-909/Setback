@@ -6,6 +6,7 @@ use {
 
 #[component]
 pub fn Join() -> Element {
+	let mut private_selected = use_signal(|| false);
 	rsx! {
 		document::Link { rel: "stylesheet", href: BUTTON_CSS }
 		document::Link { rel: "stylesheet", href: PANEL_CSS }
@@ -18,88 +19,57 @@ pub fn Join() -> Element {
 				div { class: "top-bar",
 					h1 { class: "top-bar__title", "Join a Table" }
 				}
-				div { class: "panel panel--md",
-					div { class: "panel__inner",
-						div { class: "panel__header",
-							p { class: "eyebrow", "Find a Seat" }
-							h2 { class: "panel__title", "How would you like to join?" }
-						}
-						div { class: "panel__body",
-							div { class: "option-grid",
-								a {
-									class: "option-card",
-									href: "browse-games.html",
-									span { class: "option-card__icon",
-										svg {
-											fill: "none",
-											stroke: "currentColor",
-											stroke_width: "1.6",
-											view_box: "0 0 24 24",
-											circle {
-												cx: "12",
-												cy: "12",
-												r: "9",
-											}
-											path { d: "M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z" }
-										}
-									}
-									span { class: "option-card__title", "Public" }
-									span { class: "option-card__desc", "Browse open tables" }
-								}
-								button {
-									class: "option-card",
-									id: "privateOption",
-									r#type: "button",
-									span { class: "option-card__icon",
-										svg {
-											fill: "none",
-											stroke: "currentColor",
-											stroke_width: "1.6",
-											view_box: "0 0 24 24",
-											rect {
-												height: "9",
-												rx: "2",
-												width: "16",
-												x: "4",
-												y: "11",
-											}
-											path { d: "M8 11V7a4 4 0 0 1 8 0v4" }
-										}
-									}
-									span { class: "option-card__title", "Private" }
-									span { class: "option-card__desc", "Enter a code & password" }
+				Panel {
+					PanelInner {
+						eyebrow: "Find a Seat",
+						title: "How would you like to join?",
+						ghost_btn_txt: "Cancel",
+						primary_btn_txt: "Join Table",
+
+						OptionCardGrid {
+							OptionCard {
+								to: Route::BrowseGames,
+								title: "Public",
+								description: "Browse open tables",
+								svg {
+									fill: "none",
+									stroke: "currentColor",
+									stroke_width: "1.6",
+									view_box: "0 0 24 24",
+									circle { cx: "12", cy: "12", r: "9" }
+									path { d: "M3 12h18M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z" }
 								}
 							}
-							div { hidden: "false", id: "privateJoinFields",
+							OptionCard {
+								selected: private_selected(),
+								title: "Private",
+								description: "Enter a code & password",
+								onclick: move |_| private_selected.set(!private_selected()),
+								svg {
+									fill: "none",
+									stroke: "currentColor",
+									stroke_width: "1.6",
+									view_box: "0 0 24 24",
+									rect { height: "9", rx: "2", width: "16", x: "4", y: "11" }
+									path { d: "M8 11V7a4 4 0 0 1 8 0v4" }
+								}
+							}
+						}
+						if private_selected() {
+							div { id: "privateJoinFields",
 								div { class: "divider-suit",
 									span { "♣" }
 								}
 								div { class: "stack gap-4",
-									div { class: "field",
-										label {
-											class: "field__label",
-											r#for: "joinCode",
-											"Table Code"
-										}
-										input {
-											class: "text-input text-input--code",
-											id: "joinCode",
-											maxlength: "6",
-											placeholder: "AB12CD",
-										}
+									TextInput {
+										label: "Table Code",
+										placeholder: "AB12CD",
+										input_type: TextInputType::Code,
 									}
-									div { class: "field",
-										label {
-											class: "field__label",
-											r#for: "joinPassword",
-											"Password"
-										}
-										input {
-											class: "text-input",
-											id: "joinPassword",
-											placeholder: "Table password",
-											r#type: "password",
-										}
+									TextInput {
+										label: "Password",
+										placeholder: "Table password",
+										input_type: TextInputType::Password,
 									}
 									p { class: "field__hint",
 										"Demo credentials: code "
@@ -108,19 +78,6 @@ pub fn Join() -> Element {
 										strong { "setback" }
 									}
 								}
-							}
-						}
-						div { class: "panel__footer",
-							a {
-								class: "btn btn--ghost btn--md",
-								href: "multiplayer.html",
-								"Cancel"
-							}
-							button {
-								class: "btn btn--primary btn--md",
-								hidden: "false",
-								id: "joinPrivateBtn",
-								"Join Table"
 							}
 						}
 					}

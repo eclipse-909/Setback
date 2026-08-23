@@ -1,14 +1,17 @@
 use {
 	crate::components::*,
 	dioxus::prelude::*,
-	std::fmt::{Display, Formatter},
+	std::{
+		fmt::{Display, Formatter},
+		borrow::Cow,
+	}
 };
 
 #[derive(Props, PartialEq, Clone)]
 pub struct KeybindRowProps {
 	action: KeyAction,
-	default_key: String,
-	curr_key: String,
+	default_key: Key,
+	sig: Signal<Key>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -51,19 +54,45 @@ impl Display for KeyAction {
 }
 
 #[component]
-pub fn KeybindRow(props: KeybindRowProps) -> Element {
+pub fn KeybindRow(mut props: KeybindRowProps) -> Element {
+	let mut cap_txt = use_signal(|| Cow::Owned(props.default_key.to_string()));
+	let mut cap_class = use_signal(|| "keycap");
+	let mut sig_onkeydown = use_signal(|| None);
 	rsx! {
 		document::Link { rel: "stylesheet", href: KEYBIND_ROW_CSS }
 		document::Link { rel: "stylesheet", href: BUTTON_CSS }
 
-		div { class: "keybind-row", "data-default": "{props.default_key}",
+		div { class: "keybind-row",
 			span { class: "keybind-row__action", "{props.action}" }
 			div { class: "keybind-row__controls",
-				button { class: "keycap", r#type: "button", "{props.curr_key}" }
+				button {
+					class: "{cap_class}",
+					r#type: "button",
+					onclick: move |_| {
+						cap_txt.set(Cow::Borrowed("..."));
+						cap_class.set("keycap is-listening");
+						sig_onkeydown.set(Some(move |e: KeyboardEvent| {
+							e.prevent_default();
+							let key = e.key();
+							cap_txt.set(Cow::Owned(key.to_string()));
+							*props.sig.write() = key;
+							cap_class.set("keycap");
+						}));
+					},
+					onkeydown: move |evt| if let Some(mut callback) = sig_onkeydown.take() {callback(evt)},
+
+					"{cap_txt}"
+				}
 				button {
 					aria_label: "Reset to default",
 					class: "keybind-row__reset",
 					r#type: "button",
+					onclick: move |_| {
+						cap_txt.set(Cow::Owned(props.default_key.to_string()));
+						*props.sig.write() = props.default_key.clone();
+						cap_class.set("keycap");
+					},
+
 					svg {
 						fill: "none",
 						stroke: "currentColor",

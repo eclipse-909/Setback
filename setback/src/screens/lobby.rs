@@ -1,4 +1,4 @@
-use {crate::components::*, dioxus::prelude::*, libsetback::*};
+use {crate::{components::*, *}, dioxus::prelude::*, libsetback::*};
 
 const LOBBY_CSS: Asset = asset!("/assets/styling/lobby.css");
 
@@ -13,19 +13,7 @@ pub fn Lobby() -> Element {
 		document::Link { rel: "stylesheet", href: PLAYER_NODE_CSS }
 		document::Link { rel: "stylesheet", href: LOBBY_CSS }
 
-		a {
-			aria_label: "Leave table setup",
-			class: "btn btn--ghost btn--icon back-button",
-			href: "../index.html",
-			id: "backLink",
-			svg {
-				fill: "none",
-				stroke: "currentColor",
-				stroke_width: "2",
-				view_box: "0 0 24 24",
-				path { d: "M15 18l-6-6 6-6" }
-			}
-		}
+		BackBtn { to: Route::MainMenu }
 		div { class: "lobby-page",
 			div { class: "lobby-header",
 				h1 { class: "lobby-header__title", "Table Setup" }

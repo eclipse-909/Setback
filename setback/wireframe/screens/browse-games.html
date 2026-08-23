@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setback — Public Tables</title>
+<link rel="stylesheet" href="../css/variables.css">
+<link rel="stylesheet" href="../css/base.css">
+<link rel="stylesheet" href="../css/layout.css">
+<link rel="stylesheet" href="../components/button/button.css">
+<link rel="stylesheet" href="../components/panel/panel.css">
+<link rel="stylesheet" href="../components/text-input/text-input.css">
+<link rel="stylesheet" href="../components/dropdown/dropdown.css">
+<link rel="stylesheet" href="../components/game-list-item/game-list-item.css">
+<link rel="stylesheet" href="../components/toast/toast.css">
+</head>
+<body>
+<div class="table-backdrop"></div>
+<a class="btn btn--ghost btn--icon back-button" href="join.html" aria-label="Back">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+</a>
+
+<main class="app-shell">
+  <div class="screen">
+    <div class="top-bar" style="--topbar-max: 60rem;">
+      <h1 class="top-bar__title">Public Tables</h1>
+      <div class="top-bar__trailing">
+        <button class="btn btn--ghost btn--sm" id="refreshBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:1em;height:1em;"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <div class="panel panel--wide">
+      <div class="panel__inner">
+
+        <div class="row gap-3" style="flex-wrap: wrap; margin-bottom: var(--space-5);">
+          <div class="field" style="flex: 2; min-width: 12rem;">
+            <label class="field__label" for="searchGames">Search</label>
+            <input class="text-input" id="searchGames" placeholder="Table name…">
+          </div>
+          <div class="field" style="flex: 1; min-width: 9rem;">
+            <label class="field__label" for="filterRules">Rules</label>
+            <select class="dropdown" id="filterRules">
+              <option value="all">All</option>
+              <option value="standard">Standard</option>
+              <option value="cutthroat">Cutthroat</option>
+              <option value="partner">Partner</option>
+            </select>
+          </div>
+          <div class="field" style="flex: 1; min-width: 9rem;">
+            <label class="field__label" for="filterOpen">Availability</label>
+            <select class="dropdown" id="filterOpen">
+              <option value="all">All tables</option>
+              <option value="open" selected>Open seats only</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="stack gap-3" id="gameList">
+          <div class="game-list-item">
+            <span class="game-list-item__suit">♠</span>
+            <div class="game-list-item__info">
+              <div class="game-list-item__name">Ridge's Table</div>
+              <div class="game-list-item__meta"><span>Standard rules</span><span>Play to 21</span></div>
+            </div>
+            <span class="game-list-item__players">3/4</span>
+            <button class="btn btn--primary btn--sm" onclick="location.href='lobby.html?context=multi&role=guest'">Join</button>
+          </div>
+          <div class="game-list-item">
+            <span class="game-list-item__suit game-list-item__suit--black">♣</span>
+            <div class="game-list-item__info">
+              <div class="game-list-item__name">Front Porch Pitch</div>
+              <div class="game-list-item__meta"><span>Cutthroat</span><span>Play to 11</span></div>
+            </div>
+            <span class="game-list-item__players is-full">4/4</span>
+            <button class="btn btn--ghost btn--sm" disabled>Full</button>
+          </div>
+          <div class="game-list-item">
+            <span class="game-list-item__suit game-list-item__suit--black">♦</span>
+            <div class="game-list-item__info">
+              <div class="game-list-item__name">Sunday Slow Table</div>
+              <div class="game-list-item__meta"><span>Partner rules</span><span>Play to 21</span></div>
+            </div>
+            <span class="game-list-item__players">2/4</span>
+            <button class="btn btn--primary btn--sm" onclick="location.href='lobby.html?context=multi&role=guest'">Join</button>
+          </div>
+          <div class="game-list-item">
+            <span class="game-list-item__suit">♥</span>
+            <div class="game-list-item__info">
+              <div class="game-list-item__name">High Stakes Hollow</div>
+              <div class="game-list-item__meta"><span>Standard rules</span><span>Play to 31</span></div>
+            </div>
+            <span class="game-list-item__players">1/4</span>
+            <button class="btn btn--primary btn--sm" onclick="location.href='lobby.html?context=multi&role=guest'">Join</button>
+          </div>
+        </div>
+
+        <p class="field__hint" id="emptyState" hidden style="text-align:center; padding: var(--space-6) 0;">No tables match your filters.</p>
+
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="toast-region"></div>
+
+<script src="../js/app.js"></script>
+<script>
+  // Lightweight client-side search filter over the visible demo rows.
+  const search = document.getElementById('searchGames');
+  const list = document.getElementById('gameList');
+  const emptyState = document.getElementById('emptyState');
+  search.addEventListener('input', () => {
+    const q = search.value.trim().toLowerCase();
+    let visible = 0;
+    list.querySelectorAll('.game-list-item').forEach(item => {
+      const name = item.querySelector('.game-list-item__name').textContent.toLowerCase();
+      const match = name.includes(q);
+      item.hidden = !match;
+      if (match) visible++;
+    });
+    emptyState.hidden = visible !== 0;
+  });
+  document.getElementById('refreshBtn').addEventListener('click', () => {
+    showToast('Table list refreshed.', 'success');
+  });
+</script>
+</body>
+</html>

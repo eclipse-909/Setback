@@ -23,7 +23,6 @@ pub enum BtnVariant {
 	Primary,
 	Ghost,
 	Danger,
-	Link,
 }
 
 impl BtnVariant {
@@ -33,7 +32,6 @@ impl BtnVariant {
 			BtnVariant::Primary => "btn--primary",
 			BtnVariant::Ghost => "btn--ghost",
 			BtnVariant::Danger => "btn--danger",
-			BtnVariant::Link => "btn--link",
 		}
 	}
 }
@@ -68,6 +66,32 @@ pub fn Btn(props: BtnProps) -> Element {
 			class: "btn {props.variant.as_class()} {props.size.as_class()} {full}",
 			onclick: move |evt| {props.onclick.inspect(|callback| {callback.call(evt);});},
 			r#type: "button",
+			{props.children}
+		}
+	}
+}
+
+#[derive(Props, PartialEq, Clone)]
+pub struct AnchorBtnProps {
+	#[props(extends = a)]
+	attributes: Vec<Attribute>,
+	#[props(default)]
+	size: BtnSize,
+	#[props(default)]
+	full: bool,
+	children: Element,
+}
+
+#[component]
+pub fn AnchorBtn(props: AnchorBtnProps) -> Element {
+	let full = if props.full { "btn--full" } else { "" };
+	rsx! {
+		document::Link { rel: "stylesheet", href: BUTTON_CSS }
+
+		a {
+			class: "btn btn--link {props.size.as_class()} {full}",
+			..props.attributes,
+
 			{props.children}
 		}
 	}

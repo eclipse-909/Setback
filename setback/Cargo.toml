@@ -8,6 +8,12 @@ dioxus = { workspace = true, features = ["router"] }
 libsetback = { path = "../libsetback", features = ["client"] }
 uuid.workspace = true
 
+[target.'cfg(target_family = "wasm")'.dependencies]
+gloo.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio.workspace = true
+
 [features]
 default = ["desktop"]
 web = ["dioxus/web", "uuid/js"]

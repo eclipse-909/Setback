@@ -1,0 +1,62 @@
+/* ==========================================================================
+   Component: Card Chip
+   A small decorative playing card face, used in the logo mark, dividers,
+   and as a placeholder for cards in a hand.
+   .card-chip[.card-chip--red] with .card-chip__corner + .card-chip__pip
+   Sizes: .card-chip--sm .card-chip--md (default) .card-chip--lg
+   ========================================================================== */
+
+.card-chip {
+  --chip-w: 4.4rem;
+  --chip-h: 6.2rem;
+  width: var(--chip-w);
+  height: var(--chip-h);
+  background: linear-gradient(160deg, var(--cream-100), var(--cream-300));
+  border: 1px solid var(--wood-900);
+  border-radius: 8px;
+  box-shadow: 0 6px 14px rgba(0,0,0,0.45), inset 0 0 0 3px rgba(255,255,255,0.5);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--suit-black);
+  flex-shrink: 0;
+  transition: transform var(--dur-fast) var(--ease-table);
+}
+
+.card-chip--red { color: var(--suit-red); }
+
+.card-chip__corner {
+  position: absolute;
+  top: 0.35rem;
+  left: 0.45rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.9rem;
+  line-height: 1;
+  text-align: center;
+}
+
+.card-chip__pip { font-size: 1.9rem; }
+
+.card-chip--sm { --chip-w: 2.6rem; --chip-h: 3.7rem; }
+.card-chip--sm .card-chip__pip { font-size: 1.1rem; }
+.card-chip--sm .card-chip__corner { font-size: 0.62rem; top: 0.22rem; left: 0.28rem; }
+
+.card-chip--lg { --chip-w: 7rem; --chip-h: 10rem; }
+.card-chip--lg .card-chip__pip { font-size: 3rem; }
+
+.card-chip--back {
+  background: repeating-linear-gradient(45deg, var(--felt-700) 0 6px, var(--felt-800) 6px 12px);
+  border-color: var(--gold-700);
+}
+.card-chip--back::after {
+  content: '';
+  position: absolute;
+  inset: 0.35rem;
+  border: 1px solid var(--gold-500);
+  border-radius: 5px;
+}
+
+.card-chip--interactive { cursor: pointer; }
+.card-chip--interactive:hover { transform: translateY(-6px); }

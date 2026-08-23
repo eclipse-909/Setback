@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Text Input</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="text-input.css">
+<style>.app-shell{align-items:flex-start;} .demo{width:20rem; display:flex; flex-direction:column; gap:1.5rem;}</style>
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+  <div class="demo">
+    <div class="field">
+      <label class="field__label" for="nick">Nickname</label>
+      <input class="text-input" id="nick" type="text" placeholder="Enter a nickname">
+    </div>
+    <div class="field">
+      <label class="field__label" for="code">Game Code</label>
+      <input class="text-input text-input--code" id="code" type="text" maxlength="6" placeholder="AB12CD">
+    </div>
+    <div class="field">
+      <label class="field__label" for="pw">Password</label>
+      <input class="text-input has-error" id="pw" type="password">
+      <p class="field__hint field__hint--error">Incorrect code or password.</p>
+    </div>
+  </div>
+</div>
+</body>
+</html>

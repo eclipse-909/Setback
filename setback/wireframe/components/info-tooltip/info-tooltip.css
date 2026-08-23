@@ -1,0 +1,74 @@
+/* ==========================================================================
+   Component: Info Tooltip
+   <span class="info-icon" tabindex="0">
+     <svg>...i...</svg>
+     <span class="info-icon__tip">Explanatory text</span>
+   </span>
+   Pure CSS: opens on hover or keyboard focus. No JS required.
+   ========================================================================== */
+
+.info-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 50%;
+  border: 1px solid var(--gold-700);
+  background: rgba(0,0,0,0.2);
+  color: var(--gold-300);
+  cursor: help;
+  flex-shrink: 0;
+}
+.info-icon svg { width: 0.65rem; height: 0.65rem; }
+
+.info-icon__tip {
+  position: absolute;
+  bottom: calc(100% + 0.6rem);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  width: max-content;
+  max-width: 15rem;
+  background: var(--wood-900);
+  border: 1px solid var(--gold-700);
+  border-radius: var(--radius-sm);
+  padding: 0.6em 0.85em;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--cream-100);
+  box-shadow: var(--shadow-panel);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease-table), transform var(--dur-fast) var(--ease-table);
+  z-index: 40;
+}
+
+.info-icon__tip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--gold-700);
+}
+
+.info-icon:hover .info-icon__tip,
+.info-icon:focus-visible .info-icon__tip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* When the icon sits near the right edge, flip the tip's anchor. */
+.info-icon--align-right .info-icon__tip {
+  left: auto;
+  right: 0;
+  transform: translateY(4px);
+}
+.info-icon--align-right .info-icon__tip::after { left: auto; right: 0.5rem; transform: none; }
+.info-icon--align-right:hover .info-icon__tip,
+.info-icon--align-right:focus-visible .info-icon__tip { transform: translateY(0); }

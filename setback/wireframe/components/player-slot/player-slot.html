@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Component — Player Slot</title>
+<link rel="stylesheet" href="../../css/variables.css">
+<link rel="stylesheet" href="../../css/base.css">
+<link rel="stylesheet" href="player-slot.css">
+<style>.app-shell{align-items:flex-start;} .demo{width:20rem; display:flex; flex-direction:column; gap:0.75rem;}</style>
+</head>
+<body>
+<div class="table-backdrop"></div>
+<div class="app-shell">
+  <div class="demo">
+    <div class="player-slot is-host is-ready">
+      <div class="player-slot__avatar">R</div>
+      <div class="player-slot__info">
+        <div class="player-slot__name">Ridge</div>
+        <div class="player-slot__role">Host</div>
+      </div>
+      <span class="player-slot__status">Ready</span>
+    </div>
+    <div class="player-slot">
+      <div class="player-slot__avatar">M</div>
+      <div class="player-slot__info">
+        <div class="player-slot__name">Maribel</div>
+        <div class="player-slot__role">Player</div>
+      </div>
+      <span class="player-slot__status">Waiting</span>
+    </div>
+    <div class="player-slot is-empty">
+      <div class="player-slot__avatar">?</div>
+      <div class="player-slot__info">
+        <div class="player-slot__name">Open seat</div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

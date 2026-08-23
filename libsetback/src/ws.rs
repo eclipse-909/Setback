@@ -11,7 +11,7 @@ mod ws_wasm {
 	use {
 		crate::{Error, URL_SERVER_WS, ssp::Ssp},
 		futures::{SinkExt, StreamExt},
-		gloo_net::websocket::{Message, futures::WebSocket as Ws},
+		gloo::net::websocket::{Message, futures::WebSocket as Ws},
 	};
 
 	pub type Websocket = Ws;

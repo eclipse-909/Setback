@@ -73,3 +73,26 @@ pub fn PanelInner(props: PanelInnerProps) -> Element {
 		}
 	}
 }
+
+#[derive(Props, PartialEq, Clone)]
+pub struct PanelHeaderProps {
+	#[props(default)]
+	eyebrow: String,
+	#[props(default)]
+	title: String,
+	#[props(default)]
+	subtitle: String,
+}
+
+#[component]
+pub fn PanelHeader(props: PanelHeaderProps) -> Element {
+	rsx! {
+		document::Link { rel: "stylesheet", href: PANEL_CSS }
+
+		div { class: "panel__header",
+			if !props.eyebrow.is_empty() { p { class: "eyebrow", "{props.eyebrow}" } }
+			if !props.title.is_empty() { h2 { class: "panel__title", "{props.title}" } }
+			if !props.subtitle.is_empty() { p { class: "panel__subtitle", "{props.subtitle}" } }
+		}
+	}
+}

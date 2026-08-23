@@ -10,6 +10,7 @@ pub struct TabsProps {
 /// You probably don't want to use this directly. See [setback::tabs!]
 #[component]
 pub fn Tabs(props: TabsProps) -> Element {
+	let mut active_idx = use_signal(|| props.active_idx);
 	rsx! {
 		document::Link { rel: "stylesheet", href: TABS_CSS }
 
@@ -17,9 +18,11 @@ pub fn Tabs(props: TabsProps) -> Element {
 			div { class: "tabs__list", role: "tablist",
 				for (i, label) in props.tabs.iter().map(|t| t.0.as_str()).enumerate() {
 					button {
-						class: if i == props.active_idx { "tabs__tab is-active" } else { "tabs__tab" },
+						class: if i == active_idx() { "tabs__tab is-active" } else { "tabs__tab" },
 						"data-tab": "{i}",
 						role: "tab",
+						onclick: move |_| active_idx.set(i),
+
 						"{label}"
 					}
 				}
@@ -27,8 +30,8 @@ pub fn Tabs(props: TabsProps) -> Element {
 			div { class: "tabs__body",
 				div {
 					class: "tabs__panel",
-					"data-panel": "{props.active_idx}",
-					{&props.tabs[props.active_idx].1}
+					"data-panel": "{active_idx}",
+					{&props.tabs[active_idx()].1}
 				}
 			}
 		}

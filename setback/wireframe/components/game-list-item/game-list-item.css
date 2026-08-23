@@ -1,0 +1,52 @@
+/* ==========================================================================
+   Component: Game List Item
+   Row used in the public-game browser.
+   ========================================================================== */
+
+.game-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(0,0,0,0.18);
+  border: 1px solid var(--gold-900);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-table), background var(--dur-fast) var(--ease-table);
+}
+.game-list-item:hover { border-color: var(--gold-500); background: rgba(0,0,0,0.28); }
+
+.game-list-item__suit {
+  font-size: var(--text-xl);
+  color: var(--suit-red-bright);
+  width: 2rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+.game-list-item__suit--black { color: var(--cream-300); }
+
+.game-list-item__info { flex: 1; min-width: 0; }
+
+.game-list-item__name {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--cream-100);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.game-list-item__meta {
+  font-size: var(--text-xs);
+  color: var(--cream-700);
+  display: flex;
+  gap: var(--space-3);
+  margin-top: 2px;
+}
+
+.game-list-item__players {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--gold-300);
+  flex-shrink: 0;
+}
+.game-list-item__players.is-full { color: var(--cream-700); }
