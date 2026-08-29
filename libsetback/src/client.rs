@@ -1,5 +1,5 @@
 use {
-	crate::{ssp::*, *},
+	crate::{ws::ws_client::*, *},
 	reqwest::Client,
 	std::collections::HashMap,
 	tokio::sync::mpsc::*,
@@ -7,13 +7,13 @@ use {
 };
 
 #[cfg(target_family = "wasm")]
-pub fn setback_api() -> Option<Client> {
-	Client::builder().build().ok()
+fn setback_api() -> Client {
+	Client::builder().build().unwrap()
 }
 
 #[cfg(not(target_family = "wasm"))]
-pub fn setback_api() -> Option<Client> {
-	Client::builder().cookie_store(true).build().ok()
+fn setback_api() -> Client {
+	Client::builder().cookie_store(true).build().unwrap()
 }
 
 type CorrelationMap = HashMap<u32, UnboundedSender<Ssp>>;
@@ -37,7 +37,7 @@ impl SetbackClient {
 	/// and awaiting that function will return the response from the server if all goes well.
 	pub async fn new(credentials: LoginRequest) -> Result<Self, Error> {
 		info!("Logging into api");
-		let api = setback_api().unwrap();
+		let api = setback_api();
 		let session = api
 			.post(URL_API_LOGIN)
 			.json(&credentials)

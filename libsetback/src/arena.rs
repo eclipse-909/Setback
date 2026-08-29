@@ -7,6 +7,7 @@ use {
 		mem::MaybeUninit,
 		ops::Deref,
 		ptr::{self, NonNull},
+		collections::LinkedList,
 	},
 	tracing::debug,
 };
@@ -25,11 +26,10 @@ impl<'arena> Arena<'arena> {
 		Self {
 			allocator: ArenaAlloc {
 				_phantom: PhantomData,
-				head: UnsafeCell::new(None),
-				tail: UnsafeCell::new(None),
+				segments: UnsafeCell::new(LinkedList::new()),
 				offset: Cell::new(0),
 				cap: 0,
-			},
+			}
 		}
 	}
 
@@ -39,11 +39,10 @@ impl<'arena> Arena<'arena> {
 		Self {
 			allocator: ArenaAlloc {
 				_phantom: PhantomData,
-				head: UnsafeCell::new(None),
-				tail: UnsafeCell::new(Some(new_mem_chunk(bytes))),
+				segments: UnsafeCell::new([new_mem_chunk(bytes)].into()),
 				offset: Cell::new(0),
 				cap: bytes,
-			},
+			}
 		}
 	}
 
@@ -61,6 +60,21 @@ impl<'arena> Arena<'arena> {
 			p.as_mut()
 		}
 	}
+	
+	/// Invalidates all reference to this arena and de-allocates most memory.
+	/// The last segment in the arena is reused to start the arena.
+	pub fn clear(&mut self) {
+		if let Some(tail) = self.allocator.segments.get_mut().pop_back() {
+			*self = Self {
+				allocator: ArenaAlloc {
+					_phantom: PhantomData,
+					segments: UnsafeCell::new([tail].into()),
+					offset: Cell::new(0),
+					cap: 0,
+				}
+			}
+		}
+	}
 }
 
 impl<'arena> Deref for Arena<'arena> {
@@ -71,13 +85,20 @@ impl<'arena> Deref for Arena<'arena> {
 	}
 }
 
+/// Fat pointer to the heap-allocated memory.
+type ArenaSegment = Box<[MaybeUninit<u8>]>;
+
+#[inline(always)]
+fn new_mem_chunk(cap: usize) -> ArenaSegment {
+	Box::new_uninit_slice((cap / PAGE_SIZE + 1) * PAGE_SIZE)
+}
+
 /// The allocator used for [Arena]. This struct is wrapped by [Arena] to hide implementation details and unnecessary functions.
 pub struct ArenaAlloc<'arena> {
 	/// Make sure this is the first field so the lifetime ends before the memory is deallocated when the arena is dropped.
 	_phantom: PhantomData<&'arena mut ()>,
-	head: UnsafeCell<Option<Box<ArenaNode>>>,
-	/// The memory tail points to is not part of the linked list owned by head
-	tail: UnsafeCell<Option<Box<[MaybeUninit<u8>]>>>,
+	// Contains all the memory allocated by the arena in a linked list of memory chunks.
+	segments: UnsafeCell<LinkedList<ArenaSegment>>,
 	/// Index within the tail segment to the first unused byte. Offset = 0 is guaranteed to be aligned in memory.
 	offset: Cell<usize>,
 	/// Total capacity of the arena
@@ -85,79 +106,59 @@ pub struct ArenaAlloc<'arena> {
 }
 
 // SAFETY:
-// yes
+// dw
 unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 	fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
 		// Get the layout alignment to insert padding before the actual location of the object
-		let remainder = self.offset.get() % layout.align();
+		let size = layout.size();
+		let align = layout.align();
+		let offset = self.offset.get();
+		let remainder = offset % align;
 		if remainder != 0 {
-			self.offset
-				.set(self.offset.get() + (layout.align() - remainder));
+			self.offset.set(offset + (align - remainder));
 		}
 
 		// SAFETY:
-		// We aren't accessing self.tail anywhere else
-		match unsafe { self.tail.as_mut_unchecked() } {
-			Some(tail) => {
-				// If the space needed for this allocation is greater than the amount of memory we have...
-				if self.offset.get() + layout.size() > tail.len() {
-					// ...create a new segment
-					// Double the size of the entire arena
-					let chunk_size = layout.size() + self.cap;
-					debug!("Increasing arena size to {}", chunk_size + self.cap);
-					let new_tail = new_mem_chunk(chunk_size);
-					let old_tail = std::mem::replace(tail, new_tail);
-					let node = Box::new(ArenaNode {
-						mem_ptr: old_tail,
-						next: None,
-					});
-					// SAFETY:
-					// We aren't accessing self.head anywhere else
-					match unsafe { self.head.as_mut_unchecked() } {
-						Some(head) => {
-							let mut curr = head;
-							loop {
-								match &mut curr.next {
-									Some(next) => curr = next,
-									next => {
-										*next = Some(node);
-										break;
-									}
-								}
-							}
-						}
-						head => *head = Some(node),
-					}
-					self.offset.set(0);
-				}
-			}
-			tail => {
-				// first segment in the linked list
-				*tail = Some(new_mem_chunk(layout.size()));
-			}
-		}
-		// Allocate the memory in the tail segment by adding the size to the index
+		// We aren't accessing self.segments anywhere else.
+		// We aren't mutating it outside the &mut it gives us.
+		let segments = unsafe {self.segments.as_mut_unchecked()};
+		
+		// If the space needed for this allocation is greater than the amount of memory we have,
+		let new_seg_size = if let Some(tail) = segments.back_mut() && self.offset.get() + size > tail.len() {
+			// create a new segment with the size of the entire arena
+			let new_seg_size = size + self.cap;
+			debug!("Increasing arena size to {}", new_seg_size + self.cap);
+			self.offset.set(0);
+			new_seg_size
+		} else {
+			// create the first segment in the linked list with the layout size
+			size
+		};
+		segments.push_back(new_mem_chunk(new_seg_size));
+		
+		// Get the pointer to the thing we just allocated.
 		// SAFETY:
-		// this is probably safe idk, I can't be bothered to keep writing safety comments
+		// segments is guaranteed to have a back because we just pushed stuff to it.
+		// This ptr is non-null and aligned in memory.
+		// ArenaAlloc has a phantom lifetime which invalidates all references before de-allocating the segments.
 		let new_alloc_ptr = unsafe {
 			NonNull::slice_from_raw_parts(
 				NonNull::new_unchecked(
-					self.tail
-						.as_mut_unchecked() // what the fuck is going on here
-						.as_mut()
+					segments
+						.back_mut()
 						.unwrap_unchecked()
 						.as_mut_ptr()
 						.add(self.offset.get()),
 				)
 				.cast(),
-				layout.size(),
+				size,
 			)
 		};
-		self.offset.set(self.offset.get() + layout.size());
+		self.offset.set(self.offset.get() + size);
 		Ok(new_alloc_ptr)
 	}
 
-	/// Memory cannot be deallocated individually from an arena. This function does nothing.
+	/// Memory cannot be deallocated individually from an arena. This function is a no-op.
 	#[inline(always)]
 	unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
 
@@ -219,19 +220,6 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 	}
 }
 
-struct ArenaNode {
-	/// Fat pointer to the heap-allocated memory.
-	#[allow(unused)]
-	mem_ptr: Box<[MaybeUninit<u8>]>,
-	/// The next node in the linked-list.
-	next: Option<Box<Self>>,
-}
-
-#[inline(always)]
-fn new_mem_chunk(cap: usize) -> Box<[MaybeUninit<u8>]> {
-	Box::new_uninit_slice((cap / PAGE_SIZE + 1) * PAGE_SIZE)
-}
-
 #[cfg(test)]
 mod tests {
 	use {
@@ -241,7 +229,7 @@ mod tests {
 
 	#[test]
 	fn test_compile_error() {
-		trybuild::TestCases::new().compile_fail("tests/comp_err/*.rs");
+		trybuild::TestCases::new().compile_fail("tests/comp_err/arena.rs");
 	}
 
 	#[test]

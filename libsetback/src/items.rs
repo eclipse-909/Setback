@@ -1,5 +1,6 @@
 use {
-	crate::{Error, SmallVec, constants::*, setup::*},
+	arrayvec::ArrayVec,
+	crate::*,
 	serde::{Deserialize, Serialize},
 	std::fmt::{Display, Formatter},
 };
@@ -150,32 +151,15 @@ pub struct Card {
 }
 
 impl Card {
-	pub(crate) const fn new_deck() -> SmallVec<Self, DECK_SIZE> {
-		const {
-			let mut deck = SmallVec::new();
-			let mut number = 2;
-			while number <= ACE {
-				deck.push(Card {
-					suit: Suit::Hearts,
-					number,
-				});
-				deck.push(Card {
-					suit: Suit::Clubs,
-					number,
-				});
-				deck.push(Card {
-					suit: Suit::Diamonds,
-					number,
-				});
-				deck.push(Card {
-					suit: Suit::Spades,
-					number,
-				});
-				number += 1;
+	pub(crate) fn new_deck() -> ArrayVec<Self, DECK_SIZE> {
+		let mut deck = ArrayVec::new_const();
+		for number in 2..=ACE {
+			for suit in Suit::SUITS {
+				deck.push(Card {suit, number});
 			}
-			assert!(deck.len() == DECK_SIZE as u8);
-			deck
 		}
+		debug_assert_eq!(deck.len(), DECK_SIZE);
+		deck
 	}
 
 	/// returns 0 of hearts, which is an invalid card that must not be used in the game.
@@ -236,13 +220,7 @@ index: 0-based index of card in hand
 			"q" | "queen" => Some(QUEEN),
 			"k" | "king" => Some(KING),
 			"a" | "ace" => Some(ACE),
-			_ => string.parse::<u8>().ok().and_then(|n| {
-				if !(2..=14).contains(&n) {
-					None
-				} else {
-					Some(n)
-				}
-			}),
+			_ => string.parse::<u8>().ok().filter(|&n| (2..=14).contains(&n)),
 		}
 	}
 
@@ -314,6 +292,8 @@ pub enum Suit {
 }
 
 impl Suit {
+	pub const SUITS: [Self; 4] = [ Self::Hearts, Self::Clubs, Self::Diamonds, Self::Spades ];
+	
 	pub const fn as_icon(self) -> char {
 		match self {
 			Suit::Hearts => '♥',
@@ -374,7 +354,7 @@ impl Comparison {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Team {
 	//the cards the team collects after winning a turn
-	pub pile: SmallVec<Card, PILE_SIZE>,
+	pub pile: ArrayVec<Card, PILE_SIZE>,
 	//score of the game
 	pub score: i8,
 }
@@ -382,7 +362,7 @@ pub struct Team {
 impl Team {
 	pub(crate) const fn new() -> Self {
 		Self {
-			pile: SmallVec::new(),
+			pile: ArrayVec::new_const(),
 			score: 0,
 		}
 	}
@@ -396,9 +376,9 @@ pub struct RoundScores {
 	pub jack_winner_team_id: Option<u8>,
 	pub game_winner_team_id: Option<u8>,
 	/// The number of points each team got from game (face cards and 10s) for this round
-	pub round_team_game_scores: SmallVec<u8, MAX_PLAYERS>,
+	pub round_team_game_scores: ArrayVec<u8, MAX_PLAYERS>,
 	/// The number of points each team now has in total (high, low, jack, and game) after this round
-	pub total_team_scores: SmallVec<i8, MAX_PLAYERS>,
+	pub total_team_scores: ArrayVec<i8, MAX_PLAYERS>,
 }
 
 /// Events that can be sent from the game to the player.
@@ -425,7 +405,7 @@ pub enum GameEvent {
 	PromptCard(Option<Error>),
 	/// Deal the hand to the player.
 	DealCards {
-		hand: SmallVec<Card, CARDS_PER_PLAYER>,
+		hand: ArrayVec<Card, CARDS_PER_PLAYER>,
 		idx: u8,
 	},
 	/// The round is over, and the scores of the round are given for each team
@@ -436,5 +416,6 @@ pub enum GameEvent {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PublicGame {
 	pub join_code: u32,
-	pub setup_data: SetupState,
+	pub rules: SetupRules,
+	pub num_players: u8,
 }

@@ -1,4 +1,5 @@
 use {
+	arrayvec::ArrayVec,
 	crate::*,
 	rand::seq::{IndexedRandom, SliceRandom},
 	serde::{Deserialize, Serialize},
@@ -8,9 +9,9 @@ use {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct GameState {
 	pub setup: SetupState,
-	pub teams: SmallVec<Team, MAX_PLAYERS>,
-	pub deck: SmallVec<Card, DECK_SIZE>,
-	pub pile: SmallVec<Card, MAX_PLAYERS>,
+	pub teams: ArrayVec<Team, MAX_PLAYERS>,
+	pub deck: ArrayVec<Card, DECK_SIZE>,
+	pub pile: ArrayVec<Card, MAX_PLAYERS>,
 	pub trump: Suit,
 	pub lead: Suit,
 	/// The index of the player who owns the pile. Played the highest_card.
@@ -118,7 +119,7 @@ impl GameState {
 					#[cfg(not(feature = "test-dep"))]
 					event_emitter
 						.send(GameEvent::DealCards {
-							hand: self.setup.players[human_idx].hand.clone(),
+							hand: self.setup.players[human_idx as usize].hand.clone(),
 							idx: self.turn_idx,
 						})
 						.unwrap();
@@ -227,7 +228,7 @@ impl GameState {
 impl GameState {
 	pub fn next_turn(&self) -> u8 {
 		let turn_idx = self.turn_idx + 1;
-		if turn_idx == self.setup.players.len() {
+		if turn_idx as usize == self.setup.players.len() {
 			0
 		} else {
 			turn_idx
@@ -241,23 +242,23 @@ impl GameState {
 		self.highest_bid = Bid::Pass;
 
 		// collect cards and shuffle
-		self.deck.append(&mut self.pile);
+		self.deck.extend(self.pile.drain(..));
 		for player in self.setup.players.iter_mut() {
-			self.deck.append(&mut player.hand);
+			self.deck.extend(player.hand.drain(..));
 		}
 		for team in self.teams.iter_mut() {
-			self.deck.append(&mut team.pile);
+			self.deck.extend(team.pile.drain(..));
 		}
-		self.deck.as_slice_mut().shuffle(&mut rand::rng());
+		self.deck.as_mut_slice().shuffle(&mut rand::rng());
 
 		// deal cards
 		for player in self.setup.players.iter_mut() {
-			player.hand = self.deck.split();
+			player.hand.extend(self.deck.drain(..CARDS_PER_PLAYER));
 		}
 		info!("player {} dealt the cards", self.turn_idx);
 		debug_assert_eq!(
 			self.deck.len(),
-			DECK_SIZE as u8 - (self.setup.players.len() * CARDS_PER_PLAYER as u8)
+			DECK_SIZE - (self.setup.players.len() * CARDS_PER_PLAYER)
 		);
 	}
 
@@ -265,14 +266,14 @@ impl GameState {
 	/// Right now this is just an arbitrary mapping,
 	/// and will eventually be replaced with a better AI
 	fn ai_eval_bid(&self) -> (Suit, u8) {
-		let player = &self.setup.players[self.turn_idx];
+		let player = &self.setup.players[self.turn_idx as usize];
 		// [Hearts, Clubs, Diamonds, Spades]
 		let mut suit_points = [0u8; 4];
 		for card in player.hand.iter() {
 			suit_points[card.suit as usize] += match card.number {
 				2 => 10,
 				3 => {
-					if self.setup.players.len() == MAX_PLAYERS as u8 {
+					if self.setup.players.len() == MAX_PLAYERS {
 						4
 					} else {
 						8
@@ -314,7 +315,7 @@ impl GameState {
 			100..=139 => 2,                           // A + one more good card
 			140..=179 => 3,                           // A + face card or two + maybe one more
 			180..=219 => 4,                           // A + K + J + one more good card
-			220.. if self.setup.dealer_override => 5, // A + K + Q + J + one more good card
+			220.. if self.setup.rules.dealer_override => 5, // A + K + Q + J + one more good card
 			220.. => 4,                               // A + K + Q + J + one more good card
 		};
 		// if you are one of the first to bid, maybe bid higher either to force an opponent to outbid when they shouldn't
@@ -333,10 +334,10 @@ impl GameState {
 			.enumerate()
 			.max_by(|(_, team1), (_, team2)| team1.score.cmp(&team2.score))
 		{
-			let player = &self.setup.players[self.turn_idx];
+			let player = &self.setup.players[self.turn_idx as usize];
 			if player.team_id != index as u8
-				&& lead_team.score as i16 >= self.setup.max_score as i16 - 4
-				&& self.setup.max_score as i16 - 4 > self.teams[player.team_id].score as i16
+				&& lead_team.score as i16 >= self.setup.rules.max_score as i16 - 4
+				&& self.setup.rules.max_score as i16 - 4 > self.teams[player.team_id as usize].score as i16
 				&& bid != 4
 			{
 				bid += 1;
@@ -351,7 +352,7 @@ impl GameState {
 	///Plays the highest card if this player had the highest bid.
 	///Currently picks a random valid card until a proper AI is implemented.
 	pub fn ai_play_card(&self) -> Card {
-		let player = &self.setup.players[self.turn_idx];
+		let player = &self.setup.players[self.turn_idx as usize];
 		//Highest bidder starts the round, and the leading card is a unique calculation
 		if self.turn_num == 0 && self.turn_idx == self.highest_bidder_idx {
 			//Suit of highest bid should not have changed, so we will just recalculate it instead of storing it
@@ -403,16 +404,16 @@ impl GameState {
 	/// Returns true if valid, false if invalid
 	pub fn validate_bid(&self, bid: Bid) -> bool {
 		bid == Bid::Pass
-			|| (bid > self.highest_bid && (bid != Bid::Override || self.setup.dealer_override))
+			|| (bid > self.highest_bid && (bid != Bid::Override || self.setup.rules.dealer_override))
 	}
 
 	/// Returns true if valid, false if invalid
 	pub fn validate_card(&self, card: Card) -> bool {
-		let has_card = self.setup.players[self.turn_idx]
+		let has_card = self.setup.players[self.turn_idx as usize]
 			.hand
 			.iter()
 			.any(|c| *c == card);
-		let can_follow = self.setup.players[self.turn_idx].can_follow(self.lead);
+		let can_follow = self.setup.players[self.turn_idx as usize].can_follow(self.lead);
 		let is_owner = self.owner_idx == self.turn_idx;
 		let is_lead = card.suit == self.lead;
 		let is_trump = card.suit == self.trump;
@@ -432,8 +433,8 @@ impl GameState {
 		if bid != Bid::Pass {
 			self.highest_bid = bid;
 			self.highest_bidder_idx = self.turn_idx;
-			if (bid == Bid::Four && !self.setup.dealer_override)
-				|| (bid == Bid::Override && self.setup.dealer_override)
+			if (bid == Bid::Four && !self.setup.rules.dealer_override)
+				|| (bid == Bid::Override && self.setup.rules.dealer_override)
 			{
 				return true;
 			}
@@ -459,7 +460,9 @@ impl GameState {
 	pub fn player_played_card(&mut self, card: Card) -> PlayedCardResult {
 		debug_assert!(self.validate_card(card));
 		info!("player {} played the {card:?}", self.turn_idx);
-		self.setup.players[self.turn_idx].hand.remove_item(card);
+		let hand = &mut self.setup.players[self.turn_idx as usize].hand;
+		let remove_idx = hand.iter().position(|c| *c == card).unwrap(); // validate_card already looks for the card in the hand
+		hand.swap_remove(remove_idx);
 		self.pile.push(card);
 
 		// TODO: we can improve gameplay experience by ending a round early when a team is guaranteed to win.
@@ -487,29 +490,30 @@ impl GameState {
 			self.turn_idx = self.owner_idx;
 			self.turn_num += 1;
 			// The winning team takes the pile after every turn.
-			self.teams[self.setup.players[self.owner_idx].team_id]
+			self.teams[self.setup.players[self.owner_idx as usize].team_id as usize]
 				.pile
-				.append(&mut self.pile);
+				.extend(self.pile.drain(..));
 			if self.turn_num == CARDS_PER_PLAYER as u8 {
 				// if all cards have been played, end the round
 				self.turn_num = 0;
 				self.round_num += 1;
 				self.dealer_idx += 1;
-				if self.dealer_idx == self.setup.players.len() {
+				if self.dealer_idx as usize == self.setup.players.len() {
 					self.dealer_idx = 0;
 				}
 
 				// calculate round scores
-				let mut high_winner_team_id = 0;
-				let mut low_winner_team_id = 0;
+				let mut high_winner_team_id = 0u8;
+				let mut low_winner_team_id = 0u8;
 				let mut jack_winner_team_id = None;
-				let mut game_winner_team_id = 0;
+				let mut game_winner_team_id = 0u8;
 				let mut high = 0;
 				let mut low = 255;
 				let mut highest_game = 0u8;
 				let mut second_highest_game = 0;
-				let mut round_team_game_scores = SmallVec::new();
+				let mut round_team_game_scores = ArrayVec::new();
 				for (team_id, team) in self.teams.iter().enumerate() {
+					let team_id = team_id as u8;
 					let mut game = 0;
 					for card in team.pile.iter() {
 						game += match card.number {
@@ -524,52 +528,52 @@ impl GameState {
 							continue;
 						}
 						if card.number > high {
-							high_winner_team_id = team_id as u8;
+							high_winner_team_id = team_id;
 							high = card.number;
 						} else if card.number < low {
-							low_winner_team_id = team_id as u8;
+							low_winner_team_id = team_id;
 							low = card.number;
 						}
 						if card.number == JACK {
 							debug_assert_eq!(jack_winner_team_id, None);
-							jack_winner_team_id = Some(team_id as u8);
+							jack_winner_team_id = Some(team_id);
 						}
 					}
 					round_team_game_scores.push(game);
 					if game > highest_game {
-						game_winner_team_id = team_id as u8;
+						game_winner_team_id = team_id;
 						second_highest_game = highest_game;
 						highest_game = game;
 					}
 				}
 				let mut bidder_team_points = 0;
-				let bidder_team_id = self.setup.players[self.highest_bidder_idx].team_id;
+				let bidder_team_id = self.setup.players[self.highest_bidder_idx as usize].team_id;
 				if high_winner_team_id == bidder_team_id {
 					bidder_team_points += 1;
 				} else {
-					self.teams[high_winner_team_id].score += 1;
+					self.teams[high_winner_team_id as usize].score += 1;
 				}
 				if low_winner_team_id == bidder_team_id {
 					bidder_team_points += 1;
 				} else {
-					self.teams[low_winner_team_id].score += 1;
+					self.teams[low_winner_team_id as usize].score += 1;
 				}
 				if let Some(jack_team_id) = jack_winner_team_id {
 					if jack_team_id == bidder_team_id {
 						bidder_team_points += 1;
 					} else {
-						self.teams[jack_team_id].score += 1;
+						self.teams[jack_team_id as usize].score += 1;
 					}
 				}
 				if game_winner_team_id == bidder_team_id {
 					bidder_team_points += 1;
 				} else {
-					self.teams[game_winner_team_id].score += 1;
+					self.teams[game_winner_team_id as usize].score += 1;
 				}
 				if bidder_team_points >= self.highest_bid.to_points() {
-					self.teams[bidder_team_id].score += bidder_team_points;
+					self.teams[bidder_team_id as usize].score += bidder_team_points;
 				} else {
-					self.teams[bidder_team_id].score -= self.highest_bid.to_points();
+					self.teams[bidder_team_id as usize].score -= self.highest_bid.to_points();
 				}
 				let round_scores = RoundScores {
 					high_winner_team_id,
@@ -578,7 +582,7 @@ impl GameState {
 					game_winner_team_id: if highest_game == second_highest_game {
 						None
 					} else {
-						Some(game_winner_team_id)
+						Some(game_winner_team_id as u8)
 					},
 					round_team_game_scores,
 					total_team_scores: self.teams.iter().map(|team| team.score).collect(),
@@ -600,8 +604,8 @@ impl GameState {
 				highest_score = team.score;
 			}
 		}
-		highest_score as i16 > self.setup.max_score as i16
-			&& (highest_score > second_highest_score + 1 || !self.setup.win_by_2)
+		highest_score as i16 > self.setup.rules.max_score as i16
+			&& (highest_score > second_highest_score + 1 || !self.setup.rules.win_by_2)
 	}
 }
 

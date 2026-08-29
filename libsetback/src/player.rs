@@ -1,4 +1,5 @@
 use {
+	arrayvec::ArrayVec,
 	crate::*,
 	serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant},
 	std::cell::SyncUnsafeCell,
@@ -8,7 +9,7 @@ use {
 pub struct Player {
 	#[serde(with = "serde_sync_unsafe_cell")]
 	pub player_type: SyncUnsafeCell<PlayerType>,
-	pub hand: SmallVec<Card, CARDS_PER_PLAYER>,
+	pub hand: ArrayVec<Card, CARDS_PER_PLAYER>,
 	/// This is some arbitrary integer during the setup because team numbers can be arbitrary and nonconsecutive.
 	/// Once the game starts, team ids are normalized to be consecutive and zero-based,
 	/// meaning they can be used as an index into an array of teams.
@@ -57,7 +58,7 @@ impl Player {
 	pub fn new_singleplayer_self(team_id: u8, username: String) -> Self {
 		Self {
 			player_type: SyncUnsafeCell::new(PlayerType::SingleplayerSelf { username }),
-			hand: SmallVec::new(),
+			hand: ArrayVec::new(),
 			team_id,
 		}
 	}
@@ -67,7 +68,7 @@ impl Player {
 	pub const fn new_human_empty(team_id: u8) -> Self {
 		Self {
 			player_type: SyncUnsafeCell::new(PlayerType::HumanEmpty),
-			hand: SmallVec::new(),
+			hand: ArrayVec::new_const(),
 			team_id,
 		}
 	}
@@ -76,7 +77,7 @@ impl Player {
 	pub const fn new_host_connected(conn: Box<ClientConnection>, team_id: u8) -> Self {
 		Self {
 			player_type: SyncUnsafeCell::new(PlayerType::HumanConnection { conn }),
-			hand: SmallVec::new(),
+			hand: ArrayVec::new_const(),
 			team_id,
 		}
 	}
@@ -84,7 +85,7 @@ impl Player {
 	pub const fn new_ai(team_id: u8) -> Self {
 		Self {
 			player_type: SyncUnsafeCell::new(PlayerType::Ai { account_id: 0 }),
-			hand: SmallVec::new(),
+			hand: ArrayVec::new_const(),
 			team_id,
 		}
 	}
@@ -122,7 +123,7 @@ impl Clone for Player {
 					_ => unreachable!("Variant should not be cloned: {:?}", self),
 				},
 			),
-			hand: SmallVec::new(),
+			hand: ArrayVec::new(),
 			team_id: self.team_id,
 		}
 	}

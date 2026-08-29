@@ -1,4 +1,5 @@
 use {
+	arrayvec::ArrayVec,
 	libsetback::*,
 	std::io::Write,
 	tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
@@ -29,7 +30,7 @@ async fn main() {
 			.expect("Game cannot start in invalid state")
 			.run_singleplayer(event_emitter, event_response_rx),
 	);
-	let mut my_hand = SmallVec::new();
+	let mut my_hand = ArrayVec::new();
 	let mut my_idx = u8::MAX;
 	let mut input_buf = String::new();
 	loop {
@@ -53,7 +54,8 @@ async fn main() {
 			GameEvent::PlayerPlayedCard { card, idx } => {
 				if idx == my_idx {
 					println!("You played the {card:?}");
-					my_hand.remove_item(card);
+					let card_idx = my_hand.iter().position(|c| *c == card).unwrap();
+					my_hand.remove(card_idx);
 				} else {
 					println!("Player {idx} played the {card:?}");
 				}
@@ -101,13 +103,13 @@ async fn main() {
 					let card = match card_res {
 						Ok(c) => c,
 						Err(idx) => {
-							if idx >= my_hand.len() {
+							if idx as usize >= my_hand.len() {
 								println!(
 									"Invalid index - index is out of range, please try again:"
 								);
 								continue;
 							}
-							my_hand[idx]
+							my_hand[idx as usize]
 						}
 					};
 					prompt_responder

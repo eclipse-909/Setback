@@ -6,6 +6,9 @@ edition = "2024"
 [dependencies]
 libsetback.workspace = true
 reqwest.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["full", "io-uring"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

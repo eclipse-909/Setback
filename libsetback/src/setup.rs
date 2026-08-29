@@ -1,14 +1,12 @@
 use {
+	arrayvec::ArrayVec,
 	crate::*,
 	serde::{Deserialize, Serialize},
 	tracing::{error, info, warn},
 };
 
-/// Setup data is created modified when setting up a game.
-/// It is read-only (except the players) when the game is being played.
-/// See [GameSetup] for the wrapper struct that should be used during setup.
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct SetupState {
+pub struct SetupRules {
 	/// Every other player is on a team. The alternative being custom teams.
 	pub std_team_mode: bool,
 	pub win_by_2: bool,
@@ -17,9 +15,16 @@ pub struct SetupState {
 	pub max_score: u8,
 	pub max_players: u8,
 	/// In seconds. 0 means unlimited time. The maximum allowed time on the server is [MAX_TURN_TIME_SERVER] seconds.
-	#[cfg(not(feature = "client"))]
 	pub turn_time: u8,
-	pub players: SmallVec<Player, MAX_PLAYERS>,
+}
+
+/// Setup data is created and modified when setting up a game.
+/// The rules should be read-only when the game is being played.
+/// See [GameSetup] for the wrapper struct that should be used during setup.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct SetupState {
+	pub rules: SetupRules,
+	pub players: ArrayVec<Player, MAX_PLAYERS>,
 }
 
 /// This struct just exists to wrap [SetupState] and provide methods for convenience while setting up a game.
@@ -32,15 +37,16 @@ impl GameSetup {
 	/// Default rules for a game. These can be changed by the host during setup.
 	const fn new() -> Self {
 		Self(SetupState {
-			std_team_mode: true,
-			win_by_2: false,
-			negative_scores: true,
-			dealer_override: false,
-			max_score: MAX_SCORE,
-			max_players: MAX_PLAYERS as u8,
-			#[cfg(not(feature = "client"))]
-			turn_time: DEFAULT_TURN_TIME,
-			players: SmallVec::new(),
+			rules: SetupRules {
+				std_team_mode: true,
+				win_by_2: false,
+				negative_scores: true,
+				dealer_override: false,
+				max_score: MAX_SCORE,
+				max_players: MAX_PLAYERS as u8,
+				turn_time: DEFAULT_TURN_TIME,
+			},
+			players: ArrayVec::new_const(),
 		})
 	}
 
@@ -81,7 +87,7 @@ impl GameSetup {
 		info!("Adding AI player");
 		self.0
 			.players
-			.push(Player::new_ai(self.0.players.len() & 1));
+			.push(Player::new_ai(self.0.players.len() as u8 & 1));
 	}
 
 	#[cfg(not(feature = "client"))]
@@ -89,12 +95,12 @@ impl GameSetup {
 		info!("Adding human player");
 		self.0
 			.players
-			.push(Player::new_human_empty(self.0.players.len() & 1));
+			.push(Player::new_human_empty(self.0.players.len() as u8 & 1));
 	}
 
 	/// Updates a player's status as AI or human.
 	#[cfg(not(feature = "client"))]
-	pub fn update_human(&mut self, index: u8, is_human: bool) {
+	pub fn update_human(&mut self, index: usize, is_human: bool) {
 		info!(
 			"Setting player at index {index} to {}",
 			if is_human { "empty human" } else { "AI" }
@@ -107,14 +113,14 @@ impl GameSetup {
 	}
 
 	/// Updates a player's team.
-	pub fn update_team(&mut self, index: u8, team_id: u8) {
+	pub fn update_team(&mut self, index: usize, team_id: u8) {
 		info!("Setting player at index {index} to team {team_id}");
 		self.0.players[index].team_id = team_id;
 	}
 
 	/// Makes this player type a networked client.
 	#[cfg(not(feature = "client"))]
-	pub fn set_client(&mut self, index: u8, conn: Box<ClientConnection>) {
+	pub fn set_client(&mut self, index: usize, conn: Box<ClientConnection>) {
 		info!("Setting empty human at index {index} to connected human client");
 		let pt = self.0.players[index].player_type.get_mut();
 		debug_assert!(
@@ -140,7 +146,7 @@ impl GameSetup {
 		// * cfg not feature = client
 		// * at least 2 HumanConnection
 		// * remainder are Ai or HumanConnection
-		if self.0.players.len() < MIN_PLAYERS {
+		if self.0.players.len() < MIN_PLAYERS as usize {
 			warn!(
 				"Not enough players - got {}, need {MIN_PLAYERS}",
 				self.0.players.len()
@@ -194,10 +200,10 @@ impl GameSetup {
 		}
 
 		// normalize team numbers so there are no gaps
-		let mut team_ids: SmallVec<u8, MAX_PLAYERS> =
+		let mut team_ids: ArrayVec<u8, MAX_PLAYERS> =
 			self.0.players.iter().map(|p| p.team_id).collect();
 		team_ids.sort();
-		team_ids.dedup();
+		team_ids.partition_dedup();
 		let mut team_id_map = [0; MAX_PLAYERS];
 		for (index, id) in team_ids.iter().enumerate() {
 			team_id_map[*id as usize] = index as u8;
@@ -207,21 +213,21 @@ impl GameSetup {
 		}
 
 		// create team objects in the game data
-		let mut teams = SmallVec::new();
+		let mut teams = ArrayVec::new();
 		for _ in team_ids {
 			teams.push(Team::new());
 		}
 
 		// don't allow infinite time on the server
 		#[cfg(not(feature = "client"))]
-		if self.0.turn_time == 0 || self.0.turn_time > MAX_TURN_TIME_SERVER {
-			self.0.turn_time = MAX_TURN_TIME_SERVER;
+		if self.0.rules.turn_time == 0 || self.0.rules.turn_time > MAX_TURN_TIME_SERVER {
+			self.0.rules.turn_time = MAX_TURN_TIME_SERVER;
 		}
 
 		Ok(GameState {
 			teams,
 			deck: Card::new_deck(),
-			pile: SmallVec::new(),
+			pile: ArrayVec::new(),
 			trump: Suit::Hearts,
 			lead: Suit::Hearts,
 			owner_idx: 0,
@@ -230,7 +236,7 @@ impl GameSetup {
 			highest_bid: Bid::Pass,
 			turn_idx: 0,
 			turn_num: 0,
-			dealer_idx: rand::random_range(0..self.0.players.len()),
+			dealer_idx: rand::random_range(0..self.0.players.len() as u8),
 			round_num: 0,
 			setup: self.0,
 		})

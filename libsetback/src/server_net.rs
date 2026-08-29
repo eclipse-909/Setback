@@ -1,17 +1,55 @@
 use {
-	crate::{ssp::*, *},
+	bytes::BytesMut,
+	crate::*,
 	reqwest::Client,
 	scc::hash_map::Entry,
-	std::{net::SocketAddr, sync::Arc, time::Duration},
+	sockudo_ws::{
+		WebSocketStream, Message, Config, IoUringConfig, SplitWriter, SplitReader,
+		handshake::server_handshake,
+	},
+	std::{
+		net::SocketAddr,
+		sync::Arc,
+		time::Duration,
+		cell::LazyCell,
+	},
 	tokio::net::TcpStream,
-	tokio_tungstenite::{MaybeTlsStream, tungstenite::protocol::WebSocketConfig},
 	tokio_util::sync::CancellationToken,
-	tracing::{error, info, warn},
+	tracing::{info, warn},
 };
+
+unsafe extern "Rust" {
+	static SETBACK_API: LazyCell<Client>;
+}
+
+type WsWriter = SplitWriter<TcpStream>;
+type WsReader = SplitReader<TcpStream>;
+
+async fn ws_send(ws: &mut WsWriter, ssp: &Ssp) -> Result<(), Error> {
+	let bytes = BytesMut::new();
+	let bytes = ssp.encode(bytes)?;
+	ws.send_binary(bytes.freeze()).await.map_err(|_| Error::NetworkError)
+}
+
+async fn ws_next(ws: &mut WsReader) -> Result<Ssp, Error> {
+	match ws.next().await {
+		Some(Ok(msg)) => {
+			match msg {
+				Message::Text(_) => Err(Error::BadProtocol),
+				Message::Binary(bytes) => Ssp::decode(&bytes),
+				Message::Ping(_) | Message::Pong(_) => unreachable!("ping/pong should be handled automatically"),
+				Message::Close(_) => Err(Error::Disconnected),
+			}
+		}
+		Some(Err(_)) => Err(Error::NetworkError),
+		None => Err(Error::Disconnected),
+	}
+}
 
 /// Connection to the client, owned by the server.
 pub struct ClientConnection {
-	ws: Websocket,
+	ws_writer: WsWriter,
+	ws_reader: WsReader,
 	pub account_id: u32,
 	pub username: String,
 	pub ready: bool,
@@ -23,34 +61,38 @@ impl ClientConnection {
 	/// This is used when someone first tries to connect to the server.
 	/// Their token will be validated. They are sent Ack if successful or Err
 	/// if unauthenticated.
-	pub async fn new(tcp_stream: TcpStream, api: Client, client_addr: SocketAddr) -> Option<Self> {
-		let mut ws = match tokio_tungstenite::accept_async_with_config(
-			MaybeTlsStream::Plain(tcp_stream),
-			Some(
-				// adjust these values as needed
-				WebSocketConfig::default()
-					.read_buffer_size(PAGE_SIZE)
-					.write_buffer_size(PAGE_SIZE)
-					.max_write_buffer_size(PAGE_SIZE * 2)
-					.max_message_size(Some(PAGE_SIZE))
-					.max_frame_size(Some(PAGE_SIZE)),
-			),
-		)
-		.await
-		{
-			Ok(ws) => ws,
-			Err(e) => {
-				error!("WebSocket handshake failed: {e}");
-				return None;
+	pub async fn new(mut tcp_stream: TcpStream, client_addr: SocketAddr) -> Option<Self> {
+		tcp_stream.set_nodelay(true).ok()?;
+		server_handshake(&mut tcp_stream).await.ok()?;
+		let ws = WebSocketStream::server(
+			tcp_stream,
+			// Our payloads should be very small, but we can play around with these values
+			// to try to conserve more memory or give the messages more room if it's too small.
+			// Sizes are in bytes and times are in seconds.
+			Config {
+				max_message_size: 4 * PAGE_SIZE,
+				max_frame_size: PAGE_SIZE,
+				write_buffer_size: PAGE_SIZE,
+				idle_timeout: 16,
+				max_backpressure: PAGE_SIZE,
+				ping_interval: 8,
+				pong_timeout: 4,
+				close_timeout: 4,
+				io_uring: IoUringConfig {
+					registered_buffer_size: 4 * PAGE_SIZE,
+					..Default::default()
+				},
+				..Default::default()
 			}
-		};
-
+		);
+		let (mut reader, mut writer) = ws.split();
+		
 		//TODO:
 		// Use client_addr for security features like IP bans
 
 		let res = async {
 			// we can allow more time for authentication since this isn't delaying anything important
-			let ssp: Ssp = tokio::time::timeout(Duration::from_secs(8), ws_next(&mut ws))
+			let ssp: Ssp = tokio::time::timeout(Duration::from_secs(8), ws_next(&mut reader))
 				.await
 				.map_err(|_| Error::TimedOut)??;
 
@@ -64,8 +106,8 @@ impl ClientConnection {
 			let UsernameResponse {
 				username,
 				account_id,
-			} = Self::get_username(api, auth_token.as_str()).await?;
-			ws_send(&mut ws, &Ssp::new(Payload::Ack, CorrelationId::event()))
+			} = Self::get_username(auth_token.as_str()).await?;
+			ws_send(&mut writer, &Ssp::new(Payload::Ack, CorrelationId::event()))
 				.await
 				.map_err(Error::from)?;
 			Ok((username, account_id))
@@ -74,7 +116,8 @@ impl ClientConnection {
 
 		match res {
 			Ok((username, account_id)) => Some(Self {
-				ws,
+				ws_writer: writer,
+				ws_reader: reader,
 				account_id,
 				username,
 				ready: false,
@@ -84,7 +127,7 @@ impl ClientConnection {
 			Err(err) => {
 				info!("Authentication failed for client - Error: {err}");
 				ws_send(
-					&mut ws,
+					&mut writer,
 					&Ssp::new(Payload::Err(err), CorrelationId::event()),
 				)
 				.await
@@ -95,54 +138,34 @@ impl ClientConnection {
 	}
 
 	/// Called after client connects to server. Not used when client is in a game.
-	pub fn spawn_read_loop_for_server(mut self, state: Arc<State>) {
+	pub fn spawn_handler(mut self, state: Arc<State>) {
 		tokio::spawn(async move {
-			let cancel_token = CancellationToken::new();
-			let cancel_token_clone = cancel_token.clone();
-			match state.client_store.entry_async(self.account_id).await {
-				Entry::Vacant(e) => {
-					_ = e.insert_entry(cancel_token);
-				}
-				Entry::Occupied(_) => {
-					_ = self.send_err(Error::AlreadyConnected).await;
-					return;
-				}
-			}
-			let account_id = self.account_id;
-			tokio::select! {
-				_ = self.handle_messages_for_server(state.clone()) => {}
-				_ = cancel_token_clone.cancelled() => {}
-			}
-			_ = state.client_store.remove_async(&account_id).await;
-		});
-	}
-
-	#[inline(always)]
-	async fn handle_messages_for_server(mut self, state: Arc<State>) {
-		loop {
-			let (correlation_id, res) = self.read().await;
-			if matches!(res, Err(Error::Disconnected)) {
+			if state.client_store.insert_async(self.account_id).await.is_err() {
+				_ = self.send_err(Error::AlreadyConnected).await;
+				//TODO: if a client is trying to connect more than once,
+				// it could either mean they are trying to cheat by being 2 players at once in a game,
+				// or someone has hacked their account.
+				// Either way we should do something with this.
+				// Maybe send the client a message/notification/email that someone is trying to login to their account.
+				// Suggest they should change their password.
+				// Maybe have a "this was me" and "this wasn't me" response
+				// which would confirm the cause.
 				return;
 			}
-			let ssp = match res {
-				Ok(ssp) => ssp,
-				Err(err) => {
-					_ = self
-						.write(
-							CorrelationId::response(correlation_id.id),
-							Payload::Err(err),
-						)
-						.await;
-					continue;
+			
+			loop {
+				let (correlation_id, res) = self.read().await;
+				if matches!(res, Err(Error::Disconnected)) {
+					break;
 				}
-			};
-			let res = match ssp.payload {
-				_ => todo!("handle the message using the state"),
-			};
-			_ = self
-				.write(CorrelationId::response(correlation_id.id), res)
-				.await;
-		}
+				todo!("handle the message using the state");
+				match res {
+					Ok(ssp) => {}
+					Err(err) => {}
+				};
+			}
+			_ = state.client_store.remove_async(&self.account_id).await;
+		});
 	}
 
 	/// Wraps [read] and validates the and version.
@@ -150,7 +173,7 @@ impl ClientConnection {
 	/// The chain id is the chain id from the received ssp.
 	/// It's returned here just in case version checking fails and you need to respond.
 	async fn read(&mut self) -> (CorrelationId, Result<Ssp, Error>) {
-		let mut ssp = match ws_next(&mut self.ws).await {
+		let mut ssp = match ws_next(&mut self.ws_reader).await {
 			Ok(ssp) => ssp,
 			Err(err) => return (CorrelationId::event(), Err(err)),
 		};
@@ -174,7 +197,7 @@ impl ClientConnection {
 		correlation_id: CorrelationId,
 		payload: Payload,
 	) -> Result<(), Error> {
-		ws_send(&mut self.ws, &Ssp::new(payload, correlation_id))
+		ws_send(&mut self.ws_writer, &Ssp::new(payload, correlation_id))
 			.await
 			.inspect_err(|e| {
 				warn!("Failed to write data to stream. Error: {e}");
@@ -250,8 +273,10 @@ impl ClientConnection {
 		self.write(CorrelationId::event(), Payload::Err(err)).await
 	}
 
-	async fn get_username(api: Client, auth_token: &str) -> Result<UsernameResponse, Error> {
-		api.get(URL_API_USERNAME)
+	async fn get_username(auth_token: &str) -> Result<UsernameResponse, Error> {
+		// SAFETY:
+		// Must link with server
+		unsafe {&SETBACK_API}.get(URL_API_USERNAME)
 			.bearer_auth(auth_token)
 			.send()
 			.await
@@ -265,11 +290,12 @@ impl ClientConnection {
 
 	//TODO this will be a private API call
 	async fn report_player(
-		api: Client,
 		auth_token: &str,
 		report: &ReportPlayerRequest,
 	) -> Result<(), Error> {
-		api.post(URL_API_REPORT_PLAYER)
+		// SAFETY:
+		// Must link with server
+		unsafe {&SETBACK_API}.post(URL_API_REPORT_PLAYER)
 			.bearer_auth(auth_token)
 			.json(report)
 			.send()

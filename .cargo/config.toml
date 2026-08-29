@@ -1,2 +1,5 @@
 [target.'cfg(target_arch = "x86_64")']
 rustflags = ["-C", "target-feature=+avx2,+fma"] # scc says to do this for SIMD support
+
+[build]
+rustflags = ["--cfg", "tokio_unstable"]

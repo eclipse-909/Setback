@@ -1,14 +1,9 @@
-#[cfg(target_family = "wasm")]
-pub use ws_wasm::*;
-
-#[cfg(not(target_family = "wasm"))]
-pub use ws_native::*;
-
 // The public interface between these two platform-specific implementations must be identical
 
 #[cfg(target_family = "wasm")]
-mod ws_wasm {
+pub mod ws_client {
 	use {
+		bytes::BytesMut,
 		crate::{Error, URL_SERVER_WS, ssp::Ssp},
 		futures::{SinkExt, StreamExt},
 		gloo::net::websocket::{Message, futures::WebSocket as Ws},
@@ -21,11 +16,9 @@ mod ws_wasm {
 	}
 
 	pub async fn ws_send(ws: &mut Websocket, ssp: &Ssp) -> Result<(), Error> {
-		//TODO instead of making (possibly multiple) allocations here
-		// we can probably look into using memory pooling
-		let mut bytes = Vec::new();
-		ssp.encode(&mut bytes)?;
-		ws.send(Message::Bytes(bytes))
+		let bytes = BytesMut::new();
+		let bytes = ssp.encode(bytes)?;
+		ws.send(Message::Bytes(bytes.to_vec()))
 			.await
 			.map_err(|_| Error::NetworkError)
 	}
@@ -44,15 +37,13 @@ mod ws_wasm {
 }
 
 #[cfg(not(target_family = "wasm"))]
-mod ws_native {
+pub mod ws_client {
 	use {
+		bytes::BytesMut,
 		crate::{Error, URL_SERVER_WS, ssp::Ssp},
 		futures::{SinkExt, StreamExt},
 		tokio::net::TcpStream,
-		tokio_tungstenite::{
-			tungstenite::{Bytes, Message},
-			*,
-		},
+		tokio_tungstenite::{tungstenite::Message, *},
 	};
 
 	pub type Websocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -65,11 +56,9 @@ mod ws_native {
 	}
 
 	pub async fn ws_send(ws: &mut Websocket, ssp: &Ssp) -> Result<(), Error> {
-		//TODO instead of making (possibly multiple) allocations here
-		// we can probably look into using memory pooling
-		let mut bytes = Vec::new();
-		ssp.encode(&mut bytes)?;
-		ws.send(Message::Binary(Bytes::from(bytes)))
+		let bytes = BytesMut::new();
+		let bytes = ssp.encode(bytes)?;
+		ws.send(Message::Binary(bytes.freeze()))
 			.await
 			.map_err(|_| Error::NetworkError)
 	}

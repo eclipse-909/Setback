@@ -1,7 +1,7 @@
 use {
+	arrayvec::ArrayVec,
 	crate::*,
 	serde::{Deserialize, Serialize},
-	std::io::Write,
 };
 
 ///Setback Server Protocol
@@ -40,9 +40,8 @@ impl Ssp {
 		Self::new(payload, CorrelationId::event())
 	}
 
-	pub fn encode<W: Write>(&self, w: W) -> Result<(), Error> {
-		postcard::to_io(self, w).map_err(|_| Error::BadEncoding)?;
-		Ok(())
+	pub fn encode<E: Extend<u8>>(&self, e: E) -> Result<E, Error> {
+		postcard::to_extend(self, e).map_err(|_| Error::BadEncoding)
 	}
 
 	pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
@@ -142,7 +141,7 @@ pub enum Payload {
 	/// Response only<br><br>
 	/// Client requests to rejoin game.
 	/// This is only used if the client has disconnected from an ongoing game and wants to rejoin.
-	Snapshot(Box<GameState>, SmallVec<Card, CARDS_PER_PLAYER>),
+	Snapshot(Box<GameState>, ArrayVec<Card, CARDS_PER_PLAYER>),
 	/// Client ---SearchGames--> Server<br>
 	/// Client <--PublicGames--- Server<br>
 	/// Request only<br><br>
