@@ -64,12 +64,9 @@ impl SetbackClient {
 		};
 
 		// No need to use correlation yet because this handshake is required before arbitrary communication
-		let auth_payload = Payload::Authenticate {
-			auth_token: session.auth_token,
-		};
 		info!("Authenticating with Setback server");
 		client
-			.write(CorrelationId::request(0), auth_payload.clone())
+			.write(CorrelationId::request(0), Payload::Authenticate { auth_token: session.auth_token })
 			.await?;
 		let auth_res = ws_next(&mut client.ws).await?;
 		if auth_res.correlation_id != CorrelationId::event()

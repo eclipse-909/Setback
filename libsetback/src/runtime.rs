@@ -68,9 +68,7 @@ impl GameState {
 		event_emitter: Ee,
 		event_response_rx: Err,
 	) {
-		// SAFETY:
-		// we have exclusive access to self
-		let human_idx = unsafe { self.human_idx() };
+		let human_idx = self.human_idx();
 		event_emitter
 			.send(GameEvent::Init { idx: human_idx })
 			.unwrap();
@@ -81,25 +79,16 @@ impl GameState {
 	/// ## Safety
 	/// No mutable pointers to player type must exist.
 	#[cfg(not(feature = "test-dep"))]
-	unsafe fn human_idx(&self) -> u8 {
+	fn human_idx(&self) -> u8 {
 		self.setup
 			.players
 			.iter()
-			.position(|p| {
-				matches!(
-					// SAFETY:
-					// No mutable pointers to player type must exist.
-					unsafe { &*p.player_type.get() },
-					PlayerType::SingleplayerSelf { .. }
-				)
-			})
+			.position(|p| matches!(&p.player_type, PlayerType::SingleplayerSelf { .. }))
 			.unwrap() as u8
 	}
 
-	/// ## Safety
-	/// Not actually unsafe
 	#[cfg(feature = "test-dep")]
-	unsafe fn human_idx(&self) -> u8 {
+	fn human_idx(&self) -> u8 {
 		// there is no human player in tests
 		u8::MAX
 	}
@@ -298,9 +287,9 @@ impl GameState {
 			.enumerate()
 			.max_by(|(_, num1), (_, num2)| num1.cmp(num2))
 			.unwrap();
-		// SAFETY:
-		// Suit is repr(u8) and the array length is the same as the number of suits.
 		(
+			// SAFETY:
+			// Suit is repr(u8) and the array length is the same as the number of suits.
 			unsafe { std::mem::transmute::<u8, Suit>(index as u8) },
 			score,
 		)
@@ -582,7 +571,7 @@ impl GameState {
 					game_winner_team_id: if highest_game == second_highest_game {
 						None
 					} else {
-						Some(game_winner_team_id as u8)
+						Some(game_winner_team_id)
 					},
 					round_team_game_scores,
 					total_team_scores: self.teams.iter().map(|team| team.score).collect(),

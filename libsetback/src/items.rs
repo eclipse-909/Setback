@@ -35,60 +35,12 @@ impl Version {
 macro_rules! pkg_version {
 	() => {
 		const {
-			// Thanks Rust for not having 1st class support for compile time code execution.
-			// Now I have to manually parse the string because str methods aren't const.
-
 			const VERSION_STR: &str = env!("CARGO_PKG_VERSION");
-			const LEN: usize = VERSION_STR.len();
-			let mut buffers = [[0; LEN]; 3];
-			let mut buf_lens = [0; 3];
-			let mut nums = [0; 3];
-			let mut bufs_idx = 0;
-			let ptr = VERSION_STR.as_ptr();
-			let mut i = 0;
-			let mut buf_idx = LEN - 1;
-			while i < LEN {
-				// Safety
-				// while loop does bounds checking
-				let b = unsafe { *ptr.add(i) };
-				match b {
-					b'.' => {
-						bufs_idx += 1;
-						buf_idx = LEN - 1;
-					}
-					b'0'..=b'9' => {
-						buffers[bufs_idx][buf_idx] = b;
-						buf_lens[bufs_idx] += 1;
-						buf_idx -= 1;
-					}
-					_ => panic!("invalid character in version string"),
-				}
-				i += 1;
-			}
-			bufs_idx = 0;
-			while bufs_idx < 3 {
-				let len = buf_lens[bufs_idx];
-				i = LEN - len;
-				loop {
-					if i >= LEN {
-						break;
-					}
-					let b = buffers[bufs_idx][i];
-					let num = match b {
-						b @ b'0'..=b'9' => b - b'0',
-						_ => panic!("invalid byte"),
-					};
-					let multiplier = 10u8.pow((i - (LEN - len)) as u32);
-					nums[bufs_idx] += num * multiplier;
-					i += 1;
-				}
-				bufs_idx += 1;
-			}
-			Version {
-				major: nums[0],
-				minor: nums[1],
-				patch: nums[2],
-			}
+			const VALUES: [u8; 3] = konst::iter::collect_const!(
+				u8 => konst::string::split(VERSION_STR, "."),
+					map(|s| konst::result::unwrap!(konst::parsing::Parser::new(s).parse_u8()))
+			);
+			Version {major: VALUES[0], minor: VALUES[1], patch: VALUES[2]}
 		}
 	};
 }

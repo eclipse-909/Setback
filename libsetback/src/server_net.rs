@@ -13,11 +13,16 @@ use {
 		time::Duration,
 		cell::LazyCell,
 	},
-	tokio::net::TcpStream,
+	tokio::{
+		net::TcpStream,
+		sync::mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel},
+	},
 	tokio_util::sync::CancellationToken,
 	tracing::{info, warn},
 };
 
+// SAFETY:
+// Must link with server
 unsafe extern "Rust" {
 	static SETBACK_API: LazyCell<Client>;
 }
@@ -48,8 +53,8 @@ async fn ws_next(ws: &mut WsReader) -> Result<Ssp, Error> {
 
 /// Connection to the client, owned by the server.
 pub struct ClientConnection {
-	ws_writer: WsWriter,
-	ws_reader: WsReader,
+	send_tx: UnboundedSender<Ssp>,
+	recv_rx: UnboundedReceiver<Result<Ssp, Error>>,
 	pub account_id: u32,
 	pub username: String,
 	pub ready: bool,
@@ -113,35 +118,54 @@ impl ClientConnection {
 			Ok((username, account_id))
 		}
 		.await;
-
-		match res {
-			Ok((username, account_id)) => Some(Self {
-				ws_writer: writer,
-				ws_reader: reader,
-				account_id,
-				username,
-				ready: false,
-				host: false,
-				timeout_strikes: 0,
-			}),
+		
+		let (username, account_id) = match res {
+			Ok(r) => r,
 			Err(err) => {
 				info!("Authentication failed for client - Error: {err}");
 				ws_send(
 					&mut writer,
 					&Ssp::new(Payload::Err(err), CorrelationId::event()),
-				)
-				.await
-				.ok()?;
-				None
+				).await.ok()?;
+				return None;
 			}
-		}
+		};
+		
+		let (send_tx, mut send_rx) = unbounded_channel();
+		let (recv_tx, recv_rx) = unbounded_channel();
+		tokio::spawn(async move {
+			loop {
+				tokio::select! {
+					// reading from ws
+					ssp = ws_next(&mut reader) => {
+						_ = recv_tx.send(ssp);
+					}
+					// writing to ws
+					Some(ssp) = send_rx.recv() => {
+						if let Err(e) = ws_send(&mut writer, &ssp).await {
+							_ = recv_tx.send(Err(e));
+						}
+					}
+				}
+			}
+		});
+		
+		Some(Self {
+			send_tx,
+			recv_rx,
+			account_id,
+			username,
+			ready: false,
+			host: false,
+			timeout_strikes: 0,
+		})
 	}
 
 	/// Called after client connects to server. Not used when client is in a game.
 	pub fn spawn_handler(mut self, state: Arc<State>) {
 		tokio::spawn(async move {
 			if state.client_store.insert_async(self.account_id).await.is_err() {
-				_ = self.send_err(Error::AlreadyConnected).await;
+				_ = self.send_err(Error::AlreadyConnected);
 				//TODO: if a client is trying to connect more than once,
 				// it could either mean they are trying to cheat by being 2 players at once in a game,
 				// or someone has hacked their account.
@@ -173,7 +197,7 @@ impl ClientConnection {
 	/// The chain id is the chain id from the received ssp.
 	/// It's returned here just in case version checking fails and you need to respond.
 	async fn read(&mut self) -> (CorrelationId, Result<Ssp, Error>) {
-		let mut ssp = match ws_next(&mut self.ws_reader).await {
+		let mut ssp = match self.recv_rx.recv().await.ok_or(Error::Disconnected).flatten() {
 			Ok(ssp) => ssp,
 			Err(err) => return (CorrelationId::event(), Err(err)),
 		};
@@ -192,16 +216,8 @@ impl ClientConnection {
 	/// Use CorrelationId::event() when sending a new message. The client will assign their own id if they respond.
 	///
 	/// Use the id provided by the client when responding.
-	async fn write(
-		&mut self,
-		correlation_id: CorrelationId,
-		payload: Payload,
-	) -> Result<(), Error> {
-		ws_send(&mut self.ws_writer, &Ssp::new(payload, correlation_id))
-			.await
-			.inspect_err(|e| {
-				warn!("Failed to write data to stream. Error: {e}");
-			})
+	fn write(&mut self, correlation_id: CorrelationId, payload: Payload) -> Result<(), Error> {
+		self.send_tx.send(Ssp::new(payload, correlation_id)).map_err(|_| Error::ServerError)
 	}
 
 	/// Only use this when a client is in a game.
@@ -214,8 +230,7 @@ impl ClientConnection {
 		self.write(
 			CorrelationId::request(*correlation_id),
 			Payload::GameEvent(T::PROMPT_EVENT),
-		)
-		.await?;
+		)?;
 		// get client response
 		let (res_id, res) = self.read().await;
 		// client should expect message from server
@@ -238,10 +253,7 @@ impl ClientConnection {
 		let timeout_res = tokio::time::timeout(Duration::from_secs(timeout_secs), async {
 			loop {
 				// send message to client
-				if let Err(err) = self
-					.write(CorrelationId::request(correlation_id), payload.clone())
-					.await
-				{
+				if let Err(err) = self.write(CorrelationId::request(correlation_id), payload.clone()) {
 					warn!("Failed to send message to client. Error: {err}");
 					continue;
 				}
@@ -269,8 +281,8 @@ impl ClientConnection {
 	}
 
 	/// This is not responding to a specific client message and the client isn't responding to it.
-	pub async fn send_err(&mut self, err: Error) -> Result<(), Error> {
-		self.write(CorrelationId::event(), Payload::Err(err)).await
+	pub fn send_err(&mut self, err: Error) -> Result<(), Error> {
+		self.write(CorrelationId::event(), Payload::Err(err))
 	}
 
 	async fn get_username(auth_token: &str) -> Result<UsernameResponse, Error> {

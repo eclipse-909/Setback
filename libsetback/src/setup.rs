@@ -21,10 +21,25 @@ pub struct SetupRules {
 /// Setup data is created and modified when setting up a game.
 /// The rules should be read-only when the game is being played.
 /// See [GameSetup] for the wrapper struct that should be used during setup.
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct SetupState {
 	pub rules: SetupRules,
 	pub players: ArrayVec<Player, MAX_PLAYERS>,
+}
+
+impl SetupState {
+	pub fn snapshot(&self) -> Self {
+		Self {
+			rules: self.rules.clone(),
+			players: self.players.iter().map(|p| p.snapshot()).collect(),
+		}
+	}
+}
+
+impl Clone for SetupState {
+	fn clone(&self) -> Self {
+		self.snapshot()
+	}
 }
 
 /// This struct just exists to wrap [SetupState] and provide methods for convenience while setting up a game.
@@ -105,7 +120,7 @@ impl GameSetup {
 			"Setting player at index {index} to {}",
 			if is_human { "empty human" } else { "AI" }
 		);
-		*self.0.players[index].player_type.get_mut() = if is_human {
+		self.0.players[index].player_type = if is_human {
 			PlayerType::HumanEmpty
 		} else {
 			PlayerType::Ai { account_id: 0 }
@@ -122,12 +137,12 @@ impl GameSetup {
 	#[cfg(not(feature = "client"))]
 	pub fn set_client(&mut self, index: usize, conn: Box<ClientConnection>) {
 		info!("Setting empty human at index {index} to connected human client");
-		let pt = self.0.players[index].player_type.get_mut();
+		let pt = &mut self.0.players[index].player_type;
 		debug_assert!(
 			matches!(pt, PlayerType::HumanEmpty),
 			"Player must be an empty human slot before setting a client connection"
 		);
-		*pt = PlayerType::HumanConnection { conn };
+		*pt = PlayerType::HumanConnection { conn: Some(conn) };
 	}
 
 	/// Initializes a game loop that hasn't started yet.
@@ -162,10 +177,8 @@ impl GameSetup {
 		let mut num_ai = 0;
 		self.0
 			.players
-			.iter()
-			// SAFETY:
-			// We have exclusive access to self
-			.for_each(|p| match unsafe { &*p.player_type.get() } {
+			.iter_mut()
+			.for_each(|p| match p.player_type {
 				#[cfg(feature = "client")]
 				PlayerType::SingleplayerSelf { .. } => num_singleplayer += 1,
 				#[cfg(not(feature = "client"))]

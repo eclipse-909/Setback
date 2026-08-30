@@ -2,37 +2,123 @@ use {
 	arrayvec::ArrayVec,
 	crate::*,
 	scc::{HashMap, HashSet},
-	std::{sync::Arc, time::Duration},
+	std::{
+		sync::Arc,
+		time::Duration,
+		pin::Pin,
+	},
 	tokio::{sync::mpsc::*, task::JoinHandle},
 	tokio_util::sync::CancellationToken,
 	tracing::{error, info, warn},
 };
 
+type ConnArr = ArrayVec<Box<ClientConnection>, MAX_PLAYERS>;
+type ConnIdxArr = ArrayVec<(u8, Box<ClientConnection>), MAX_PLAYERS>;
+type CompleteConnections = ArrayVec<(u8, Result<Box<ClientConnection>, Error>), MAX_PLAYERS>;
+
+/// A future that is doing async network io with the clients,
+/// then returns those clients and the index they belong when all are done.
+type ClientIoFuture = Pin<Box<dyn Future<Output=CompleteConnections> + Send + 'static>>;
+
 pub struct GameLoopHandle {
-	pub cancel_token: CancellationToken,
 	pub rejoin_tx: Sender<Box<ClientConnection>>,
-	pub task: JoinHandle<ArrayVec<Box<ClientConnection>, MAX_PLAYERS>>,
+	pub task: JoinHandle<ConnArr>,
 }
 
 impl GameState {
-	fn spawn_server(self, reject_tx: UnboundedSender<Box<ClientConnection>>) -> GameLoopHandle {
-		let cancel_token = CancellationToken::new();
-		let cancel_token_clone = cancel_token.clone();
-		let (rejoin_tx, rejoin_rx) = channel(MAX_PLAYERS);
-		GameLoopHandle {
-			cancel_token,
-			rejoin_tx,
-			task: tokio::spawn(self.run_event_loop(cancel_token_clone, rejoin_rx, reject_tx)),
+	pub fn spawn_server(mut self, reject_tx: UnboundedSender<Box<ClientConnection>>) -> GameLoopHandle {
+		let (rejoin_tx, mut rejoin_rx) = channel(MAX_PLAYERS);
+		let task = tokio::spawn(async move {
+			let mut rejoin_idxs = ArrayVec::new_const();
+			let mut client_io_fut = self.advance_game(ArrayVec::new_const(), &mut rejoin_idxs);
+			loop {
+				let Some(fut) = client_io_fut.as_mut() else {return self.collect_players();};
+				tokio::select! {
+					Some(conn) = rejoin_rx.recv() => {
+						let rejoin_idx = self.rejoin_player(conn, &reject_tx);
+						// MAX means no player has rejoined, see Self::rejoin_player below
+						if rejoin_idx != u8::MAX {
+							rejoin_idxs.push(rejoin_idx);
+						}
+					}
+					conns = fut => client_io_fut = self.advance_game(conns, &mut rejoin_idxs),
+				}
+			}
+		});
+		GameLoopHandle {rejoin_tx, task}
+	}
+	
+	/// Attempts to let a player rejoin the game.
+	fn rejoin_player(
+		&mut self,
+		conn: Box<ClientConnection>,
+		reject_tx: &UnboundedSender<Box<ClientConnection>>
+	) -> u8 {
+		if conn.account_id != 0 && let Some(player_idx) = self
+			.setup
+			.players
+			.iter_mut()
+			.position(|p| matches!(p.player_type, PlayerType::Ai {account_id} if conn.account_id == account_id))
+		{
+			self.setup.players[player_idx].player_type = PlayerType::HumanConnection {conn: Some(conn)};
+			player_idx as u8
+		} else {
+			_ = reject_tx.send(conn);
+			u8::MAX
 		}
 	}
+	
+	/// Game logic is synchronous but returns a future for client networking.
+	fn advance_game(
+		&mut self,
+		conns: CompleteConnections,
+		// the following indexes are players that have rejoined since the last time this function was called
+		rejoin_idxs: &mut ArrayVec<u8, MAX_PLAYERS>
+	) -> Option<ClientIoFuture> {
+		//TODO
+		// put the connections back
+		// advance the game state synchronously
+		// when client network io is needed, it will be moved out and put into the following future
+		// the returned future will own Boxed ClientConnections and nothing else from the state.
+		// or it will return None when the game is over.
+		Some(Box::pin(async move {ArrayVec::new_const()}))
+	}
+	
+	fn take_conns(&mut self, except_idx: u8) -> ConnIdxArr {
+		let mut conns = ArrayVec::new_const();
+		for (idx, player) in self.setup.players.iter_mut().enumerate() {
+			if idx == except_idx as usize { continue; }
+			if let Some(c) = player.take_conn() {
+				conns.push((idx as u8, c));
+			}
+		}
+		conns
+	}
+	
+	fn restore_conns(&mut self, conns: CompleteConnections) -> ArrayVec<u8, MAX_PLAYERS> {
+		let mut disconnected = ArrayVec::new_const();
+		for (idx, conn) in conns {
+			match conn {
+				Ok(conn) => self.setup.players[idx as usize].restore_conn(conn),
+				Err(err) => {
+					info!("Player disconnected - idx: {idx} - err: {err}");
+					disconnected.push(idx);
+				}
+			}
+		}
+		disconnected
+	}
 
-	fn collect_players(self) -> ArrayVec<Box<ClientConnection>, MAX_PLAYERS> {
+	fn collect_players(self) -> ConnArr {
 		self.setup
 			.players
 			.into_iter()
-			.filter_map(|mut p| {
-				match std::mem::replace(p.player_type.get_mut(), PlayerType::Ai { account_id: 0 }) {
-					PlayerType::HumanConnection { conn } => Some(conn),
+			.filter_map(|p| {
+				match p.player_type {
+					PlayerType::HumanConnection { conn } => {
+						debug_assert!(conn.is_some());
+						conn
+					}
 					_ => None,
 				}
 			})
@@ -40,13 +126,11 @@ impl GameState {
 	}
 
 	/// Makes a copy of the game loop without sensitive data like the player's hand or the deck.
-	/// This should be called after a player makes a bid or plays a card,
-	/// but before the game state is updated with that bid or card.
 	fn snapshot(&self) -> Self {
 		Self {
 			// setup and deck are not fully cloned to prevent the user from accessing protected data
-			setup: self.setup.clone(),
-			deck: ArrayVec::new(),
+			setup: self.setup.snapshot(),
+			deck: ArrayVec::new_const(),
 			// the rest are fully cloned
 			teams: self.teams.clone(),
 			pile: self.pile.clone(),
@@ -62,13 +146,38 @@ impl GameState {
 			round_num: self.round_num,
 		}
 	}
+	
+	//TODO make new networking methods and helper methods
+	// prompt, notify, notify_all, notify_all_but, notify_all_unique
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 
 	async fn run_event_loop(
 		mut self,
 		cancel_token: CancellationToken,
 		mut rejoin_rx: Receiver<Box<ClientConnection>>,
 		reject_tx: UnboundedSender<Box<ClientConnection>>,
-	) -> ArrayVec<Box<ClientConnection>, MAX_PLAYERS> {
+	) -> ConnArr {
 		let mut loop_state = GameLoopState::DealCards;
 		let mut idx_payloads = (0..self.setup.players.len() as u8)
 			.map(|idx| Payload::GameEvent(GameEvent::Init { idx }))
@@ -92,15 +201,8 @@ impl GameState {
 			// It's also done here because it otherwise doesn't get run when it's the Ai's turn.
 			let rejoined = rejoin_rx.try_recv().ok();
 			if rejoined.is_some() {
-				// SAFETY:
-				// we have exclusive access to self
-				let mut rejoin_prep = unsafe { self.prepare_rejoin() };
-				// SAFETY:
-				// We have exclusive access to self
-				unsafe {
-					self.rejoin_player(&mut rejoin_prep, &reject_tx, rejoined)
-						.await;
-				}
+				let mut rejoin_prep = self.prepare_rejoin();
+				self.rejoin_player(&mut rejoin_prep, &reject_tx, rejoined).await;
 				self.send_all_player_rejoined(
 					rejoin_prep,
 					&mut loop_state,
@@ -194,26 +296,18 @@ impl GameState {
 		reject_tx: &UnboundedSender<Box<ClientConnection>>,
 	) -> T {
 		if matches!(
-			// SAFETY:
-			// we have exclusive access to self
-			unsafe { &*self.setup.players[self.turn_idx as usize].player_type.get() },
+			self.setup.players[self.turn_idx as usize].player_type,
 			PlayerType::Ai { .. }
 		) {
 			return T::ai_play(self);
 		}
-		// SAFETY:
-		// Ai was checked so this is HumanConnection.
-		// send_prompt must only push self.turn_idx to disconnected_idxs iff that player disconnects,
-		// and it preserves the ClientConnection object in that player to be later properly disconnected.
-		unsafe {
-			self.send_with_join(
-				loop_state,
-				join_rx,
-				reject_tx,
-				async move |this, disconnected_idxs| this.send_prompt(disconnected_idxs).await,
-			)
-			.await
-		}
+		self.send_with_join(
+			loop_state,
+			join_rx,
+			reject_tx,
+			async move |this, disconnected_idxs| this.send_prompt(disconnected_idxs).await,
+		)
+		.await
 	}
 
 	async fn notify_all(
@@ -227,8 +321,7 @@ impl GameState {
 		const {
 			assert!(MAX_PLAYERS > u8::MAX as usize);
 		}
-		self.notify_all_but(u8::MAX, loop_state, join_rx, reject_tx, payload)
-			.await
+		self.notify_all_but(u8::MAX, loop_state, join_rx, reject_tx, payload).await
 	}
 
 	async fn notify_all_but(
@@ -240,44 +333,36 @@ impl GameState {
 		payload: Payload,
 	) {
 		let payload_ref = &payload;
-		// SAFETY:
-		// Ais are skipped so these only send to HumanConnection players.
-		// send_payload must only push player_idx to disconnected_idxs iff that player disconnects,
-		// and it preserves the ClientConnection object in that player to be later properly disconnected.
-		// Each player it sends to is a unique player in the array and disjoint in memory.
-		unsafe {
-			self.send_with_join(
-				loop_state,
-				join_rx,
-				reject_tx,
-				async move |this, disconnected_idxs| {
-					futures::future::join_all((0..this.setup.players.len() as u8).filter_map(|i| {
-						if i != idx {
-							Some(async move {
-								// each future needs its own small vec because this future can't capture variables by mutable reference
-								let mut disconn_idxs = ArrayVec::new();
-								this.send_payload(&mut disconn_idxs, i, payload_ref.clone())
-									.await;
-								disconn_idxs
-							})
-						} else {
-							None
-						}
-					}))
-					.await
-					.into_iter()
-					.for_each(|disconn_idxs| {
-						disconn_idxs.into_iter().for_each(|i| {
-							if !disconnected_idxs.iter().any(|ii| i == *ii) {
-								debug_assert!(disconnected_idxs.len() < disconnected_idxs.capacity());
-								disconnected_idxs.push(i);
-							}
+		self.send_with_join(
+			loop_state,
+			join_rx,
+			reject_tx,
+			async move |this, disconnected_idxs| {
+				futures::future::join_all((0..this.setup.players.len() as u8).filter_map(|i| {
+					if i != idx {
+						Some(async move {
+							// each future needs its own small vec because this future can't capture variables by mutable reference
+							let mut disconn_idxs = ArrayVec::new();
+							this.send_payload(&mut disconn_idxs, i, payload_ref.clone()).await;
+							disconn_idxs
 						})
-					});
-				},
-			)
-			.await
-		}
+					} else {
+						None
+					}
+				}))
+				.await
+				.into_iter()
+				.for_each(|disconn_idxs| {
+					disconn_idxs.into_iter().for_each(|i| {
+						if !disconnected_idxs.iter().any(|ii| i == *ii) {
+							debug_assert!(disconnected_idxs.len() < disconnected_idxs.capacity());
+							disconnected_idxs.push(i);
+						}
+					})
+				});
+			},
+		)
+		.await
 	}
 
 	async fn notify_all_unique(
@@ -287,59 +372,49 @@ impl GameState {
 		reject_tx: &UnboundedSender<Box<ClientConnection>>,
 		payloads: &mut ArrayVec<Payload, MAX_PLAYERS>,
 	) {
-		// SAFETY:
-		// Ais are skipped so these only send to HumanConnection players.
-		// send_payload must only push player_idx to disconnected_idxs iff that player disconnects,
-		// and it preserves the ClientConnection object in that player to be later properly disconnected.
-		// Each player it sends to is a unique player in the array and disjoint in memory.
-		unsafe {
-			self.send_with_join(
-				loop_state,
-				join_rx,
-				reject_tx,
-				async move |this, disconnected_idxs| {
-					futures::future::join_all((0..this.setup.players.len() as u8).map(|i| {
-						let payload = std::mem::replace(&mut payloads[i as usize], Payload::Ack);
-						async move {
-							// each future needs its own small vec because this future can't capture variables by mutable reference
-							let mut disconn_idxs = ArrayVec::new();
-							this.send_payload(&mut disconn_idxs, i, payload).await;
-							disconn_idxs
+		self.send_with_join(
+			loop_state,
+			join_rx,
+			reject_tx,
+			async move |this, disconnected_idxs| {
+				futures::future::join_all((0..this.setup.players.len() as u8).map(|i| {
+					let payload = std::mem::replace(&mut payloads[i as usize], Payload::Ack);
+					async move {
+						// each future needs its own small vec because this future can't capture variables by mutable reference
+						let mut disconn_idxs = ArrayVec::new();
+						this.send_payload(&mut disconn_idxs, i, payload).await;
+						disconn_idxs
+					}
+				}))
+				.await
+				.into_iter()
+				.for_each(|disconn_idxs| {
+					disconn_idxs.into_iter().for_each(|i| {
+						if !disconnected_idxs.iter().any(|ii| i == *ii) {
+							debug_assert!(disconnected_idxs.len() < disconnected_idxs.capacity());
+							disconnected_idxs.push(i);
 						}
-					}))
-					.await
-					.into_iter()
-					.for_each(|disconn_idxs| {
-						disconn_idxs.into_iter().for_each(|i| {
-							if !disconnected_idxs.iter().any(|ii| i == *ii) {
-								debug_assert!(disconnected_idxs.len() < disconnected_idxs.capacity());
-								disconnected_idxs.push(i);
-							}
-						})
-					});
-				},
-			)
-			.await
-		}
+					})
+				});
+			},
+		)
+		.await
 	}
 
 	/// ## Notice
 	/// This function can be recursive.
 	/// If a player rejoins or disconnects, this function will notify all other players.
 	/// If nobody rejoins or disconnects, or if all players have disconnected, then it doesn't.
-	/// ## Safety
-	/// When async_send_fn is called, a player might be disconnected.
-	/// The index of that player needs to be pushed to the &mut SmallVec parameter.
-	async unsafe fn send_with_join<T: PromptResult>(
+	async fn send_with_join<T: PromptResult>(
 		&mut self,
 		loop_state: &mut GameLoopState,
 		join_rx: &mut Receiver<Box<ClientConnection>>,
 		reject_tx: &UnboundedSender<Box<ClientConnection>>,
-		async_send_fn: impl AsyncFnOnce(&Self, &mut ArrayVec<u8, MAX_PLAYERS>) -> T,
+		async_send_fn: impl AsyncFnOnce(&mut Self, &mut ArrayVec<u8, MAX_PLAYERS>) -> T,
 	) -> T {
 		// SAFETY:
 		// we have exclusive access to self
-		let mut rejoin_prep = unsafe { self.prepare_rejoin() };
+		let mut rejoin_prep = self.prepare_rejoin();
 		let mut disconnected_idxs = ArrayVec::new();
 
 		// The following future is what actually sends the prompt,
@@ -354,27 +429,17 @@ impl GameState {
 			loop {
 				tokio::select! {
 					output = &mut future => break output,
-					// SAFETY:
-					// see safety of Self::rejoin_player
-					join_res = join_rx.recv() => unsafe {self.rejoin_player(
+					join_res = join_rx.recv() => self.rejoin_player(
 						&mut rejoin_prep,
 						reject_tx,
 						join_res,
-					).await},
+					).await,
 				}
 			}
 		};
-		self.send_all_player_rejoined(rejoin_prep, loop_state, join_rx, reject_tx)
-			.await;
+		self.send_all_player_rejoined(rejoin_prep, loop_state, join_rx, reject_tx).await;
 		for i in disconnected_idxs.into_iter() {
-			// SAFETY:
-			// We have exclusive access to self.
-			// disconnected_idxs determines which players must be disconnected.
-			// The functions that populate it must guarantee that the players at these indices are HumanConnection.
-			unsafe {
-				self.disconnect_player(loop_state, join_rx, reject_tx, i)
-					.await
-			}
+			self.disconnect_player(loop_state, join_rx, reject_tx, i).await;
 		}
 		output
 	}
@@ -394,9 +459,7 @@ impl GameState {
 					reject_tx,
 					Payload::Reconnected {
 						player_idx: i,
-						// SAFETY:
-						// We have exclusive access to self
-						username: unsafe { &*self.setup.players[i as usize].player_type.get() }
+						username: self.setup.players[i as usize].player_type
 							.username()
 							.to_string(),
 					},
@@ -409,7 +472,7 @@ impl GameState {
 	// ## Safety
 	// The returned RejoinPrep is safe to use.
 	// Don't hold mutable pointers to players while this function is called.
-	unsafe fn prepare_rejoin(&self) -> RejoinPrep {
+	fn prepare_rejoin(&self) -> RejoinPrep {
 		RejoinPrep {
 			// create copies of AI account ids and hands and game state snapshot
 			// because they're cheaper than synchronizing shared state
@@ -419,8 +482,8 @@ impl GameState {
 				.setup
 				.players
 				.iter()
-				.map(|p| match unsafe { &*p.player_type.get() } {
-					PlayerType::Ai { account_id } => *account_id,
+				.map(|p| match p.player_type {
+					PlayerType::Ai { account_id } => account_id,
 					_ => 0,
 				})
 				.collect(),
@@ -430,8 +493,8 @@ impl GameState {
 				.setup
 				.players
 				.iter()
-				.map(|p| match unsafe { &*p.player_type.get() } {
-					PlayerType::Ai { account_id } if *account_id != 0 => p.hand.clone(),
+				.map(|p| match p.player_type {
+					PlayerType::Ai { account_id } if account_id != 0 => p.hand.clone(),
 					#[cfg(debug_assertions)]
 					_ => {
 						let mut v = ArrayVec::new();
@@ -450,67 +513,49 @@ impl GameState {
 
 	/// Attempts to let the client rejoin the game.
 	/// If the rejoin is unsuccessful, the connection is rejected and sent back to the server.
-	/// ## Safety
-	/// account_ids must be 0 for each index where the player is HumanConnection.
-	/// This function is called in a select loop with some other future that takes &Self.
-	/// That future holds *mut PlayerType across .await boundaries for players that are PlayerType::HumanConnection,
-	/// so this function must not in any way access HumanConnection players.
-	/// This is why we have the account_ids array to tell us which players are guaranteed to be Ai
-	/// (`if account_ids[i] == conn.account_id`).
-	/// Since the pointers in this unsafe block are not held across .await boundaries,
-	/// it is safe for the other future to mutably access any player_type, even Ai.
-	async unsafe fn rejoin_player(
-		&self,
-		rejoin_prep: &mut RejoinPrep,
-		reject_tx: &UnboundedSender<Box<ClientConnection>>,
-		conn: Option<Box<ClientConnection>>,
-	) {
-		let Some(mut conn) = conn else {
-			error!("rejoin channel closed unexpectedly");
-			return;
-		};
-		debug_assert_ne!(conn.account_id, 0);
-		debug_assert_eq!(rejoin_prep.account_ids.len(), rejoin_prep.hands.len());
-		let Some((i, account_id)) = rejoin_prep
-			.account_ids
-			.iter_mut()
-			.enumerate()
-			.find(|(_, id)| **id == conn.account_id)
-		else {
-			reject_tx.send(conn).unwrap();
-			return;
-		};
-		let Payload::Snapshot(_, ref mut ssp_hand) = rejoin_prep.snapshot_payload else {
-			unreachable!("snapshot_ssp should be a snapshot")
-		};
-		std::mem::swap(ssp_hand, &mut rejoin_prep.hands[i]);
-		debug_assert!(ssp_hand.len() != 1 || ssp_hand[0] != Card::zero());
-		if let Err(err) = conn
-			.send_expect_ack(0, rejoin_prep.snapshot_payload.clone(), NETWORK_TIMEOUT)
-			.await
-		{
-			warn!("Failed to rejoin player: {err}");
-			if err != Error::Disconnected {
-				reject_tx.send(conn).unwrap();
-			}
-			return;
-		}
-		*account_id = 0;
-		debug_assert!(rejoin_prep.rejoined_idxs.len() < rejoin_prep.rejoined_idxs.capacity());
-		rejoin_prep.rejoined_idxs.push(i as u8);
-		// SAFETY:
-		// see above safety message
-		// we can use ptr.write because the Ai variant doesn't need to call drop
-		unsafe {
-			let ptr = self.setup.players[i].player_type.get();
-			std::debug_assert_matches!(&*ptr, PlayerType::Ai { .. });
-			ptr.write(PlayerType::HumanConnection { conn });
-		}
-	}
+	// async fn rejoin_player(
+	// 	&mut self,
+	// 	rejoin_prep: &mut RejoinPrep,
+	// 	reject_tx: &UnboundedSender<Box<ClientConnection>>,
+	// 	conn: Option<Box<ClientConnection>>,
+	// ) {
+	// 	let Some(mut conn) = conn else {
+	// 		error!("rejoin channel closed unexpectedly");
+	// 		return;
+	// 	};
+	// 	debug_assert_ne!(conn.account_id, 0);
+	// 	debug_assert_eq!(rejoin_prep.account_ids.len(), rejoin_prep.hands.len());
+	// 	let Some((i, account_id)) = rejoin_prep
+	// 		.account_ids
+	// 		.iter_mut()
+	// 		.enumerate()
+	// 		.find(|(_, id)| **id == conn.account_id)
+	// 	else {
+	// 		reject_tx.send(conn).unwrap();
+	// 		return;
+	// 	};
+	// 	let Payload::Snapshot(_, ref mut ssp_hand) = rejoin_prep.snapshot_payload else {
+	// 		unreachable!("snapshot_ssp should be a snapshot")
+	// 	};
+	// 	std::mem::swap(ssp_hand, &mut rejoin_prep.hands[i]);
+	// 	debug_assert!(ssp_hand.len() != 1 || ssp_hand[0] != Card::zero());
+	// 	if let Err(err) = conn
+	// 		.send_expect_ack(0, rejoin_prep.snapshot_payload.clone(), NETWORK_TIMEOUT)
+	// 		.await
+	// 	{
+	// 		warn!("Failed to rejoin player: {err}");
+	// 		if err != Error::Disconnected {
+	// 			reject_tx.send(conn).unwrap();
+	// 		}
+	// 		return;
+	// 	}
+	// 	*account_id = 0;
+	// 	debug_assert!(rejoin_prep.rejoined_idxs.len() < rejoin_prep.rejoined_idxs.capacity());
+	// 	rejoin_prep.rejoined_idxs.push(i as u8);
+	// 	self.setup.players[i].player_type = PlayerType::HumanConnection { conn };
+	// }
 
-	/// ## Safety
-	/// Player at player_idx must be HumanConnection.
-	async unsafe fn disconnect_player(
+	async fn disconnect_player(
 		&mut self,
 		loop_state: &mut GameLoopState,
 		join_rx: &mut Receiver<Box<ClientConnection>>,
@@ -519,7 +564,7 @@ impl GameState {
 	) {
 		warn!("player disconnected");
 		{
-			let human_conn = self.setup.players[player_idx as usize].player_type.get_mut();
+			let human_conn = &mut self.setup.players[player_idx as usize].player_type;
 			let account_id = {
 				let PlayerType::HumanConnection { conn } = human_conn else {
 					unreachable!("Player should be human")
@@ -532,9 +577,7 @@ impl GameState {
 			.setup
 			.players
 			.iter()
-			// SAFETY:
-			// &mut self gives exclusive access
-			.all(|p| matches!(unsafe { &*p.player_type.get() }, PlayerType::Ai { .. }))
+			.all(|p| matches!(p.player_type, PlayerType::Ai { .. }))
 		{
 			// all humans have disconnected
 			*loop_state = GameLoopState::GameOver;
@@ -554,12 +597,8 @@ impl GameState {
 	/// If there is an error that requires the player to disconnect,
 	/// this function returns true.
 	/// Otherwise, it returns false.
-	/// ## Safety
-	/// Player at self.turn_idx must be HumanConnection.
-	/// Player at self.turn_idx must not be accessed anywhere else.
-	/// This function should be used as the future in send_with_join.
-	async unsafe fn send_prompt<T: PromptResult>(
-		&self,
+	async fn send_prompt<T: PromptResult>(
+		&mut self,
 		disconnected_idxs: &mut ArrayVec<u8, MAX_PLAYERS>,
 	) -> T {
 		const {
@@ -569,11 +608,7 @@ impl GameState {
 			);
 		}
 		debug_assert!(disconnected_idxs.len() < disconnected_idxs.capacity());
-		// SAFETY:
-		// The future that receives rejoining players must not access any player_type that is HumanConnection
-		let PlayerType::HumanConnection { conn } =
-			(unsafe { &mut *self.setup.players[self.turn_idx as usize].player_type.get() })
-		else {
+		let PlayerType::HumanConnection { conn } = &mut self.setup.players[self.turn_idx as usize].player_type else {
 			unreachable!("Player should be human");
 		};
 		let mut correlation_id = 0;
@@ -619,22 +654,14 @@ impl GameState {
 	/// If there is an error that requires the player to disconnect,
 	/// this function returns true.
 	/// Otherwise, it returns false.
-	/// ## Safety
-	/// Player at player_idx must be HumanConnection.
-	/// Player at player_idx must not be accessed anywhere else.
-	/// This function should be used as the future in send_with_join.
-	async unsafe fn send_payload(
-		&self,
+	async fn send_payload(
+		&mut self,
 		disconnected_idxs: &mut ArrayVec<u8, MAX_PLAYERS>,
 		player_idx: u8,
 		payload: Payload,
 	) {
 		debug_assert!(disconnected_idxs.len() < disconnected_idxs.capacity());
-		// SAFETY:
-		// The future that receives rejoining players must not access any player_type that is HumanConnection
-		let PlayerType::HumanConnection { conn } =
-			(unsafe { &mut *self.setup.players[player_idx as usize].player_type.get() })
-		else {
+		let PlayerType::HumanConnection { conn } = &mut self.setup.players[player_idx as usize].player_type else {
 			unreachable!("Player should be human");
 		};
 		if let Err(err) = conn.send_expect_ack(0, payload, NETWORK_TIMEOUT).await {
@@ -645,6 +672,31 @@ impl GameState {
 		}
 	}
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #[cfg(not(feature = "client"))]
 pub trait PromptResult: Copy {

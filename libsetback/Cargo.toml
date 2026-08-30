@@ -9,6 +9,7 @@ arrayvec.workspace = true
 bytes.workspace = true
 const_format.workspace = true
 futures.workspace = true
+konst.workspace = true
 postcard.workspace = true
 rand.workspace = true
 reqwest.workspace = true

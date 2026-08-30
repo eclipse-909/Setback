@@ -1,14 +1,15 @@
 use {
 	arrayvec::ArrayVec,
 	crate::*,
-	serde::{Deserialize, Serialize, Serializer, ser::SerializeStructVariant},
-	std::cell::SyncUnsafeCell,
+	serde::{Deserialize, Serialize, Serializer},
+	tracing::error
 };
+
+const NONE_CONN_ERR: &str = "Player must own their connection when calling this function";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Player {
-	#[serde(with = "serde_sync_unsafe_cell")]
-	pub player_type: SyncUnsafeCell<PlayerType>,
+	pub player_type: PlayerType,
 	pub hand: ArrayVec<Card, CARDS_PER_PLAYER>,
 	/// This is some arbitrary integer during the setup because team numbers can be arbitrary and nonconsecutive.
 	/// Once the game starts, team ids are normalized to be consecutive and zero-based,
@@ -17,7 +18,7 @@ pub struct Player {
 }
 
 #[repr(u8)]
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub enum PlayerType {
 	/// Yourself in singleplayer.
 	#[serde(skip)]
@@ -33,11 +34,15 @@ pub enum PlayerType {
 	/// A connected player in multiplayer.
 	/// This gets serialized into HumanPlayer because the [ClientConnection] struct is not serializable.
 	///
-	/// Futures will take ownership of the inner ClientConnection and they leave behind HumanPlayer.
-	/// When the future completes, the HumanConnection variant is restored.
+	/// Futures will take ownership of the inner boxed ClientConnection and they leave behind None.
+	/// When the future completes, the ClientConnection is restored.
 	#[serde(skip_deserializing)]
 	#[cfg(not(feature = "client"))]
-	HumanConnection { conn: Box<ClientConnection> } = 2,
+	HumanConnection {
+		/// See [PlayerType::HumanConnection]
+		#[serde(serialize_with = "serialize_conn_as_player")]
+		conn: Option<Box<ClientConnection>>
+	} = 2,
 	/// This variant has 2 uses:
 	/// 1. The server serializes a HumanConnection into this variant when sending data to clients.
 	///    The clients only need to know the username and ready state.
@@ -57,7 +62,7 @@ impl Player {
 	#[cfg(feature = "client")]
 	pub fn new_singleplayer_self(team_id: u8, username: String) -> Self {
 		Self {
-			player_type: SyncUnsafeCell::new(PlayerType::SingleplayerSelf { username }),
+			player_type: PlayerType::SingleplayerSelf { username },
 			hand: ArrayVec::new(),
 			team_id,
 		}
@@ -67,7 +72,7 @@ impl Player {
 	#[cfg(not(feature = "client"))]
 	pub const fn new_human_empty(team_id: u8) -> Self {
 		Self {
-			player_type: SyncUnsafeCell::new(PlayerType::HumanEmpty),
+			player_type: PlayerType::HumanEmpty,
 			hand: ArrayVec::new_const(),
 			team_id,
 		}
@@ -76,7 +81,7 @@ impl Player {
 	#[cfg(not(feature = "client"))]
 	pub const fn new_host_connected(conn: Box<ClientConnection>, team_id: u8) -> Self {
 		Self {
-			player_type: SyncUnsafeCell::new(PlayerType::HumanConnection { conn }),
+			player_type: PlayerType::HumanConnection { conn: Some(conn) },
 			hand: ArrayVec::new_const(),
 			team_id,
 		}
@@ -84,7 +89,7 @@ impl Player {
 
 	pub const fn new_ai(team_id: u8) -> Self {
 		Self {
-			player_type: SyncUnsafeCell::new(PlayerType::Ai { account_id: 0 }),
+			player_type: PlayerType::Ai { account_id: 0 },
 			hand: ArrayVec::new_const(),
 			team_id,
 		}
@@ -93,37 +98,76 @@ impl Player {
 	pub fn can_follow(&self, lead: Suit) -> bool {
 		self.hand.iter().any(|card| card.suit == lead)
 	}
-}
-
-impl Clone for Player {
+	
+	/// Takes the connection from the player if they are a HumanConnection variant.
+	/// Returns None if they are some other variant.
+	/// ## Panics - debug_assertions only
+	/// If this player is a HumanConnection and they don't have the connection.
+	/// This implies take_conn was called twice without the connection being restored in between.
+	/// Returns None in release mode and logs an error.
+	pub fn take_conn(&mut self) -> Option<Box<ClientConnection>> {
+		if let PlayerType::HumanConnection {conn} = &mut self.player_type {
+			if conn.is_none() {
+				error!("Logical error: a player had take_conn called with a missing ClientConnection");
+			}
+			debug_assert!(conn.is_some());
+			return conn.take()
+		}
+		None
+	}
+	
+	/// Gives the connection back to the player after calling [Self::take_conn].
+	/// ## Panics - debug_assertions only
+	/// ### Case 1
+	/// If this player is a HumanConnection and they already have the connection.
+	/// This implies restore_conn was called twice without the connection being taken in between.
+	/// Logs an error in release mode.
+	/// ### Case 2
+	/// If the player is not a HumanConnection.
+	/// The connection will just be dropped in release mode and logs an error.
+	pub fn restore_conn(&mut self, connection: Box<ClientConnection>) {
+		if let PlayerType::HumanConnection {conn} = &mut self.player_type {
+			if conn.is_some() {
+				error!("Logical error: a player had restore_conn called with an existing ClientConnection");
+			}
+			debug_assert!(conn.is_none());
+			*conn = Some(connection);
+		}
+		const ERR_MSG: &str = "Logical error: restore_conn should only be called on HumanConnection players";
+		error!("{ERR_MSG}");
+		#[cfg(debug_assertions)]
+		unreachable!("{ERR_MSG}");
+	}
+	
 	/// ## Notice
 	/// Does not clone the player's hand, that is just an empty list.
 	/// This function is only used when a player is trying to rejoin an ongoing game that they disconnected from
 	/// and needs to get the game state.
 	/// Do not use this function unless you know what it does and what you're doing.
-	/// ## Safety
-	/// Only HumanConnection, HumanPlayer, and Ai variants can be cloned. Others are undefined behavior.
-	fn clone(&self) -> Self {
+	/// Only HumanConnection, HumanPlayer, and Ai variants can be cloned. Others will panic.
+	/// The server can send a snapshot to the players, and the host can send a snapshot to the server,
+	/// so it needs to be supported from both the client and server side.
+	pub fn snapshot(&self) -> Self {
 		Self {
-			player_type: SyncUnsafeCell::new(
-				// SAFETY:
-				// We just need readonly access
-				match unsafe { &*self.player_type.get() } {
-					#[cfg(not(feature = "client"))]
-					PlayerType::HumanConnection { conn } => PlayerType::HumanPlayer {
+			player_type: match &self.player_type {
+				#[cfg(not(feature = "client"))]
+				PlayerType::HumanConnection { conn: Some(conn) } => {
+					PlayerType::HumanPlayer {
 						username: conn.username.clone(),
 						ready: conn.ready,
-					},
-					#[cfg(feature = "client")]
-					PlayerType::HumanPlayer { username, ready } => PlayerType::HumanPlayer {
-						username: username.clone(),
-						ready: *ready,
-					},
-					PlayerType::Ai { .. } => PlayerType::Ai { account_id: 0 },
-					_ => unreachable!("Variant should not be cloned: {:?}", self),
+					}
 				},
-			),
-			hand: ArrayVec::new(),
+				#[cfg(not(feature = "client"))]
+				PlayerType::HumanConnection { conn: None } => unreachable!("{NONE_CONN_ERR}"),
+				#[cfg(feature = "client")]
+				PlayerType::HumanPlayer { username, ready } => PlayerType::HumanPlayer {
+					username: username.clone(),
+					ready: *ready,
+				},
+				PlayerType::Ai { .. } => PlayerType::Ai { account_id: 0 },
+				_ => unreachable!("Variant should not be cloned: {:?}", self),
+			},
+			hand: ArrayVec::new_const(),
 			team_id: self.team_id,
 		}
 	}
@@ -136,7 +180,9 @@ impl PlayerType {
 			PlayerType::SingleplayerSelf { username, .. } => username.as_str(),
 			PlayerType::HumanPlayer { username, .. } => username.as_str(),
 			#[cfg(not(feature = "client"))]
-			PlayerType::HumanConnection { conn } => conn.username.as_str(),
+			PlayerType::HumanConnection { conn: Some(conn) } => conn.username.as_str(),
+			#[cfg(not(feature = "client"))]
+			PlayerType::HumanConnection { conn: None } => unreachable!("{NONE_CONN_ERR}"),
 			#[cfg(not(feature = "client"))]
 			PlayerType::HumanEmpty => "Waiting for player...",
 			PlayerType::Ai { .. } => "CPU",
@@ -144,68 +190,19 @@ impl PlayerType {
 	}
 }
 
-impl Serialize for PlayerType {
-	fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-		const PLAYER_TYPE: &str = "PlayerType";
-		match self {
-			#[cfg(not(feature = "client"))]
-			PlayerType::HumanEmpty => {
-				Serializer::serialize_unit_variant(serializer, PLAYER_TYPE, 1, "HumanEmpty")
-			}
-			#[cfg(not(feature = "client"))]
-			PlayerType::HumanConnection { conn } => {
-				let mut state = Serializer::serialize_struct_variant(
-					serializer,
-					PLAYER_TYPE,
-					3,
-					"HumanPlayer",
-					2,
-				)?;
-				SerializeStructVariant::serialize_field(&mut state, "username", &conn.username)?;
-				SerializeStructVariant::serialize_field(&mut state, "ready", &conn.ready)?;
-				state.end()
-			}
-			#[cfg(feature = "client")]
-			PlayerType::HumanPlayer { username, ready } => {
-				let mut state = Serializer::serialize_struct_variant(
-					serializer,
-					PLAYER_TYPE,
-					3,
-					"HumanPlayer",
-					2,
-				)?;
-				SerializeStructVariant::serialize_field(&mut state, "username", username)?;
-				SerializeStructVariant::serialize_field(&mut state, "ready", ready)?;
-				state.end()
-			}
-			PlayerType::Ai { .. } => {
-				let mut state =
-					Serializer::serialize_struct_variant(serializer, PLAYER_TYPE, 4, "Ai", 1)?;
-				SerializeStructVariant::serialize_field(&mut state, "account_id", &0)?;
-				state.end()
-			}
-			_ => Err(serde::ser::Error::custom(
-				"variant should not be serialized: {:?}",
-			)),
-		}
+fn serialize_conn_as_player<S>(conn: &Option<Box<ClientConnection>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+	S: Serializer,
+{
+	#[derive(Serialize)]
+	#[serde(rename = "HumanPlayer")]
+	struct HumanPlayerShim<'a> {
+		username: &'a str,
+		ready: bool,
 	}
-}
-
-mod serde_sync_unsafe_cell {
-	use {super::*, serde::Deserializer};
-
-	pub fn serialize<S: Serializer>(
-		this: &SyncUnsafeCell<PlayerType>,
-		serializer: S,
-	) -> Result<S::Ok, S::Error> {
-		// SAFETY:
-		// just need readonly access
-		unsafe { &*this.get() }.serialize(serializer)
-	}
-
-	pub fn deserialize<'de, D: Deserializer<'de>>(
-		deserializer: D,
-	) -> Result<SyncUnsafeCell<PlayerType>, D::Error> {
-		Ok(SyncUnsafeCell::new(PlayerType::deserialize(deserializer)?))
-	}
+	let conn = conn.as_ref().expect(NONE_CONN_ERR);
+	HumanPlayerShim {
+		username: &conn.username,
+		ready: conn.ready,
+	}.serialize(serializer)
 }
