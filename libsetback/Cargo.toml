@@ -8,6 +8,7 @@ edition = "2024"
 arrayvec.workspace = true
 bytes.workspace = true
 const_format.workspace = true
+dioxus.workspace = true
 futures.workspace = true
 konst.workspace = true
 postcard.workspace = true
@@ -24,9 +25,12 @@ tokio = { workspace = true, features = ["sync"] }
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 scc.workspace = true
 sockudo-ws.workspace = true
-tokio-tungstenite.workspace = true
+rustls.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tokio-rustls.workspace = true
 tokio-util.workspace = true
+url.workspace = true
+webpki-roots.workspace = true
 
 [dev-dependencies]
 trybuild.workspace = true

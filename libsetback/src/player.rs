@@ -1,10 +1,16 @@
 use {
 	arrayvec::ArrayVec,
 	crate::*,
-	serde::{Deserialize, Serialize, Serializer},
-	tracing::error
+	serde::{Deserialize, Serialize},
 };
 
+#[cfg(not(feature = "client"))]
+use {
+	serde::Serializer,
+	tracing::error,
+};
+
+#[cfg(not(feature = "client"))]
 const NONE_CONN_ERR: &str = "Player must own their connection when calling this function";
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -105,6 +111,7 @@ impl Player {
 	/// If this player is a HumanConnection and they don't have the connection.
 	/// This implies take_conn was called twice without the connection being restored in between.
 	/// Returns None in release mode and logs an error.
+	#[cfg(not(feature = "client"))]
 	pub fn take_conn(&mut self) -> Option<Box<ClientConnection>> {
 		if let PlayerType::HumanConnection {conn} = &mut self.player_type {
 			if conn.is_none() {
@@ -125,6 +132,7 @@ impl Player {
 	/// ### Case 2
 	/// If the player is not a HumanConnection.
 	/// The connection will just be dropped in release mode and logs an error.
+	#[cfg(not(feature = "client"))]
 	pub fn restore_conn(&mut self, connection: Box<ClientConnection>) {
 		if let PlayerType::HumanConnection {conn} = &mut self.player_type {
 			if conn.is_some() {
@@ -188,8 +196,20 @@ impl PlayerType {
 			PlayerType::Ai { .. } => "CPU",
 		}
 	}
+	
+	#[cfg(not(feature = "client"))]
+	pub fn disconnect(&mut self, allow_reconnect: bool) {
+		let Self::HumanConnection {conn: Some(conn)} = self else {return;};
+		let id = conn.account_id;
+		let Self::HumanConnection {conn: Some(mut conn)} = std::mem::replace(
+			self,
+			Self::Ai { account_id: if allow_reconnect {id} else {0} }
+		) else {return;};
+		_ = conn.send_err(Error::Disconnected);
+	}
 }
 
+#[cfg(not(feature = "client"))]
 fn serialize_conn_as_player<S>(conn: &Option<Box<ClientConnection>>, serializer: S) -> Result<S::Ok, S::Error>
 where
 	S: Serializer,

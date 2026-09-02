@@ -4,7 +4,7 @@ use {
 	reqwest::Client,
 	scc::hash_map::Entry,
 	sockudo_ws::{
-		WebSocketStream, Message, Config, IoUringConfig, SplitWriter, SplitReader,
+		WebSocketStream, Message, Config, SplitWriter, SplitReader,
 		handshake::server_handshake,
 	},
 	std::{
@@ -12,13 +12,17 @@ use {
 		sync::Arc,
 		time::Duration,
 		cell::LazyCell,
+		collections::HashMap
 	},
 	tokio::{
 		net::TcpStream,
-		sync::mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel},
+		sync::{
+			mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel},
+			oneshot::{Receiver, Sender, channel}
+		},
 	},
 	tokio_util::sync::CancellationToken,
-	tracing::{info, warn},
+	tracing::{info, warn, error},
 };
 
 // SAFETY:
@@ -27,34 +31,11 @@ unsafe extern "Rust" {
 	static SETBACK_API: LazyCell<Client>;
 }
 
-type WsWriter = SplitWriter<TcpStream>;
-type WsReader = SplitReader<TcpStream>;
-
-async fn ws_send(ws: &mut WsWriter, ssp: &Ssp) -> Result<(), Error> {
-	let bytes = BytesMut::new();
-	let bytes = ssp.encode(bytes)?;
-	ws.send_binary(bytes.freeze()).await.map_err(|_| Error::NetworkError)
-}
-
-async fn ws_next(ws: &mut WsReader) -> Result<Ssp, Error> {
-	match ws.next().await {
-		Some(Ok(msg)) => {
-			match msg {
-				Message::Text(_) => Err(Error::BadProtocol),
-				Message::Binary(bytes) => Ssp::decode(&bytes),
-				Message::Ping(_) | Message::Pong(_) => unreachable!("ping/pong should be handled automatically"),
-				Message::Close(_) => Err(Error::Disconnected),
-			}
-		}
-		Some(Err(_)) => Err(Error::NetworkError),
-		None => Err(Error::Disconnected),
-	}
-}
-
 /// Connection to the client, owned by the server.
 pub struct ClientConnection {
-	send_tx: UnboundedSender<Ssp>,
-	recv_rx: UnboundedReceiver<Result<Ssp, Error>>,
+	ssp_tx: UnboundedSender<(Option<Sender<Result<Ssp, Error>>>, Ssp)>,
+	fallback_rx: UnboundedReceiver<Result<Ssp, Error>>,
+	correlation_id: u32,
 	pub account_id: u32,
 	pub username: String,
 	pub ready: bool,
@@ -62,68 +43,50 @@ pub struct ClientConnection {
 	pub timeout_strikes: u8,
 }
 
+impl WebSocketeer for ClientConnection {
+	fn ssp_tx(&self) -> &UnboundedSender<(Option<Sender<Result<Ssp, Error>>>, Ssp)> {&self.ssp_tx}
+	fn fallback_rx(&mut self) -> &mut UnboundedReceiver<Result<Ssp, Error>> {&mut self.fallback_rx}
+	fn correlation_id(&mut self) -> &mut u32 {&mut self.correlation_id}
+}
+
 impl ClientConnection {
 	/// This is used when someone first tries to connect to the server.
 	/// Their token will be validated. They are sent Ack if successful or Err
 	/// if unauthenticated.
-	pub async fn new(mut tcp_stream: TcpStream, client_addr: SocketAddr) -> Option<Self> {
-		tcp_stream.set_nodelay(true).ok()?;
-		server_handshake(&mut tcp_stream).await.ok()?;
-		let ws = WebSocketStream::server(
-			tcp_stream,
-			// Our payloads should be very small, but we can play around with these values
-			// to try to conserve more memory or give the messages more room if it's too small.
-			// Sizes are in bytes and times are in seconds.
-			Config {
-				max_message_size: 4 * PAGE_SIZE,
-				max_frame_size: PAGE_SIZE,
-				write_buffer_size: PAGE_SIZE,
-				idle_timeout: 16,
-				max_backpressure: PAGE_SIZE,
-				ping_interval: 8,
-				pong_timeout: 4,
-				close_timeout: 4,
-				io_uring: IoUringConfig {
-					registered_buffer_size: 4 * PAGE_SIZE,
-					..Default::default()
-				},
-				..Default::default()
-			}
-		);
-		let (mut reader, mut writer) = ws.split();
+	pub async fn new(tcp_stream: TcpStream, client_addr: SocketAddr) -> Option<Self> {
+		let (mut reader, mut writer) = ws::ws_accept(tcp_stream).await.ok()?;
 		
 		//TODO:
 		// Use client_addr for security features like IP bans
 
 		let res = async {
 			// we can allow more time for authentication since this isn't delaying anything important
-			let ssp: Ssp = tokio::time::timeout(Duration::from_secs(8), ws_next(&mut reader))
+			let ssp: Ssp = tokio::time::timeout(Duration::from_secs(8), ws::ws_next(&mut reader))
 				.await
 				.map_err(|_| Error::TimedOut)??;
 
-			// validate version
-			ssp.version.check_compatible(SSP_VERSION)?;
-			// get auth token
-			let Payload::Authenticate { auth_token } = ssp.payload else {
+			// get version and auth token
+			let Payload::Authenticate { version, auth_token } = ssp.payload else {
 				return Err(Error::BadProtocol);
 			};
+			// validate version
+			version.check_compatible(SSP_VERSION)?;
 			// validate token and get username
 			let UsernameResponse {
 				username,
 				account_id,
 			} = Self::get_username(auth_token.as_str()).await?;
-			ws_send(&mut writer, &Ssp::new(Payload::Ack, CorrelationId::event()))
+			ws::ws_send(&mut writer, &Ssp::new(Payload::Ack, CorrelationId::event()))
 				.await
 				.map_err(Error::from)?;
 			Ok((username, account_id))
-		}
-		.await;
+		}.await;
 		
 		let (username, account_id) = match res {
 			Ok(r) => r,
 			Err(err) => {
 				info!("Authentication failed for client - Error: {err}");
-				ws_send(
+				ws::ws_send(
 					&mut writer,
 					&Ssp::new(Payload::Err(err), CorrelationId::event()),
 				).await.ok()?;
@@ -131,28 +94,14 @@ impl ClientConnection {
 			}
 		};
 		
-		let (send_tx, mut send_rx) = unbounded_channel();
-		let (recv_tx, recv_rx) = unbounded_channel();
-		tokio::spawn(async move {
-			loop {
-				tokio::select! {
-					// reading from ws
-					ssp = ws_next(&mut reader) => {
-						_ = recv_tx.send(ssp);
-					}
-					// writing to ws
-					Some(ssp) = send_rx.recv() => {
-						if let Err(e) = ws_send(&mut writer, &ssp).await {
-							_ = recv_tx.send(Err(e));
-						}
-					}
-				}
-			}
-		});
+		let (ssp_tx, ssp_rx) = unbounded_channel();
+		let (fallback_tx, fallback_rx) = unbounded_channel();
+		tokio::spawn(Self::run_rw_handler(reader, writer, ssp_rx, fallback_tx));
 		
 		Some(Self {
-			send_tx,
-			recv_rx,
+			ssp_tx,
+			fallback_rx,
+			correlation_id: 3, // DO NOT TOUCH THIS 3, see WebSocketeer::correlation_id
 			account_id,
 			username,
 			ready: false,
@@ -177,112 +126,81 @@ impl ClientConnection {
 				return;
 			}
 			
+			// DO NOT RETURN, USE BREAK INSTEAD
+			// TODO maybe use defer semantics to guarantee the client is removed from the store
 			loop {
-				let (correlation_id, res) = self.read().await;
-				if matches!(res, Err(Error::Disconnected)) {
-					break;
-				}
+				let Some(res) = self.fallback_rx().recv().await else { break };
 				todo!("handle the message using the state");
 				match res {
 					Ok(ssp) => {}
+					Err(Error::Disconnected) => break,
 					Err(err) => {}
 				};
 			}
 			_ = state.client_store.remove_async(&self.account_id).await;
 		});
 	}
-
-	/// Wraps [read] and validates the and version.
-	/// This should always be used in the server instead of [read] for security.
-	/// The chain id is the chain id from the received ssp.
-	/// It's returned here just in case version checking fails and you need to respond.
-	async fn read(&mut self) -> (CorrelationId, Result<Ssp, Error>) {
-		let mut ssp = match self.recv_rx.recv().await.ok_or(Error::Disconnected).flatten() {
-			Ok(ssp) => ssp,
-			Err(err) => return (CorrelationId::event(), Err(err)),
-		};
-		let correlation_id = if !ssp.correlation_id.end {
-			CorrelationId::response(ssp.correlation_id.id)
-		} else {
-			CorrelationId::event()
-		};
-		if ssp.version.check_compatible(SSP_VERSION).is_err() {
-			return (correlation_id, Err(Error::BadVersion));
-		}
-		ssp.src_id = self.account_id;
-		(correlation_id, Ok(ssp))
-	}
-
-	/// Use CorrelationId::event() when sending a new message. The client will assign their own id if they respond.
-	///
-	/// Use the id provided by the client when responding.
-	fn write(&mut self, correlation_id: CorrelationId, payload: Payload) -> Result<(), Error> {
-		self.send_tx.send(Ssp::new(payload, correlation_id)).map_err(|_| Error::ServerError)
-	}
-
+	
 	/// Only use this when a client is in a game.
 	/// This does not respond to the client; the client is still expecting a response.
-	pub async fn send_prompt<T: PromptResult>(
-		&mut self,
-		correlation_id: &mut u32,
-	) -> Result<T, Error> {
-		// send prompt
-		self.write(
-			CorrelationId::request(*correlation_id),
-			Payload::GameEvent(T::PROMPT_EVENT),
-		)?;
-		// get client response
-		let (res_id, res) = self.read().await;
-		// client should expect message from server
-		if res_id.end || res_id.id == 0 || (res_id.id != *correlation_id && *correlation_id != 0) {
-			return Err(Error::BadRequest);
+	/// This function should be called in a loop to verify the response from the client,
+	/// perform retries, and handle a timeout.
+	/// Start the correlation id as 0 then keep reusing it.
+	pub async fn send_prompt<T: PromptResult>(&mut self, correlation_id: &mut u32) -> Result<T, Error> {
+		// send prompt and get response
+		let (response, id) = self.send_request(Payload::GameEvent(T::PROMPT_EVENT), *correlation_id).await?;
+		// client should still expect message from server
+		if id == 0 { return Err(Error::BadRequest) }
+		if *correlation_id == 0 {
+			// set correlation_id if it wasn't set already
+			*correlation_id = id;
+		} else {
+			// make sure the correlation id didn't change, this should be unreachable
+			error!("Correlation id changed unexpectedly. Was {correlation_id}, got {id}");
+			debug_assert_eq!(*correlation_id, id);
 		}
-		*correlation_id = res_id.id;
-		T::extract_response(res?.payload)
+		T::extract_response(response)
 	}
 
 	/// Only use this when a client is in a game.
-	/// This does not respond to the client; the client is not expecting a response.
+	/// Sends a message to the client and expects ack in response.
+	/// This does not send another message to the client; the client should not expect a response.
 	/// This function does retries if there is an error.
-	pub async fn send_expect_ack(
-		&mut self,
-		correlation_id: u32,
-		payload: Payload,
-		timeout_secs: u64,
-	) -> Result<(), Error> {
-		let timeout_res = tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+	/// It also has a timeout because it expects an immediate response.
+	pub async fn send_expect_ack(&mut self, payload: Payload) -> Result<(), Error> {
+		tokio::time::timeout(Duration::from_secs(NETWORK_TIMEOUT), async move {
+			let mut correlation_id = 0;
+			let (mut response, mut id) = self.send_request(payload.clone(), correlation_id).await?;
 			loop {
-				// send message to client
-				if let Err(err) = self.write(CorrelationId::request(correlation_id), payload.clone()) {
-					warn!("Failed to send message to client. Error: {err}");
-					continue;
-				}
-				// get response from client
-				let (res_id, res) = self.read().await;
-				// validate response
-				let err = if res_id.end && res_id.id != 0 && res_id.id == correlation_id {
-					match res?.payload {
-						Payload::Ack => return Ok(()),
-						Payload::Err(e) => e,
-						_ => Error::BadProtocol,
+				match response {
+					Payload::Ack => {
+						if id != 0 {
+							self.send_response(Payload::Err(Error::BadRequest), id)?;
+						}
+						return Ok(());
 					}
-				} else {
-					Error::BadRequest
-				};
-				warn!("Error receiving message from client. Error: {err}");
+					Payload::Err(e) => {
+						if id != 0 {
+							correlation_id = id;
+						}
+						(response, id) = self.send_request(Payload::Err(e), correlation_id).await?;
+					}
+					_ => {
+						if id != 0 {
+							correlation_id = id;
+						}
+						(response, id) = self.send_request(Payload::Err(Error::BadProtocol), correlation_id).await?;
+					}
+				}
 			}
-		})
-		.await;
-		match timeout_res {
-			Ok(Ok(())) => Ok(()),
-			Ok(Err(err)) => Err(err),
-			Err(_) => Err(Error::TimedOut),
-		}
+		}).await
+			.map_err(|_| Error::TimedOut)
+			.flatten()
 	}
 
 	/// This is not responding to a specific client message and the client isn't responding to it.
 	pub fn send_err(&mut self, err: Error) -> Result<(), Error> {
-		self.write(CorrelationId::event(), Payload::Err(err))
+		self.send_event(Payload::Err(err))
 	}
 
 	async fn get_username(auth_token: &str) -> Result<UsernameResponse, Error> {
@@ -317,13 +235,6 @@ impl ClientConnection {
 			.map_err(Error::from)?;
 		Ok(())
 	}
-
-	pub fn as_human_player(&self) -> PlayerType {
-		PlayerType::HumanPlayer {
-			username: self.username.clone(),
-			ready: self.ready,
-		}
-	}
 }
 
 impl std::fmt::Debug for ClientConnection {
@@ -333,5 +244,67 @@ impl std::fmt::Debug for ClientConnection {
 			.field("ready", &self.ready)
 			.field("host", &self.host)
 			.finish()
+	}
+}
+
+#[cfg(not(feature = "client"))]
+pub trait PromptResult: Copy {
+	const PROMPT_EVENT: GameEvent;
+	fn validate(self, game_state: &GameState) -> bool;
+	fn ai_play(game_state: &GameState) -> Self;
+	fn extract_response(payload: Payload) -> Result<Self, Error>;
+}
+
+#[cfg(not(feature = "client"))]
+impl PromptResult for Bid {
+	const PROMPT_EVENT: GameEvent = GameEvent::PromptBid(None);
+	#[inline(always)]
+	fn validate(self, game_state: &GameState) -> bool {
+		game_state.validate_bid(self)
+	}
+	#[inline(always)]
+	fn ai_play(game_state: &GameState) -> Self {
+		game_state.ai_bid()
+	}
+	fn extract_response(payload: Payload) -> Result<Self, Error> {
+		match payload {
+			Payload::GameEvent(GameEvent::PlayerBid { bid, .. }) => Ok(bid),
+			Payload::Err(e) => Err(e),
+			_ => Err(Error::BadProtocol),
+		}
+	}
+}
+
+#[cfg(not(feature = "client"))]
+impl PromptResult for Card {
+	const PROMPT_EVENT: GameEvent = GameEvent::PromptCard(None);
+	#[inline(always)]
+	fn validate(self, game_state: &GameState) -> bool {
+		game_state.validate_card(self)
+	}
+	#[inline(always)]
+	fn ai_play(game_state: &GameState) -> Self {
+		game_state.ai_play_card()
+	}
+	fn extract_response(payload: Payload) -> Result<Self, Error> {
+		match payload {
+			Payload::GameEvent(GameEvent::PlayerPlayedCard { card, .. }) => Ok(card),
+			Payload::Err(e) => Err(e),
+			_ => Err(Error::BadProtocol),
+		}
+	}
+}
+
+#[cfg(not(feature = "client"))]
+impl PromptResult for () {
+	const PROMPT_EVENT: GameEvent = GameEvent::GameOver;
+	#[inline(always)]
+	fn validate(self, _game_state: &GameState) -> bool {
+		true
+	}
+	#[inline(always)]
+	fn ai_play(_game_state: &GameState) -> Self {}
+	fn extract_response(_payload: Payload) -> Result<Self, Error> {
+		Ok(())
 	}
 }

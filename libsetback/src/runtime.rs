@@ -29,11 +29,14 @@ pub struct GameState {
 	pub dealer_idx: u8,
 	/// A round is 6 turns; when all cards have been played
 	pub round_num: u8,
+	/// Makes it easier to keep track of states in this state machine
+	pub loop_state: GameLoopState,
 }
 
 #[repr(u8)]
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
 pub enum GameLoopState {
+	Init,
 	DealCards,
 	Bidding,
 	Playing,
@@ -63,19 +66,6 @@ pub trait PromptResponder {
 
 #[cfg(feature = "client")]
 impl GameState {
-	pub async fn run_singleplayer<Ee: EventEmitter, Err: EventResponseReceiver>(
-		self,
-		event_emitter: Ee,
-		event_response_rx: Err,
-	) {
-		let human_idx = self.human_idx();
-		event_emitter
-			.send(GameEvent::Init { idx: human_idx })
-			.unwrap();
-		self.run_event_loop(human_idx, event_emitter, event_response_rx)
-			.await;
-	}
-
 	/// ## Safety
 	/// No mutable pointers to player type must exist.
 	#[cfg(not(feature = "test-dep"))]
@@ -93,16 +83,22 @@ impl GameState {
 		u8::MAX
 	}
 
-	async fn run_event_loop<Ee: EventEmitter, Err: EventResponseReceiver>(
+	pub async fn run_singleplayer<Ee: EventEmitter, Err: EventResponseReceiver>(
 		mut self,
-		human_idx: u8,
 		event_emitter: Ee,
 		mut event_response_rx: Err,
 	) {
+		let human_idx = self.human_idx();
 		let mut loop_state = GameLoopState::DealCards;
 		loop {
 			// Tip: `continue` can be used to not increment the turn index.
 			match loop_state {
+				GameLoopState::Init => {
+					event_emitter
+						.send(GameEvent::Init { idx: human_idx })
+						.unwrap();
+					loop_state = GameLoopState::DealCards;
+				}
 				GameLoopState::DealCards => {
 					self.deal_cards();
 					#[cfg(not(feature = "test-dep"))]
@@ -390,13 +386,13 @@ impl GameState {
 		*/
 	}
 
-	/// Returns true if valid, false if invalid
+	/// Returns true if valid, false if invalid. This function is idempotent.
 	pub fn validate_bid(&self, bid: Bid) -> bool {
 		bid == Bid::Pass
 			|| (bid > self.highest_bid && (bid != Bid::Override || self.setup.rules.dealer_override))
 	}
 
-	/// Returns true if valid, false if invalid
+	/// Returns true if valid, false if invalid. This function is idempotent.
 	pub fn validate_card(&self, card: Card) -> bool {
 		let has_card = self.setup.players[self.turn_idx as usize]
 			.hand

@@ -34,7 +34,7 @@ pub use {
 	runtime::*,
 	setup::*,
 	ssp::*,
-	ws::*,
+	ws::{WebSocketeer, SspTx, FallbackRx},
 };
 
 #[cfg(not(feature = "client"))]

@@ -7,8 +7,6 @@ use {
 ///Setback Server Protocol
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Ssp {
-	/// Must be the same major and minor version to be compatible.
-	pub version: Version,
 	/// The account id or game code that produced this message.
 	/// Only the server uses this internally.
 	#[serde(skip)]
@@ -23,7 +21,6 @@ pub struct Ssp {
 impl Ssp {
 	pub const fn new(payload: Payload, correlation_id: CorrelationId) -> Self {
 		Self {
-			version: SSP_VERSION,
 			src_id: 0,
 			correlation_id,
 			payload,
@@ -79,7 +76,7 @@ pub enum Payload {
 	/// Client sends its account id as src_id and sends the auth token it got from logging into the API.
 	/// Server responds with Ack if authentication was successful.
 	/// Server responds with Err if authentication was unsuccessful.
-	Authenticate { auth_token: String },
+	Authenticate { version: Version, auth_token: String },
 	/// Client <--Disconnect--- Server<br>
 	/// Spontaneous<br><br>
 	/// Informs you when another player disconnects and provides the index of that player.

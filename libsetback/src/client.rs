@@ -1,9 +1,8 @@
 use {
-	crate::{ws::ws_client::*, *},
+	crate::*,
 	reqwest::Client,
-	std::collections::HashMap,
-	tokio::sync::mpsc::*,
-	tracing::{info, warn},
+	tokio::sync::mpsc::unbounded_channel,
+	tracing::{info, error},
 };
 
 #[cfg(target_family = "wasm")]
@@ -16,16 +15,21 @@ fn setback_api() -> Client {
 	Client::builder().cookie_store(true).build().unwrap()
 }
 
-type CorrelationMap = HashMap<u32, UnboundedSender<Ssp>>;
-
 /// Connection to the server, owned by the client.
 pub struct SetbackClient {
-	ws: Websocket,
-	pending_reqs: CorrelationMap,
+	ssp_tx: SspTx,
+	fallback_rx: FallbackRx,
+	correlation_id: u32,
 	api: Client,
 	auth_token: String,
 	renew_token: String,
 	ready: bool,
+}
+
+impl WebSocketeer for SetbackClient {
+	fn ssp_tx(&self) -> &SspTx {&self.ssp_tx}
+	fn fallback_rx(&mut self) -> &mut FallbackRx {&mut self.fallback_rx}
+	fn correlation_id(&mut self) -> &mut u32 {&mut self.correlation_id}
 }
 
 impl SetbackClient {
@@ -52,31 +56,42 @@ impl SetbackClient {
 		info!("Logged into api");
 
 		info!("Connecting to Setback server");
-		let ws = ws_connect().await?;
+		let (mut reader, mut writer) = ws::ws_connect().await?;
 		info!("Connected to Setback server");
-		let mut client = Self {
-			ws,
-			pending_reqs: CorrelationMap::default(),
-			api,
-			auth_token: session.auth_token.clone(),
-			renew_token: session.renew_token,
-			ready: false,
-		};
-
+		
 		// No need to use correlation yet because this handshake is required before arbitrary communication
 		info!("Authenticating with Setback server");
-		client
-			.write(CorrelationId::request(0), Payload::Authenticate { auth_token: session.auth_token })
-			.await?;
-		let auth_res = ws_next(&mut client.ws).await?;
-		if auth_res.correlation_id != CorrelationId::event()
-			|| !matches!(auth_res.payload, Payload::Ack)
-		{
+		ws::ws_send(&mut writer, &Ssp::new(
+			Payload::Authenticate {
+				version: SSP_VERSION,
+				auth_token: session.auth_token.clone(),
+			},
+			CorrelationId::request(0)
+		)).await.inspect_err(|e| {
+			error!("Failed to authenticate: {e}");
+		})?;
+		let auth_res = ws::ws_next(&mut reader).await.inspect_err(|e| {
+			error!("Failed to authenticate: {e}");
+		})?;
+		if auth_res.correlation_id != CorrelationId::event() || !matches!(auth_res.payload, Payload::Ack) {
+			error!("Failed to authenticate");
 			return Err(Error::ServerError);
 		};
 		info!("Authenticated with Setback server");
-
-		Ok(client)
+		
+		let (ssp_tx, ssp_rx) = unbounded_channel();
+		let (fallback_tx, fallback_rx) = unbounded_channel();
+		dioxus::prelude::spawn(Self::run_rw_handler(reader, writer, ssp_rx, fallback_tx));
+		
+		Ok(Self {
+			ssp_tx,
+			fallback_rx,
+			correlation_id: 1, // DO NOT TOUCH THIS 1, see WebSocketeer::correlation_id
+			api,
+			auth_token: session.auth_token,
+			renew_token: session.renew_token,
+			ready: false,
+		})
 	}
 
 	pub async fn logout(
@@ -97,92 +112,19 @@ impl SetbackClient {
 		Ok(())
 	}
 
-	/// CorrelationId.end must be false. Removes the id from the map if Err is returned.
-	pub async fn write(
-		&mut self,
-		correlation_id: CorrelationId,
-		payload: Payload,
-	) -> Result<(), Error> {
-		debug_assert!(
-			!correlation_id.end,
-			"Any message sent to the server should expect a response"
-		);
-		ws_send(&mut self.ws, &Ssp::new(payload, correlation_id))
-			.await
-			.inspect_err(|e| {
-				self.pending_reqs.remove(&correlation_id.id);
-				warn!("Failed to write Ssp to websocket. Error: {e}");
-			})
-	}
-
-	/// Returns the Ssp if it has no correlation id.
-	/// Sends it to pending reqs map otherwise.
-	pub async fn read(&mut self) -> Result<Option<Ssp>, Error> {
-		let ssp = ws_next(&mut self.ws).await?;
-		if ssp.correlation_id.id == 0 {
-			return Ok(Some(ssp));
-		}
-		// if the transmitter isn't in the hash map,
-		// the request probably timed out,
-		// and it was removed from the hash map
-		if ssp.correlation_id.end {
-			if let Some(correlation_tx) = self.pending_reqs.remove(&ssp.correlation_id.id) {
-				correlation_tx.send(ssp).unwrap();
-			}
-		} else if let Some(correlation_tx) = self.pending_reqs.get(&ssp.correlation_id.id) {
-			correlation_tx.send(ssp).unwrap();
-		}
-		Ok(None)
-	}
-
-	/// Starts a message correlation where the correlation id is passed into all messages
-	/// and the receiver is used to await responses from the server.
-	fn start_correlation(&mut self) -> (CorrelationId, UnboundedReceiver<Ssp>) {
-		//get new key
-		let mut next_key = 0;
-		//TODO: find a better way to make a unique key.
-		// This loop will probably never run more than a few times, but still.
-		let (tx, rx) = unbounded_channel();
-		loop {
-			if let std::collections::hash_map::Entry::Vacant(e) = self.pending_reqs.entry(next_key)
-			{
-				//create new channel
-				e.insert_entry(tx);
-				return (CorrelationId::request(next_key), rx);
-			}
-			next_key += 1;
-		}
-	}
-
-	/// Send a message to the server and return its response
-	async fn send_recv(&mut self, payload: Payload) -> Result<Payload, Error> {
-		let (correlation_id, mut rx) = self.start_correlation();
-		self.write(correlation_id, payload).await?;
-		let ssp = rx.recv().await.ok_or({
-			self.pending_reqs.remove(&correlation_id.id);
-			Error::Disconnected
-		})?;
-		debug_assert_eq!(
-			ssp.correlation_id,
-			CorrelationId::response(correlation_id.id)
-		);
-		match ssp.payload {
-			Payload::Err(err) => Err(err),
-			_ => Ok(ssp.payload),
-		}
-	}
-
 	async fn send_expect_game_setup(&mut self, payload: Payload) -> Result<Box<SetupState>, Error> {
-		match self.send_recv(payload).await? {
+		let (response, id) = self.send_new_request(payload).await?;
+		let setup = match response {
 			Payload::Game(game) => Ok(game),
 			Payload::Err(err) => Err(err),
 			_ => Err(Error::ServerError),
-		}
+		};
+		self.send_response_ack(id)?;
+		setup
 	}
 
 	pub async fn send_create_game(&mut self, password: String) -> Result<Box<SetupState>, Error> {
-		self.send_expect_game_setup(Payload::CreateGame { password })
-			.await
+		self.send_expect_game_setup(Payload::CreateGame { password }).await
 	}
 
 	pub async fn send_join_game(
@@ -190,8 +132,7 @@ impl SetbackClient {
 		code: u32,
 		password: String,
 	) -> Result<Box<SetupState>, Error> {
-		self.send_expect_game_setup(Payload::JoinGame { code, password })
-			.await
+		self.send_expect_game_setup(Payload::JoinGame { code, password }).await
 	}
 
 	pub async fn send_rejoin_game(
@@ -199,38 +140,40 @@ impl SetbackClient {
 		code: u32,
 		password: String,
 	) -> Result<Box<SetupState>, Error> {
-		self.send_expect_game_setup(Payload::RejoinGame { code, password })
-			.await
+		self.send_expect_game_setup(Payload::RejoinGame { code, password }).await
 	}
 
 	pub async fn send_search_games(
 		&mut self,
 		filter: GameFilter,
 	) -> Result<Vec<PublicGame>, Error> {
-		match self.send_recv(Payload::SearchGames(filter)).await? {
+		let (response, id) = self.send_new_request(Payload::SearchGames(filter)).await?;
+		let games = match response {
 			Payload::PublicGames(games) => Ok(games),
 			Payload::Err(err) => Err(err),
 			_ => Err(Error::ServerError),
-		}
+		};
+		self.send_response_ack(id)?;
+		games
 	}
 
 	async fn send_expect_ack(&mut self, payload: Payload) -> Result<(), Error> {
-		match self.send_recv(payload).await? {
+		let (response, id) = self.send_new_request(payload).await?;
+		match response {
 			Payload::Ack => Ok(()),
 			Payload::Err(err) => Err(err),
 			_ => Err(Error::ServerError),
-		}
+		}?;
+		self.send_response_ack(id)
 	}
 
 	/// Host-only
 	pub async fn send_game_setup(&mut self, setup_data: SetupState) -> Result<(), Error> {
-		self.send_expect_ack(Payload::Game(Box::new(setup_data)))
-			.await
+		self.send_expect_ack(Payload::Game(Box::new(setup_data))).await
 	}
 
 	pub async fn send_update_team(&mut self, player_idx: u8, team: u8) -> Result<(), Error> {
-		self.send_expect_ack(Payload::UpdatePlayerTeam { player_idx, team })
-			.await
+		self.send_expect_ack(Payload::UpdatePlayerTeam { player_idx, team }).await
 	}
 
 	/// Host-only
@@ -242,16 +185,14 @@ impl SetbackClient {
 		self.send_expect_ack(Payload::UpdatePlayerType {
 			player_idx,
 			is_human,
-		})
-		.await
+		}).await
 	}
 
 	pub async fn send_ready(&mut self, is_ready: bool) -> Result<(), Error> {
 		self.send_expect_ack(Payload::Ready {
 			is_ready,
 			player_idx: 0,
-		})
-		.await
+		}).await
 	}
 
 	/// Host-only
@@ -261,8 +202,7 @@ impl SetbackClient {
 
 	/// Host-only
 	pub async fn send_remove_player(&mut self, player_idx: u8) -> Result<(), Error> {
-		self.send_expect_ack(Payload::RemovePlayer { player_idx })
-			.await
+		self.send_expect_ack(Payload::RemovePlayer { player_idx }).await
 	}
 
 	/// Host-only
@@ -274,8 +214,7 @@ impl SetbackClient {
 		self.send_expect_ack(Payload::SwapPlayers {
 			player_idx_a,
 			player_idx_b,
-		})
-		.await
+		}).await
 	}
 
 	/// Host-only
@@ -287,8 +226,7 @@ impl SetbackClient {
 		self.send_expect_ack(Payload::ReinsertPlayer {
 			player_idx,
 			new_player_idx,
-		})
-		.await
+		}).await
 	}
 
 	pub async fn send_game_event(&mut self, event: GameEvent) -> Result<(), Error> {

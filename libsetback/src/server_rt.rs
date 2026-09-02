@@ -7,18 +7,40 @@ use {
 		time::Duration,
 		pin::Pin,
 	},
-	tokio::{sync::mpsc::*, task::JoinHandle},
+	tokio::{
+		sync::mpsc::*,
+		task::{JoinHandle, JoinSet},
+		time::{sleep, Sleep}
+	},
 	tokio_util::sync::CancellationToken,
 	tracing::{error, info, warn},
 };
 
 type ConnArr = ArrayVec<Box<ClientConnection>, MAX_PLAYERS>;
 type ConnIdxArr = ArrayVec<(u8, Box<ClientConnection>), MAX_PLAYERS>;
-type CompleteConnections = ArrayVec<(u8, Result<Box<ClientConnection>, Error>), MAX_PLAYERS>;
+/// It might seem better to use a Result<Connection, Error> rather than two options,
+/// but there are cases where the Connection is returned and there is an error.
+type ReadyConns = ArrayVec<(u8, Option<Box<ClientConnection>>, Option<Error>), MAX_PLAYERS>;
+struct ClientIoResult {
+	conns: ReadyConns,
+	/// The timeout is only used when prompting players for a bid or card.
+	timeout: Option<Pin<Box<Sleep>>>,
+}
+
+impl ClientIoResult {
+	const fn new() -> Self {
+		Self {conns: ArrayVec::new_const(), timeout: None}
+	}
+}
+
+fn timeout(timeout_secs: u8) -> Pin<Box<Sleep>> {
+	Box::pin(sleep(Duration::from_secs(timeout_secs as u64)))
+}
 
 /// A future that is doing async network io with the clients,
 /// then returns those clients and the index they belong when all are done.
-type ClientIoFuture = Pin<Box<dyn Future<Output=CompleteConnections> + Send + 'static>>;
+/// The future may internally timeout and must return all ClientConnections.
+type ClientIoFuture = Pin<Box<dyn Future<Output=ClientIoResult> + Send + 'static>>;
 
 pub struct GameLoopHandle {
 	pub rejoin_tx: Sender<Box<ClientConnection>>,
@@ -30,7 +52,7 @@ impl GameState {
 		let (rejoin_tx, mut rejoin_rx) = channel(MAX_PLAYERS);
 		let task = tokio::spawn(async move {
 			let mut rejoin_idxs = ArrayVec::new_const();
-			let mut client_io_fut = self.advance_game(ArrayVec::new_const(), &mut rejoin_idxs);
+			let mut client_io_fut = self.advance_game(ClientIoResult::new(), &mut rejoin_idxs);
 			loop {
 				let Some(fut) = client_io_fut.as_mut() else {return self.collect_players();};
 				tokio::select! {
@@ -68,20 +90,116 @@ impl GameState {
 		}
 	}
 	
+	/// Advances the game state as much as possible synchronously until the game is waiting on IO.
 	/// Game logic is synchronous but returns a future for client networking.
 	fn advance_game(
 		&mut self,
-		conns: CompleteConnections,
+		conns: ClientIoResult,
 		// the following indexes are players that have rejoined since the last time this function was called
 		rejoin_idxs: &mut ArrayVec<u8, MAX_PLAYERS>
 	) -> Option<ClientIoFuture> {
-		//TODO
-		// put the connections back
+		// At first it might make sense to keep the ClientConnections out of the players
+		// to avoid moving them back and forth, but this is how we can tell when a player
+		// disconnects and we can handle it here.
+		let disconnected_players = self.restore_conns(conns.conns);
+		// TODO build payloads to notify all players of each disconnected player
+		self.send_all_player_rejoined(
+			rejoin_prep,
+			&mut loop_state,
+			&mut rejoin_rx,
+			&reject_tx,
+		).await;
+		
 		// advance the game state synchronously
+		match self.loop_state {
+			GameLoopState::Init => {
+				let mut idx_payloads = (0..self.setup.players.len() as u8)
+					.map(|idx| Payload::GameEvent(GameEvent::Init { idx }))
+					.collect();
+				self.loop_state = GameLoopState::DealCards;
+				self.notify_all_unique(
+					&mut loop_state,
+					&mut rejoin_rx,
+					&reject_tx,
+					&mut idx_payloads,
+				).await;
+			}
+			GameLoopState::DealCards => {
+				self.deal_cards();
+				loop_state = GameLoopState::Bidding;
+				let mut payloads = self
+					.setup
+					.players
+					.iter()
+					.map(|p| {
+						Payload::GameEvent(GameEvent::DealCards {
+							hand: p.hand.clone(),
+							idx: self.dealer_idx,
+						})
+					})
+					.collect();
+				self.notify_all_unique(
+					&mut loop_state,
+					&mut rejoin_rx,
+					&reject_tx,
+					&mut payloads,
+				).await;
+				// no continue because it is currently the dealer's turn and we want the next player to start bidding.
+			}
+			GameLoopState::Bidding => {
+				let bid = self
+					.prompt(&mut loop_state, &mut rejoin_rx, &reject_tx)
+					.await;
+				if self.player_bid(bid, &mut loop_state) {
+					continue;
+				}
+			}
+			GameLoopState::Playing => {
+				let card = self
+					.prompt(&mut loop_state, &mut rejoin_rx, &reject_tx)
+					.await;
+				match self.player_played_card(card) {
+					PlayedCardResult::RoundOver(round_scores) => {
+						loop_state = GameLoopState::RoundOver;
+						self.notify_all(
+							&mut loop_state,
+							&mut rejoin_rx,
+							&reject_tx,
+							Payload::GameEvent(GameEvent::RoundScores(round_scores)),
+						).await;
+						continue;
+					}
+					PlayedCardResult::TurnOver => continue,
+					PlayedCardResult::None => {}
+				}
+			}
+			GameLoopState::RoundOver => {
+				if self.team_won() {
+					loop_state = GameLoopState::GameOver;
+				} else {
+					loop_state = GameLoopState::DealCards;
+				}
+				continue;
+			}
+			GameLoopState::GameOver => {
+				self.notify_all(
+					&mut loop_state,
+					&mut rejoin_rx,
+					&reject_tx,
+					Payload::GameEvent(GameEvent::GameOver),
+				).await;
+				info!("Game over");
+			}
+		}
+		
+		
+		self.turn_idx = self.next_turn();
+		
+		
 		// when client network io is needed, it will be moved out and put into the following future
 		// the returned future will own Boxed ClientConnections and nothing else from the state.
 		// or it will return None when the game is over.
-		Some(Box::pin(async move {ArrayVec::new_const()}))
+		Some(Box::pin(async move {ClientIoResult::new()}))
 	}
 	
 	fn take_conns(&mut self, except_idx: u8) -> ConnIdxArr {
@@ -95,15 +213,16 @@ impl GameState {
 		conns
 	}
 	
-	fn restore_conns(&mut self, conns: CompleteConnections) -> ArrayVec<u8, MAX_PLAYERS> {
+	fn restore_conns(&mut self, conns: ReadyConns) -> ArrayVec<u8, MAX_PLAYERS> {
 		let mut disconnected = ArrayVec::new_const();
-		for (idx, conn) in conns {
-			match conn {
-				Ok(conn) => self.setup.players[idx as usize].restore_conn(conn),
-				Err(err) => {
-					info!("Player disconnected - idx: {idx} - err: {err}");
-					disconnected.push(idx);
-				}
+		for (idx, conn, err) in conns {
+			if let Some(conn) = conn {
+				self.setup.players[idx as usize].restore_conn(conn);
+			}
+			if let Some(err) = err {
+				info!("Player disconnected - idx: {idx} - err: {err}");
+				disconnected.push(idx);
+				self.setup.players[idx as usize].player_type.disconnect(true);
 			}
 		}
 		disconnected
@@ -144,149 +263,86 @@ impl GameState {
 			turn_num: self.turn_num,
 			dealer_idx: self.dealer_idx,
 			round_num: self.round_num,
+			loop_state: self.loop_state
 		}
 	}
 	
-	//TODO make new networking methods and helper methods
-	// prompt, notify, notify_all, notify_all_but, notify_all_unique
+	fn prompt(&mut self) -> ClientIoFuture {}
 	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-
-	async fn run_event_loop(
-		mut self,
-		cancel_token: CancellationToken,
-		mut rejoin_rx: Receiver<Box<ClientConnection>>,
-		reject_tx: UnboundedSender<Box<ClientConnection>>,
-	) -> ConnArr {
-		let mut loop_state = GameLoopState::DealCards;
-		let mut idx_payloads = (0..self.setup.players.len() as u8)
-			.map(|idx| Payload::GameEvent(GameEvent::Init { idx }))
-			.collect();
-		self.notify_all_unique(
-			&mut loop_state,
-			&mut rejoin_rx,
-			&reject_tx,
-			&mut idx_payloads,
-		)
-		.await;
-		loop {
-			if cancel_token.is_cancelled() {
-				return self.collect_players();
+	fn notify(&mut self, payload: Payload) -> Option<ClientIoFuture> {
+		let idx = self.turn_idx;
+		let mut conn = self.setup.players[idx as usize].take_conn()?;
+		Some(Box::pin(async move {
+			let mut arr = ArrayVec::new_const();
+			let err = conn.send_expect_ack(payload).await.err();
+			arr.push((idx, Some(conn), err));
+			ClientIoResult {
+				conns: arr,
+				timeout: None,
 			}
-			// See if there are any players that have rejoined.
-			// This is called twice: once here at the top of the loop,
-			// and whenever we send any messages to a HumanConnection player.
-			// It's done when sending messages because the player might take many seconds
-			// or minutes to finish a turn, and we want the rejoining player to instantly join without delay.
-			// It's also done here because it otherwise doesn't get run when it's the Ai's turn.
-			let rejoined = rejoin_rx.try_recv().ok();
-			if rejoined.is_some() {
-				let mut rejoin_prep = self.prepare_rejoin();
-				self.rejoin_player(&mut rejoin_prep, &reject_tx, rejoined).await;
-				self.send_all_player_rejoined(
-					rejoin_prep,
-					&mut loop_state,
-					&mut rejoin_rx,
-					&reject_tx,
-				)
-				.await;
-			}
-			// Tip: `continue` can be used to not increment the turn index.
-			match loop_state {
-				GameLoopState::DealCards => {
-					self.deal_cards();
-					loop_state = GameLoopState::Bidding;
-					let mut payloads = self
-						.setup
-						.players
-						.iter()
-						.map(|p| {
-							Payload::GameEvent(GameEvent::DealCards {
-								hand: p.hand.clone(),
-								idx: self.dealer_idx,
-							})
-						})
-						.collect();
-					self.notify_all_unique(
-						&mut loop_state,
-						&mut rejoin_rx,
-						&reject_tx,
-						&mut payloads,
-					)
-					.await;
-					// no continue because it is currently the dealer's turn and we want the next player to start bidding.
-				}
-				GameLoopState::Bidding => {
-					let bid = self
-						.prompt(&mut loop_state, &mut rejoin_rx, &reject_tx)
-						.await;
-					if self.player_bid(bid, &mut loop_state) {
-						continue;
-					}
-				}
-				GameLoopState::Playing => {
-					let card = self
-						.prompt(&mut loop_state, &mut rejoin_rx, &reject_tx)
-						.await;
-					match self.player_played_card(card) {
-						PlayedCardResult::RoundOver(round_scores) => {
-							loop_state = GameLoopState::RoundOver;
-							self.notify_all(
-								&mut loop_state,
-								&mut rejoin_rx,
-								&reject_tx,
-								Payload::GameEvent(GameEvent::RoundScores(round_scores)),
-							)
-							.await;
-							continue;
-						}
-						PlayedCardResult::TurnOver => continue,
-						PlayedCardResult::None => {}
-					}
-				}
-				GameLoopState::RoundOver => {
-					if self.team_won() {
-						loop_state = GameLoopState::GameOver;
-					} else {
-						loop_state = GameLoopState::DealCards;
-					}
-					continue;
-				}
-				GameLoopState::GameOver => {
-					self.notify_all(
-						&mut loop_state,
-						&mut rejoin_rx,
-						&reject_tx,
-						Payload::GameEvent(GameEvent::GameOver),
-					)
-					.await;
-					info!("Game over");
-					return self.collect_players();
-				}
-			}
-			self.turn_idx = self.next_turn();
-		}
+		}))
 	}
+	
+	fn notify_all(&mut self, payload: Payload) -> ClientIoFuture {
+		self.notify_all_but(payload, u8::MAX)
+	}
+	
+	fn notify_all_but(&mut self, payload: Payload, exclude: u8) -> ClientIoFuture {
+		self.notify_all_unique_but(|_| payload.clone(), exclude)
+	}
+	
+	fn notify_all_unique(&mut self, payload_fn: impl FnMut(&Player) -> Payload) -> ClientIoFuture {
+		self.notify_all_unique_but(payload_fn, u8::MAX)
+	}
+	
+	fn notify_all_unique_but(&mut self, payload_fn: impl FnMut(&Player) -> Payload, exclude: u8) -> ClientIoFuture {
+		let payloads: ArrayVec<_, MAX_PLAYERS> = self.setup.players.iter().map(payload_fn).collect();
+		let conns = self.take_conns(exclude);
+		Box::pin(async move {
+			let mut join_set = JoinSet::new();
+			let mut idx_by_id = ArrayVec::<_, MAX_PLAYERS>::new_const();
+			for (idx, mut conn) in conns {
+				let p = payloads[idx as usize].clone();
+				let handle = join_set.spawn(async move {
+					let err = conn.send_expect_ack(p).await.err();
+					(idx, conn, err)
+				});
+				idx_by_id.push((handle.id(), idx));
+			}
+			let mut arr = ArrayVec::new_const();
+			while let Some(res) = join_set.join_next_with_id().await {
+				match res {
+					Ok((_, (idx, conn, err))) => {
+						arr.push((idx, Some(conn), err));
+					}
+					Err(err) => {
+						let idx = idx_by_id.iter().find(|(i, _)| *i == err.id()).unwrap().1;
+						arr.push((idx, None, Some(Error::ServerError)));
+					}
+				}
+			}
+			ClientIoResult {
+				conns: arr,
+				timeout: None,
+			}
+		})
+	}
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
 
 	/// This function can be called for Ai and HumanConnection players
 	async fn prompt<T: PromptResult>(
@@ -698,67 +754,7 @@ impl GameState {
 
 
 
-#[cfg(not(feature = "client"))]
-pub trait PromptResult: Copy {
-	const PROMPT_EVENT: GameEvent;
-	fn validate(self, game_state: &GameState) -> bool;
-	fn ai_play(game_state: &GameState) -> Self;
-	fn extract_response(payload: Payload) -> Result<Self, Error>;
-}
 
-#[cfg(not(feature = "client"))]
-impl PromptResult for Bid {
-	const PROMPT_EVENT: GameEvent = GameEvent::PromptBid(None);
-	#[inline(always)]
-	fn validate(self, game_state: &GameState) -> bool {
-		game_state.validate_bid(self)
-	}
-	#[inline(always)]
-	fn ai_play(game_state: &GameState) -> Self {
-		game_state.ai_bid()
-	}
-	fn extract_response(payload: Payload) -> Result<Self, Error> {
-		match payload {
-			Payload::GameEvent(GameEvent::PlayerBid { bid, .. }) => Ok(bid),
-			Payload::Err(e) => Err(e),
-			_ => Err(Error::BadProtocol),
-		}
-	}
-}
-
-#[cfg(not(feature = "client"))]
-impl PromptResult for Card {
-	const PROMPT_EVENT: GameEvent = GameEvent::PromptCard(None);
-	#[inline(always)]
-	fn validate(self, game_state: &GameState) -> bool {
-		game_state.validate_card(self)
-	}
-	#[inline(always)]
-	fn ai_play(game_state: &GameState) -> Self {
-		game_state.ai_play_card()
-	}
-	fn extract_response(payload: Payload) -> Result<Self, Error> {
-		match payload {
-			Payload::GameEvent(GameEvent::PlayerPlayedCard { card, .. }) => Ok(card),
-			Payload::Err(e) => Err(e),
-			_ => Err(Error::BadProtocol),
-		}
-	}
-}
-
-#[cfg(not(feature = "client"))]
-impl PromptResult for () {
-	const PROMPT_EVENT: GameEvent = GameEvent::GameOver;
-	#[inline(always)]
-	fn validate(self, _game_state: &GameState) -> bool {
-		true
-	}
-	#[inline(always)]
-	fn ai_play(_game_state: &GameState) -> Self {}
-	fn extract_response(_payload: Payload) -> Result<Self, Error> {
-		Ok(())
-	}
-}
 
 #[cfg(not(feature = "client"))]
 struct RejoinPrep {

@@ -8,7 +8,7 @@ default:
 cloc:
 	cloc \
 		--include-ext=rs,js,sh,sql,html,css,toml,yml,json,md \
-		--exclude-dir=target,.idea,.git,.zed,.vscode \
+		--exclude-dir=target,.idea,.git,.zed,.vscode,node_modules,dist \
 		--not-match-d=".*\.bak" \
 		.
 
@@ -34,7 +34,7 @@ run-server:
 gencerts:
 	#!/usr/bin/env bash
 	set -xe
-	CERTS_DIR="./certs"
+	CERTS_DIR="./compose/certs"
 	rm -rf "$CERTS_DIR"
 	mkdir -p "$CERTS_DIR"
 	openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
@@ -42,4 +42,4 @@ gencerts:
 		-out    "$CERTS_DIR/cert.pem" \
 		-subj   "/CN=localhost" \
 		-addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
-	echo "Certificates written to $CERTS_DIR"
+	echo "Done! Certificates written to $CERTS_DIR"

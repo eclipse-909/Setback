@@ -252,6 +252,7 @@ impl GameSetup {
 			dealer_idx: rand::random_range(0..self.0.players.len() as u8),
 			round_num: 0,
 			setup: self.0,
+			loop_state: GameLoopState::Init,
 		})
 	}
 }

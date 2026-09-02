@@ -56,11 +56,6 @@ pub const SSP_VERSION: Version = Version {
 	minor: 1,
 	patch: 0,
 };
-pub const SDP_VERSION: Version = Version {
-	major: 0,
-	minor: 1,
-	patch: 0,
-};
 /// Maximum number of games to be sent in a request over the network
 pub const MAX_GAME_LIST: u8 = 127;
 /// This is the port that setbackd is bound to on the server. This is the port that clients must connect to initially.
