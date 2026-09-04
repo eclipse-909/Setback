@@ -1,28 +1,23 @@
 use {
-	bytes::BytesMut,
 	crate::*,
 	reqwest::Client,
-	scc::hash_map::Entry,
-	sockudo_ws::{
-		WebSocketStream, Message, Config, SplitWriter, SplitReader,
-		handshake::server_handshake,
-	},
+	futures::TryFutureExt,
 	std::{
-		net::SocketAddr,
-		sync::Arc,
-		time::Duration,
 		cell::LazyCell,
-		collections::HashMap
+		net::SocketAddr,
+		pin::Pin,
+		sync::Arc,
+		time::Duration
 	},
 	tokio::{
 		net::TcpStream,
 		sync::{
-			mpsc::{UnboundedSender, UnboundedReceiver, unbounded_channel},
-			oneshot::{Receiver, Sender, channel}
+			mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+			oneshot::Sender
 		},
+		time::Sleep
 	},
-	tokio_util::sync::CancellationToken,
-	tracing::{info, warn, error},
+	tracing::{error, info},
 };
 
 // SAFETY:
@@ -31,10 +26,19 @@ unsafe extern "Rust" {
 	static SETBACK_API: LazyCell<Client>;
 }
 
+pub struct PromptState {
+	pub correlation_id: u32,
+	pub timeout: Pin<Box<Sleep>>,
+}
+
+trait PromptFut<T: PromptResult>: Future<Output=Result<(T, u32), Error>> + 'static {}
+impl<T: PromptResult, F: Future<Output=Result<(T, u32), Error>> + 'static> PromptFut<T> for F {}
+pub trait NotifyFut = Future<Output=Result<(), Error>> + 'static;
+
 /// Connection to the client, owned by the server.
 pub struct ClientConnection {
 	ssp_tx: UnboundedSender<(Option<Sender<Result<Ssp, Error>>>, Ssp)>,
-	fallback_rx: UnboundedReceiver<Result<Ssp, Error>>,
+	pub fallback_rx: UnboundedReceiver<Result<Ssp, Error>>,
 	correlation_id: u32,
 	pub account_id: u32,
 	pub username: String,
@@ -141,63 +145,52 @@ impl ClientConnection {
 		});
 	}
 	
+	// these functions are not marked async because we don't want to move self into the futures they return
+	
 	/// Only use this when a client is in a game.
 	/// This does not respond to the client; the client is still expecting a response.
 	/// This function should be called in a loop to verify the response from the client,
 	/// perform retries, and handle a timeout.
-	/// Start the correlation id as 0 then keep reusing it.
-	pub async fn send_prompt<T: PromptResult>(&mut self, correlation_id: &mut u32) -> Result<T, Error> {
+	/// Start the correlation id as 0. This function mutates it, then keep reusing it.
+	pub fn send_prompt<T: PromptResult>(&mut self, correlation_id: u32) -> impl PromptFut<T> {
 		// send prompt and get response
-		let (response, id) = self.send_request(Payload::GameEvent(T::PROMPT_EVENT), *correlation_id).await?;
-		// client should still expect message from server
-		if id == 0 { return Err(Error::BadRequest) }
-		if *correlation_id == 0 {
-			// set correlation_id if it wasn't set already
-			*correlation_id = id;
-		} else {
-			// make sure the correlation id didn't change, this should be unreachable
-			error!("Correlation id changed unexpectedly. Was {correlation_id}, got {id}");
-			debug_assert_eq!(*correlation_id, id);
+		let mut payload = Payload::GameEvent(T::PROMPT_EVENT);
+		if correlation_id != 0 {
+			payload = Payload::ErrRetry(T::INVALID_ERR, Box::new(payload));
 		}
-		T::extract_response(response)
+		self.send_request(payload, correlation_id)
+			.and_then(|(response, id)| async move {
+				// client should still expect message from server
+				if id == 0 { return Err(Error::BadRequest) }
+				T::extract_response(response).map(|t| (t, id))
+			})
 	}
-
+	
 	/// Only use this when a client is in a game.
 	/// Sends a message to the client and expects ack in response.
 	/// This does not send another message to the client; the client should not expect a response.
-	/// This function does retries if there is an error.
 	/// It also has a timeout because it expects an immediate response.
-	pub async fn send_expect_ack(&mut self, payload: Payload) -> Result<(), Error> {
-		tokio::time::timeout(Duration::from_secs(NETWORK_TIMEOUT), async move {
-			let mut correlation_id = 0;
-			let (mut response, mut id) = self.send_request(payload.clone(), correlation_id).await?;
-			loop {
-				match response {
-					Payload::Ack => {
-						if id != 0 {
-							self.send_response(Payload::Err(Error::BadRequest), id)?;
-						}
-						return Ok(());
+	pub fn send_expect_ack(&mut self, payload: Payload) -> impl NotifyFut {
+		let res_fut = self.send_new_request(payload);
+		async move {
+			tokio::time::timeout(
+				Duration::from_secs(NETWORK_TIMEOUT),
+				res_fut.and_then(|(response, correlation_id)| async move {
+					if correlation_id != 0 {
+						return Err(Error::BadRequest);
 					}
-					Payload::Err(e) => {
-						if id != 0 {
-							correlation_id = id;
-						}
-						(response, id) = self.send_request(Payload::Err(e), correlation_id).await?;
+					match response {
+						Payload::Ack => Ok(()),
+						Payload::Err(e) => Err(e),
+						_ => Err(Error::BadProtocol),
 					}
-					_ => {
-						if id != 0 {
-							correlation_id = id;
-						}
-						(response, id) = self.send_request(Payload::Err(Error::BadProtocol), correlation_id).await?;
-					}
-				}
-			}
-		}).await
-			.map_err(|_| Error::TimedOut)
-			.flatten()
+				})
+			).await
+				.map_err(|_| Error::TimedOut)
+				.flatten()
+		}
 	}
-
+	
 	/// This is not responding to a specific client message and the client isn't responding to it.
 	pub fn send_err(&mut self, err: Error) -> Result<(), Error> {
 		self.send_event(Payload::Err(err))
@@ -250,6 +243,7 @@ impl std::fmt::Debug for ClientConnection {
 #[cfg(not(feature = "client"))]
 pub trait PromptResult: Copy {
 	const PROMPT_EVENT: GameEvent;
+	const INVALID_ERR: Error;
 	fn validate(self, game_state: &GameState) -> bool;
 	fn ai_play(game_state: &GameState) -> Self;
 	fn extract_response(payload: Payload) -> Result<Self, Error>;
@@ -258,6 +252,7 @@ pub trait PromptResult: Copy {
 #[cfg(not(feature = "client"))]
 impl PromptResult for Bid {
 	const PROMPT_EVENT: GameEvent = GameEvent::PromptBid(None);
+	const INVALID_ERR: Error = Error::BadBid;
 	#[inline(always)]
 	fn validate(self, game_state: &GameState) -> bool {
 		game_state.validate_bid(self)
@@ -278,6 +273,7 @@ impl PromptResult for Bid {
 #[cfg(not(feature = "client"))]
 impl PromptResult for Card {
 	const PROMPT_EVENT: GameEvent = GameEvent::PromptCard(None);
+	const INVALID_ERR: Error = Error::BadCard;
 	#[inline(always)]
 	fn validate(self, game_state: &GameState) -> bool {
 		game_state.validate_card(self)
@@ -298,6 +294,7 @@ impl PromptResult for Card {
 #[cfg(not(feature = "client"))]
 impl PromptResult for () {
 	const PROMPT_EVENT: GameEvent = GameEvent::GameOver;
+	const INVALID_ERR: Error = Error::ServerError;
 	#[inline(always)]
 	fn validate(self, _game_state: &GameState) -> bool {
 		true

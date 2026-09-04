@@ -5,12 +5,6 @@ use {
 };
 
 #[cfg(not(feature = "client"))]
-use {
-	serde::Serializer,
-	tracing::error,
-};
-
-#[cfg(not(feature = "client"))]
 const NONE_CONN_ERR: &str = "Player must own their connection when calling this function";
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -23,6 +17,7 @@ pub struct Player {
 	pub team_id: u8,
 }
 
+/// Variant numbers must be explicit because some variants are feature toggled.
 #[repr(u8)]
 #[derive(Serialize, Deserialize, Debug)]
 pub enum PlayerType {
@@ -47,7 +42,7 @@ pub enum PlayerType {
 	HumanConnection {
 		/// See [PlayerType::HumanConnection]
 		#[serde(serialize_with = "serialize_conn_as_player")]
-		conn: Option<Box<ClientConnection>>
+		conn: Box<ClientConnection>
 	} = 2,
 	/// This variant has 2 uses:
 	/// 1. The server serializes a HumanConnection into this variant when sending data to clients.
@@ -87,7 +82,7 @@ impl Player {
 	#[cfg(not(feature = "client"))]
 	pub const fn new_host_connected(conn: Box<ClientConnection>, team_id: u8) -> Self {
 		Self {
-			player_type: PlayerType::HumanConnection { conn: Some(conn) },
+			player_type: PlayerType::HumanConnection { conn },
 			hand: ArrayVec::new_const(),
 			team_id,
 		}
@@ -105,48 +100,6 @@ impl Player {
 		self.hand.iter().any(|card| card.suit == lead)
 	}
 	
-	/// Takes the connection from the player if they are a HumanConnection variant.
-	/// Returns None if they are some other variant.
-	/// ## Panics - debug_assertions only
-	/// If this player is a HumanConnection and they don't have the connection.
-	/// This implies take_conn was called twice without the connection being restored in between.
-	/// Returns None in release mode and logs an error.
-	#[cfg(not(feature = "client"))]
-	pub fn take_conn(&mut self) -> Option<Box<ClientConnection>> {
-		if let PlayerType::HumanConnection {conn} = &mut self.player_type {
-			if conn.is_none() {
-				error!("Logical error: a player had take_conn called with a missing ClientConnection");
-			}
-			debug_assert!(conn.is_some());
-			return conn.take()
-		}
-		None
-	}
-	
-	/// Gives the connection back to the player after calling [Self::take_conn].
-	/// ## Panics - debug_assertions only
-	/// ### Case 1
-	/// If this player is a HumanConnection and they already have the connection.
-	/// This implies restore_conn was called twice without the connection being taken in between.
-	/// Logs an error in release mode.
-	/// ### Case 2
-	/// If the player is not a HumanConnection.
-	/// The connection will just be dropped in release mode and logs an error.
-	#[cfg(not(feature = "client"))]
-	pub fn restore_conn(&mut self, connection: Box<ClientConnection>) {
-		if let PlayerType::HumanConnection {conn} = &mut self.player_type {
-			if conn.is_some() {
-				error!("Logical error: a player had restore_conn called with an existing ClientConnection");
-			}
-			debug_assert!(conn.is_none());
-			*conn = Some(connection);
-		}
-		const ERR_MSG: &str = "Logical error: restore_conn should only be called on HumanConnection players";
-		error!("{ERR_MSG}");
-		#[cfg(debug_assertions)]
-		unreachable!("{ERR_MSG}");
-	}
-	
 	/// ## Notice
 	/// Does not clone the player's hand, that is just an empty list.
 	/// This function is only used when a player is trying to rejoin an ongoing game that they disconnected from
@@ -159,14 +112,12 @@ impl Player {
 		Self {
 			player_type: match &self.player_type {
 				#[cfg(not(feature = "client"))]
-				PlayerType::HumanConnection { conn: Some(conn) } => {
+				PlayerType::HumanConnection { conn } => {
 					PlayerType::HumanPlayer {
 						username: conn.username.clone(),
 						ready: conn.ready,
 					}
 				},
-				#[cfg(not(feature = "client"))]
-				PlayerType::HumanConnection { conn: None } => unreachable!("{NONE_CONN_ERR}"),
 				#[cfg(feature = "client")]
 				PlayerType::HumanPlayer { username, ready } => PlayerType::HumanPlayer {
 					username: username.clone(),
@@ -179,40 +130,40 @@ impl Player {
 			team_id: self.team_id,
 		}
 	}
-}
-
-impl PlayerType {
-	pub fn username(&self) -> &str {
-		match self {
+	
+	pub fn username(&self) -> String {
+		match &self.player_type {
 			#[cfg(feature = "client")]
-			PlayerType::SingleplayerSelf { username, .. } => username.as_str(),
-			PlayerType::HumanPlayer { username, .. } => username.as_str(),
+			PlayerType::SingleplayerSelf { username, .. } => username.clone(),
+			PlayerType::HumanPlayer { username, .. } => username.clone(),
 			#[cfg(not(feature = "client"))]
-			PlayerType::HumanConnection { conn: Some(conn) } => conn.username.as_str(),
+			PlayerType::HumanConnection { conn } => conn.username.clone(),
 			#[cfg(not(feature = "client"))]
-			PlayerType::HumanConnection { conn: None } => unreachable!("{NONE_CONN_ERR}"),
-			#[cfg(not(feature = "client"))]
-			PlayerType::HumanEmpty => "Waiting for player...",
-			PlayerType::Ai { .. } => "CPU",
+			PlayerType::HumanEmpty => "Waiting for player...".to_string(),
+			PlayerType::Ai { .. } => "CPU".to_string(),
 		}
 	}
 	
 	#[cfg(not(feature = "client"))]
 	pub fn disconnect(&mut self, allow_reconnect: bool) {
-		let Self::HumanConnection {conn: Some(conn)} = self else {return;};
+		let PlayerType::HumanConnection {conn} = &mut self.player_type else {return;};
 		let id = conn.account_id;
-		let Self::HumanConnection {conn: Some(mut conn)} = std::mem::replace(
-			self,
-			Self::Ai { account_id: if allow_reconnect {id} else {0} }
+		let PlayerType::HumanConnection {mut conn} = std::mem::replace(
+			&mut self.player_type,
+			PlayerType::Ai { account_id: if allow_reconnect {id} else {0} }
 		) else {return;};
-		_ = conn.send_err(Error::Disconnected);
+		if allow_reconnect {
+			_ = conn.send_err(Error::Disconnected);
+		} else {
+			_ = conn.send_event(Payload::LeaveGame);
+		}
 	}
 }
 
 #[cfg(not(feature = "client"))]
-fn serialize_conn_as_player<S>(conn: &Option<Box<ClientConnection>>, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_conn_as_player<S>(conn: &Box<ClientConnection>, serializer: S) -> Result<S::Ok, S::Error>
 where
-	S: Serializer,
+	S: serde::Serializer,
 {
 	#[derive(Serialize)]
 	#[serde(rename = "HumanPlayer")]
@@ -220,7 +171,6 @@ where
 		username: &'a str,
 		ready: bool,
 	}
-	let conn = conn.as_ref().expect(NONE_CONN_ERR);
 	HumanPlayerShim {
 		username: &conn.username,
 		ready: conn.ready,

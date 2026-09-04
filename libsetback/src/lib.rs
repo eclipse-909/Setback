@@ -4,6 +4,7 @@
 	allocator_api,
 	unsafe_cell_access,
 	slice_partition_dedup,
+	trait_alias,
 )]
 
 mod arena;

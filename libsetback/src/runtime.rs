@@ -40,8 +40,8 @@ pub enum GameLoopState {
 	DealCards,
 	Bidding,
 	Playing,
-	RoundOver,
 	GameOver,
+	Terminated,
 }
 
 // Runtime-owned trait objects
@@ -183,20 +183,16 @@ impl GameState {
 							event_emitter
 								.send(GameEvent::RoundScores(round_scores))
 								.unwrap();
-							loop_state = GameLoopState::RoundOver;
+							if self.team_won() {
+								loop_state = GameLoopState::GameOver;
+							} else {
+								loop_state = GameLoopState::DealCards;
+							}
 							continue;
 						}
 						PlayedCardResult::TurnOver => continue,
 						PlayedCardResult::None => {}
 					}
-				}
-				GameLoopState::RoundOver => {
-					if self.team_won() {
-						loop_state = GameLoopState::GameOver;
-					} else {
-						loop_state = GameLoopState::DealCards;
-					}
-					continue;
 				}
 				GameLoopState::GameOver => {
 					#[cfg(not(feature = "test-dep"))]
@@ -204,6 +200,7 @@ impl GameState {
 					info!("Game over");
 					return;
 				}
+				GameLoopState::Terminated => return,
 			}
 			self.turn_idx = self.next_turn();
 		}
@@ -394,11 +391,9 @@ impl GameState {
 
 	/// Returns true if valid, false if invalid. This function is idempotent.
 	pub fn validate_card(&self, card: Card) -> bool {
-		let has_card = self.setup.players[self.turn_idx as usize]
-			.hand
-			.iter()
-			.any(|c| *c == card);
-		let can_follow = self.setup.players[self.turn_idx as usize].can_follow(self.lead);
+		let player = &self.setup.players[self.turn_idx as usize];
+		let has_card = player.hand.iter().any(|c| *c == card);
+		let can_follow = player.can_follow(self.lead);
 		let is_owner = self.owner_idx == self.turn_idx;
 		let is_lead = card.suit == self.lead;
 		let is_trump = card.suit == self.trump;
@@ -425,8 +420,8 @@ impl GameState {
 			}
 		}
 		// if all players have bid, end the turn...
-		let should_end = self.turn_idx == self.dealer_idx;
-		if should_end {
+		let turn_should_end = self.turn_idx == self.dealer_idx;
+		if turn_should_end {
 			if self.highest_bid == Bid::Pass {
 				*loop_state = GameLoopState::DealCards;
 			} else {
@@ -435,7 +430,7 @@ impl GameState {
 				self.owner_idx = self.highest_bidder_idx;
 			}
 		}
-		should_end
+		turn_should_end
 	}
 
 	/// The card must have already been validated because it will be taken from the player's hand and moved to the pile.
@@ -595,7 +590,8 @@ impl GameState {
 }
 
 pub enum PlayedCardResult {
-	RoundOver(RoundScores),
-	TurnOver,
 	None,
+	TurnOver,
+	RoundOver(RoundScores),
+	GameOver(RoundScores),
 }

@@ -1,5 +1,6 @@
 use {
 	crate::*,
+	futures::TryFutureExt,
 	std::collections::HashMap,
 	tokio::sync::{
 		oneshot::{Sender, channel},
@@ -18,6 +19,8 @@ pub type SspTx = UnboundedSender<(Option<Sender<Result<Ssp, Error>>>, Ssp)>;
 	type SspRx = UnboundedReceiver<(Option<Sender<Result<Ssp, Error>>>, Ssp)>;
 pub type FallbackRx = UnboundedReceiver<Result<Ssp, Error>>;
 	type FallbackTx = UnboundedSender<Result<Ssp, Error>>;
+
+trait ResponseFut = Future<Output=Result<(Payload, u32), Error>> + 'static;
 
 pub trait WebSocketeer {
 	/// this is how you send all messages
@@ -87,12 +90,14 @@ pub trait WebSocketeer {
 		}
 	}
 	
+	// these functions are not marked async because we don't want to move self into the futures they return
+	
 	/// Sends a message and waits for the response.
 	/// Returns the payload of the response and a correlation id.
 	/// The correlation id is 0 if the other side is not expecting a response.
 	/// If the correlation id is not 0, you must send another message.
-	async fn send_new_request(&mut self, payload: Payload) -> Result<(Payload, u32), Error> {
-		self.send_request(payload, 0).await
+	fn send_new_request(&mut self, payload: Payload) -> impl ResponseFut {
+		self.send_request(payload, 0)
 	}
 	
 	/// Sends a message and waits for the response.
@@ -101,18 +106,21 @@ pub trait WebSocketeer {
 	/// Returns the payload of the response and a correlation id.
 	/// The correlation id is 0 if the other side is not expecting a response.
 	/// If the correlation id is not 0, you must send another message.
-	async fn send_request(&mut self, payload: Payload, mut correlation_id: u32) -> Result<(Payload, u32), Error> {
+	fn send_request(&mut self, payload: Payload, mut correlation_id: u32) -> impl ResponseFut {
 		if correlation_id == 0 {
 			correlation_id = self.auto_inc_id();
 		}
 		let (tx, rx) = channel();
-		self.ssp_tx().send((Some(tx), Ssp::request(payload, correlation_id))).map_err(|_| Error::LogicError)?;
-		let ssp = rx.await.map_err(|_| Error::LogicError).flatten()?;
-		debug_assert_eq!(ssp.correlation_id.id, correlation_id);
-		match ssp.payload {
-			Payload::Err(e) => Err(e),
-			p => Ok((p, if ssp.correlation_id.end {0} else {correlation_id}))
-		}
+		let send_res = self.ssp_tx().send((Some(tx), Ssp::request(payload, correlation_id))).map_err(|_| Error::LogicError);
+		rx.map_err(|_| Error::LogicError).and_then(move |ssp| async move {
+			send_res?;
+			let ssp = ssp?;
+			debug_assert_eq!(ssp.correlation_id.id, correlation_id);
+			match ssp.payload {
+				Payload::Err(e) => Err(e),
+				p => Ok((p, if ssp.correlation_id.end {0} else {correlation_id}))
+			}
+		})
 	}
 	
 	/// Sends a message in response to some request from the other side.
@@ -180,8 +188,6 @@ mod ws_server_and_client {
 	use {
 		bytes::BytesMut,
 		crate::*,
-		// futures::{SinkExt, StreamExt},
-		
 		sockudo_ws::{SplitReader, SplitWriter, WebSocketStream, Config},
 		tokio::net::TcpStream,
 		
