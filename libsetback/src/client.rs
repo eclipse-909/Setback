@@ -47,12 +47,12 @@ impl SetbackClient {
 			.json(&credentials)
 			.send()
 			.await
-			.map_err(|_| Error::NetworkError)?
+			.map_err(|_| NetError::Disconnected)?
 			.error_for_status()
 			.map_err(Error::from)?
 			.json::<LoginResponse>()
 			.await
-			.map_err(|_| Error::LogicError)?;
+			.map_err(|_| Error::ServerError)?;
 		info!("Logged into api");
 
 		info!("Connecting to Setback server");
@@ -96,18 +96,18 @@ impl SetbackClient {
 
 	pub async fn logout(
 		&self,
-		#[cfg(not(feature = "test-dep"))] auth_token: &str,
+		auth_token: &str,
 	) -> Result<(), Error> {
 		info!("Logging out");
-		#[cfg(not(feature = "test-dep"))]
+		#[cfg(not(feature = "test-libsetback"))]
 		self.api
 			.get(URL_API_LOGOUT)
 			.bearer_auth(auth_token)
 			.send()
 			.await
-			.map_err(|_| Error::NetworkError)?
+			.map_err(|_| NetError::Disconnected)?
 			.error_for_status()
-			.map_err(|_| Error::ServerError)?;
+			.map_err(Error::from)?;
 		info!("Logged out");
 		Ok(())
 	}
@@ -157,22 +157,20 @@ impl SetbackClient {
 		games
 	}
 
-	async fn send_expect_ack(&mut self, payload: Payload) -> Result<(), Error> {
+	async fn send_expect_ack(&mut self, payload: Payload) -> Result<(), NetError> {
 		let (response, id) = self.send_new_request(payload).await?;
-		match response {
-			Payload::Ack => Ok(()),
-			Payload::Err(err) => Err(err),
-			_ => Err(Error::ServerError),
-		}?;
+		if !matches!(response, Payload::Ack) {
+			return Err(NetError::BadRequest);
+		}
 		self.send_response_ack(id)
 	}
 
 	/// Host-only
-	pub async fn send_game_setup(&mut self, setup_data: SetupState) -> Result<(), Error> {
+	pub async fn send_game_setup(&mut self, setup_data: SetupState) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::Game(Box::new(setup_data))).await
 	}
 
-	pub async fn send_update_team(&mut self, player_idx: u8, team: u8) -> Result<(), Error> {
+	pub async fn send_update_team(&mut self, player_idx: u8, team: u8) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::UpdatePlayerTeam { player_idx, team }).await
 	}
 
@@ -181,14 +179,14 @@ impl SetbackClient {
 		&mut self,
 		player_idx: u8,
 		is_human: bool,
-	) -> Result<(), Error> {
+	) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::UpdatePlayerType {
 			player_idx,
 			is_human,
 		}).await
 	}
 
-	pub async fn send_ready(&mut self, is_ready: bool) -> Result<(), Error> {
+	pub async fn send_ready(&mut self, is_ready: bool) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::Ready {
 			is_ready,
 			player_idx: 0,
@@ -196,12 +194,12 @@ impl SetbackClient {
 	}
 
 	/// Host-only
-	pub async fn send_add_player(&mut self) -> Result<(), Error> {
+	pub async fn send_add_player(&mut self) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::AddPlayer).await
 	}
 
 	/// Host-only
-	pub async fn send_remove_player(&mut self, player_idx: u8) -> Result<(), Error> {
+	pub async fn send_remove_player(&mut self, player_idx: u8) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::RemovePlayer { player_idx }).await
 	}
 
@@ -210,7 +208,7 @@ impl SetbackClient {
 		&mut self,
 		player_idx_a: u8,
 		player_idx_b: u8,
-	) -> Result<(), Error> {
+	) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::SwapPlayers {
 			player_idx_a,
 			player_idx_b,
@@ -222,18 +220,18 @@ impl SetbackClient {
 		&mut self,
 		player_idx: u8,
 		new_player_idx: u8,
-	) -> Result<(), Error> {
+	) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::ReinsertPlayer {
 			player_idx,
 			new_player_idx,
 		}).await
 	}
 
-	pub async fn send_game_event(&mut self, event: GameEvent) -> Result<(), Error> {
+	pub async fn send_game_event(&mut self, event: GameEvent) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::GameEvent(event)).await
 	}
 
-	pub async fn send_report_player(&mut self, report: ReportPlayerRequest) -> Result<(), Error> {
+	pub async fn send_report_player(&mut self, report: ReportPlayerRequest) -> Result<(), NetError> {
 		self.send_expect_ack(Payload::ReportPlayer(report)).await
 	}
 }

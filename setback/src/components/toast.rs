@@ -46,10 +46,8 @@ pub fn ToastRegion() -> Element {
 	}
 }
 
-#[inline(always)]
 pub fn toast_success(message: impl Into<String>) { show_toast(message.into(), false); }
 
-#[inline(always)]
 pub fn toast_err(message: impl Into<String>) { show_toast(message.into(), true); }
 
 fn show_toast(message: String, is_err: bool) {

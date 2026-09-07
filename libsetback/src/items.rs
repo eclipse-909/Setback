@@ -352,9 +352,9 @@ pub enum GameEvent {
 		card: Card,
 	},
 	/// This should only be sent to the player whose turn it is.
-	PromptBid(Option<Error>),
+	PromptBid(Option<PromptError>),
 	/// This should only be sent to the player whose turn it is.
-	PromptCard(Option<Error>),
+	PromptCard(Option<PromptError>),
 	/// Deal the hand to the player.
 	DealCards {
 		hand: ArrayVec<Card, CARDS_PER_PLAYER>,

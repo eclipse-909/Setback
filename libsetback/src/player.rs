@@ -4,9 +4,6 @@ use {
 	serde::{Deserialize, Serialize},
 };
 
-#[cfg(not(feature = "client"))]
-const NONE_CONN_ERR: &str = "Player must own their connection when calling this function";
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Player {
 	pub player_type: PlayerType,
@@ -153,7 +150,7 @@ impl Player {
 			PlayerType::Ai { account_id: if allow_reconnect {id} else {0} }
 		) else {return;};
 		if allow_reconnect {
-			_ = conn.send_err(Error::Disconnected);
+			_ = conn.send_err(NetError::Disconnected.into());
 		} else {
 			_ = conn.send_event(Payload::LeaveGame);
 		}
@@ -161,7 +158,7 @@ impl Player {
 }
 
 #[cfg(not(feature = "client"))]
-fn serialize_conn_as_player<S>(conn: &Box<ClientConnection>, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_conn_as_player<S>(conn: &ClientConnection, serializer: S) -> Result<S::Ok, S::Error>
 where
 	S: serde::Serializer,
 {

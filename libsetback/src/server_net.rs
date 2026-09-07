@@ -1,29 +1,27 @@
 use {
 	crate::*,
+	futures::FutureExt,
 	reqwest::Client,
-	futures::TryFutureExt,
 	std::{
 		cell::LazyCell,
 		net::SocketAddr,
 		pin::Pin,
 		sync::Arc,
-		time::Duration
+		time::Duration,
 	},
 	tokio::{
 		net::TcpStream,
-		sync::{
-			mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
-			oneshot::Sender
-		},
-		time::Sleep
+		sync::
+		mpsc::unbounded_channel,
+		time::Sleep,
 	},
-	tracing::{error, info},
+	tracing::info,
 };
 
 // SAFETY:
 // Must link with server
 unsafe extern "Rust" {
-	static SETBACK_API: LazyCell<Client>;
+	pub static SETBACK_API: LazyCell<Client>;
 }
 
 pub struct PromptState {
@@ -31,15 +29,16 @@ pub struct PromptState {
 	pub timeout: Pin<Box<Sleep>>,
 }
 
-trait PromptFut<T: PromptResult>: Future<Output=Result<(T, u32), Error>> + 'static {}
-impl<T: PromptResult, F: Future<Output=Result<(T, u32), Error>> + 'static> PromptFut<T> for F {}
-pub trait NotifyFut = Future<Output=Result<(), Error>> + 'static;
+pub trait PromptFut<T: PromptResult>: Future<Output=Result<(T, u32), PromptError>> + Send +'static {}
+impl<T: PromptResult, F: Future<Output=Result<(T, u32), PromptError>> + Send + 'static> PromptFut<T> for F {}
+pub trait NotifyFut = Future<Output=Result<(), NetError>> + Send + 'static;
 
 /// Connection to the client, owned by the server.
 pub struct ClientConnection {
-	ssp_tx: UnboundedSender<(Option<Sender<Result<Ssp, Error>>>, Ssp)>,
-	pub fallback_rx: UnboundedReceiver<Result<Ssp, Error>>,
+	ssp_tx: SspTx,
+	pub fallback_rx: FallbackRx,
 	correlation_id: u32,
+	pub auth_token: String,
 	pub account_id: u32,
 	pub username: String,
 	pub ready: bool,
@@ -48,8 +47,8 @@ pub struct ClientConnection {
 }
 
 impl WebSocketeer for ClientConnection {
-	fn ssp_tx(&self) -> &UnboundedSender<(Option<Sender<Result<Ssp, Error>>>, Ssp)> {&self.ssp_tx}
-	fn fallback_rx(&mut self) -> &mut UnboundedReceiver<Result<Ssp, Error>> {&mut self.fallback_rx}
+	fn ssp_tx(&self) -> &SspTx {&self.ssp_tx}
+	fn fallback_rx(&mut self) -> &mut FallbackRx {&mut self.fallback_rx}
 	fn correlation_id(&mut self) -> &mut u32 {&mut self.correlation_id}
 }
 
@@ -67,11 +66,11 @@ impl ClientConnection {
 			// we can allow more time for authentication since this isn't delaying anything important
 			let ssp: Ssp = tokio::time::timeout(Duration::from_secs(8), ws::ws_next(&mut reader))
 				.await
-				.map_err(|_| Error::TimedOut)??;
+				.map_err(|_| NetError::TimedOut)??;
 
 			// get version and auth token
 			let Payload::Authenticate { version, auth_token } = ssp.payload else {
-				return Err(Error::BadProtocol);
+				return Err(NetError::BadRequest.into());
 			};
 			// validate version
 			version.check_compatible(SSP_VERSION)?;
@@ -80,13 +79,11 @@ impl ClientConnection {
 				username,
 				account_id,
 			} = Self::get_username(auth_token.as_str()).await?;
-			ws::ws_send(&mut writer, &Ssp::new(Payload::Ack, CorrelationId::event()))
-				.await
-				.map_err(Error::from)?;
-			Ok((username, account_id))
+			ws::ws_send(&mut writer, &Ssp::new(Payload::Ack, CorrelationId::event())).await?;
+			Ok((username, account_id, auth_token))
 		}.await;
 		
-		let (username, account_id) = match res {
+		let (username, account_id, auth_token) = match res {
 			Ok(r) => r,
 			Err(err) => {
 				info!("Authentication failed for client - Error: {err}");
@@ -106,6 +103,7 @@ impl ClientConnection {
 			ssp_tx,
 			fallback_rx,
 			correlation_id: 3, // DO NOT TOUCH THIS 3, see WebSocketeer::correlation_id
+			auth_token,
 			account_id,
 			username,
 			ready: false,
@@ -137,7 +135,7 @@ impl ClientConnection {
 				todo!("handle the message using the state");
 				match res {
 					Ok(ssp) => {}
-					Err(Error::Disconnected) => break,
+					Err(NetError::Disconnected) => break,
 					Err(err) => {}
 				};
 			}
@@ -154,46 +152,65 @@ impl ClientConnection {
 	/// Start the correlation id as 0. This function mutates it, then keep reusing it.
 	pub fn send_prompt<T: PromptResult>(&mut self, correlation_id: u32) -> impl PromptFut<T> {
 		// send prompt and get response
-		let mut payload = Payload::GameEvent(T::PROMPT_EVENT);
-		if correlation_id != 0 {
-			payload = Payload::ErrRetry(T::INVALID_ERR, Box::new(payload));
-		}
+		let err = if correlation_id != 0 {
+			Some(PromptError::Invalid)
+		} else {
+			None
+		};
+		let payload = Payload::GameEvent(T::prompt_event(err));
 		self.send_request(payload, correlation_id)
-			.and_then(|(response, id)| async move {
+			.map(|response| {
+				let (response, id) = response?;
 				// client should still expect message from server
-				if id == 0 { return Err(Error::BadRequest) }
+				if id == 0 { return Err(NetError::BadRequest.into()) }
 				T::extract_response(response).map(|t| (t, id))
 			})
 	}
 	
 	/// Only use this when a client is in a game.
 	/// Sends a message to the client and expects ack in response.
-	/// This does not send another message to the client; the client should not expect a response.
+	/// This function does retries if there is an error,
+	/// but otherwise sends no other messages after the client responds with Ack.
 	/// It also has a timeout because it expects an immediate response.
 	pub fn send_expect_ack(&mut self, payload: Payload) -> impl NotifyFut {
-		let res_fut = self.send_new_request(payload);
-		async move {
-			tokio::time::timeout(
-				Duration::from_secs(NETWORK_TIMEOUT),
-				res_fut.and_then(|(response, correlation_id)| async move {
+		let res_fut = self.send_new_request(payload.clone());
+		let ssp_tx = self.ssp_tx.clone();
+		tokio::time::timeout(
+			Duration::from_secs(NETWORK_TIMEOUT),
+			async move {
+				let mut result = res_fut.await;
+				let payload = Box::new(payload);
+				loop {
+					let (response, correlation_id) = result?;
 					if correlation_id != 0 {
-						return Err(Error::BadRequest);
+						result = Self::send_request_raw(
+							&ssp_tx,
+							Payload::ErrRetry(NetError::BadRequest.into(), payload.clone()),
+							correlation_id
+						).await;
+						continue;
 					}
-					match response {
-						Payload::Ack => Ok(()),
-						Payload::Err(e) => Err(e),
-						_ => Err(Error::BadProtocol),
+					if !matches!(response, Payload::Ack) {
+						result = Self::send_request_raw(
+							&ssp_tx,
+							Payload::ErrRetry(NetError::BadRequest.into(), payload.clone()),
+							correlation_id
+						).await;
+						continue;
 					}
-				})
-			).await
-				.map_err(|_| Error::TimedOut)
-				.flatten()
-		}
+					return Ok(());
+				}
+			}
+		).map(|res| res.map_err(|_| NetError::TimedOut).flatten())
 	}
 	
 	/// This is not responding to a specific client message and the client isn't responding to it.
-	pub fn send_err(&mut self, err: Error) -> Result<(), Error> {
+	pub fn send_err(&mut self, err: Error) -> Result<(), NetError> {
 		self.send_event(Payload::Err(err))
+	}
+	
+	pub fn send_ack(&mut self, correlation_id: u32) -> Result<(), NetError> {
+		self.send_response(Payload::Ack, correlation_id)
 	}
 
 	async fn get_username(auth_token: &str) -> Result<UsernameResponse, Error> {
@@ -203,30 +220,12 @@ impl ClientConnection {
 			.bearer_auth(auth_token)
 			.send()
 			.await
-			.map_err(|_| Error::NetworkError)?
+			.map_err(|_| Error::ApiErr)?
 			.error_for_status()
 			.map_err(Error::from)?
 			.json::<UsernameResponse>()
 			.await
 			.map_err(|_| Error::ServerError)
-	}
-
-	//TODO this will be a private API call
-	async fn report_player(
-		auth_token: &str,
-		report: &ReportPlayerRequest,
-	) -> Result<(), Error> {
-		// SAFETY:
-		// Must link with server
-		unsafe {&SETBACK_API}.post(URL_API_REPORT_PLAYER)
-			.bearer_auth(auth_token)
-			.json(report)
-			.send()
-			.await
-			.map_err(|_| Error::NetworkError)?
-			.error_for_status()
-			.map_err(Error::from)?;
-		Ok(())
 	}
 }
 
@@ -241,67 +240,102 @@ impl std::fmt::Debug for ClientConnection {
 }
 
 #[cfg(not(feature = "client"))]
-pub trait PromptResult: Copy {
-	const PROMPT_EVENT: GameEvent;
-	const INVALID_ERR: Error;
-	fn validate(self, game_state: &GameState) -> bool;
+pub trait PromptResult: Copy + Send {
+	type PlayResult;
+	fn prompt_event(err: Option<PromptError>) -> GameEvent;
+	fn notify_prompt_payload(self, turn_idx: u8) -> Payload;
+	fn is_valid(self, game_state: &GameState) -> bool;
 	fn ai_play(game_state: &GameState) -> Self;
-	fn extract_response(payload: Payload) -> Result<Self, Error>;
+	fn extract_response(payload: Payload) -> Result<Self, PromptError>;
+	fn map_client_io_fut(future: impl TryPromptFut<Self>) -> ClientIOFut;
+	fn notify_play(self, game_state: &mut GameState, correlation_id: u32) -> Self::PlayResult;
+	fn match_io_res_prompt(io_res: ClientIOResult) -> Option<(Result<Self, PromptError>, PromptState)>;
+	fn play_res_to_io_fut(play_res: Self::PlayResult) -> ClientIOFut;
+	
+	/// The correlation id and returned error are only used if it's a human's turn.
+	fn notify_prompt_result(self, game_state: &mut GameState, correlation_id: u32) {
+		if let PlayerType::HumanConnection {conn} = &mut game_state
+			.setup.players[game_state.turn_idx as usize]
+			.player_type
+			&& let Err(e) = conn.send_ack(correlation_id)
+		{
+			game_state.err_q.send((game_state.turn_idx, e)).unwrap();
+		}
+		game_state.notify_all_but(self.notify_prompt_payload(game_state.turn_idx), game_state.turn_idx);
+	}
 }
 
 #[cfg(not(feature = "client"))]
 impl PromptResult for Bid {
-	const PROMPT_EVENT: GameEvent = GameEvent::PromptBid(None);
-	const INVALID_ERR: Error = Error::BadBid;
-	#[inline(always)]
-	fn validate(self, game_state: &GameState) -> bool {
-		game_state.validate_bid(self)
+	type PlayResult = ();
+	fn prompt_event(err: Option<PromptError>) -> GameEvent {
+		GameEvent::PromptBid(err)
 	}
-	#[inline(always)]
+	fn notify_prompt_payload(self, turn_idx: u8) -> Payload {
+		Payload::GameEvent(GameEvent::PlayerBid {bid: self, idx: turn_idx})
+	}
+	fn is_valid(self, game_state: &GameState) -> bool {
+		game_state.bid_is_valid(self)
+	}
 	fn ai_play(game_state: &GameState) -> Self {
 		game_state.ai_bid()
 	}
-	fn extract_response(payload: Payload) -> Result<Self, Error> {
+	fn extract_response(payload: Payload) -> Result<Self, PromptError> {
 		match payload {
 			Payload::GameEvent(GameEvent::PlayerBid { bid, .. }) => Ok(bid),
-			Payload::Err(e) => Err(e),
-			_ => Err(Error::BadProtocol),
+			_ => Err(NetError::BadRequest.into()),
 		}
 	}
+	fn map_client_io_fut(future: impl TryPromptFut<Self>) -> ClientIOFut {
+		ClientIOFut::PromptBid(Box::pin(future))
+	}
+	fn notify_play(self, game_state: &mut GameState, correlation_id: u32)  -> Self::PlayResult {
+		game_state.player_bid(self);
+		self.notify_prompt_result(game_state, correlation_id);
+	}
+	fn match_io_res_prompt(io_res: ClientIOResult) -> Option<(Result<Self, PromptError>, PromptState)> {
+		match io_res {
+			ClientIOResult::PromptBid(r, s) => Some((r, s)),
+			_ => None
+		}
+	}
+	fn play_res_to_io_fut(_: Self::PlayResult) -> ClientIOFut { ClientIOFut::None }
 }
 
 #[cfg(not(feature = "client"))]
 impl PromptResult for Card {
-	const PROMPT_EVENT: GameEvent = GameEvent::PromptCard(None);
-	const INVALID_ERR: Error = Error::BadCard;
-	#[inline(always)]
-	fn validate(self, game_state: &GameState) -> bool {
-		game_state.validate_card(self)
+	type PlayResult = PlayedCardResult;
+	fn prompt_event(err: Option<PromptError>) -> GameEvent {
+		GameEvent::PromptCard(err)
 	}
-	#[inline(always)]
+	fn notify_prompt_payload(self, turn_idx: u8) -> Payload {
+		Payload::GameEvent(GameEvent::PlayerPlayedCard {card: self, idx: turn_idx})
+	}
+	fn is_valid(self, game_state: &GameState) -> bool {
+		game_state.card_is_valid(self)
+	}
 	fn ai_play(game_state: &GameState) -> Self {
 		game_state.ai_play_card()
 	}
-	fn extract_response(payload: Payload) -> Result<Self, Error> {
+	fn extract_response(payload: Payload) -> Result<Self, PromptError> {
 		match payload {
 			Payload::GameEvent(GameEvent::PlayerPlayedCard { card, .. }) => Ok(card),
-			Payload::Err(e) => Err(e),
-			_ => Err(Error::BadProtocol),
+			_ => Err(NetError::BadRequest.into()),
 		}
 	}
-}
-
-#[cfg(not(feature = "client"))]
-impl PromptResult for () {
-	const PROMPT_EVENT: GameEvent = GameEvent::GameOver;
-	const INVALID_ERR: Error = Error::ServerError;
-	#[inline(always)]
-	fn validate(self, _game_state: &GameState) -> bool {
-		true
+	fn map_client_io_fut(future: impl TryPromptFut<Self>) -> ClientIOFut {
+		ClientIOFut::PromptCard(Box::pin(future))
 	}
-	#[inline(always)]
-	fn ai_play(_game_state: &GameState) -> Self {}
-	fn extract_response(_payload: Payload) -> Result<Self, Error> {
-		Ok(())
+	fn notify_play(self, game_state: &mut GameState, correlation_id: u32) -> Self::PlayResult {
+		let post_play = game_state.player_played_card(self);
+		self.notify_prompt_result(game_state, correlation_id);
+		post_play
 	}
+	fn match_io_res_prompt(io_res: ClientIOResult) -> Option<(Result<Self, PromptError>, PromptState)> {
+		match io_res {
+			ClientIOResult::PromptCard(r, s) => Some((r, s)),
+			_ => None
+		}
+	}
+	fn play_res_to_io_fut(play_res: Self::PlayResult) -> ClientIOFut { ClientIOFut::NotifyCardPlayed(play_res) }
 }

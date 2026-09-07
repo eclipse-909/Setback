@@ -1,6 +1,6 @@
 use {
 	crate::*,
-	futures::TryFutureExt,
+	futures::{FutureExt, TryFutureExt},
 	std::collections::HashMap,
 	tokio::sync::{
 		oneshot::{Sender, channel},
@@ -14,13 +14,13 @@ pub use ws_client::*;
 #[cfg(not(target_family = "wasm"))]
 pub use ws_server_and_client::*;
 
-	type CorrelationMap = HashMap<u32, Sender<Result<Ssp, Error>>>;
-pub type SspTx = UnboundedSender<(Option<Sender<Result<Ssp, Error>>>, Ssp)>;
-	type SspRx = UnboundedReceiver<(Option<Sender<Result<Ssp, Error>>>, Ssp)>;
-pub type FallbackRx = UnboundedReceiver<Result<Ssp, Error>>;
-	type FallbackTx = UnboundedSender<Result<Ssp, Error>>;
+	type CorrelationMap = HashMap<u32, Sender<Result<Ssp, NetError>>>;
+pub type SspTx = UnboundedSender<(Option<Sender<Result<Ssp, NetError>>>, Ssp)>;
+	type SspRx = UnboundedReceiver<(Option<Sender<Result<Ssp, NetError>>>, Ssp)>;
+pub type FallbackRx = UnboundedReceiver<Result<Ssp, NetError>>;
+	type FallbackTx = UnboundedSender<Result<Ssp, NetError>>;
 
-trait ResponseFut = Future<Output=Result<(Payload, u32), Error>> + 'static;
+pub trait ResponseFut = Future<Output=Result<(Payload, u32), NetError>> + 'static;
 
 pub trait WebSocketeer {
 	/// this is how you send all messages
@@ -110,34 +110,46 @@ pub trait WebSocketeer {
 		if correlation_id == 0 {
 			correlation_id = self.auto_inc_id();
 		}
+		Self::send_request_raw(self.ssp_tx(), payload, correlation_id)
+	}
+	
+	/// Correlation id must not be 0!
+	fn send_request_raw(ssp_tx: &SspTx, payload: Payload, correlation_id: u32) -> impl ResponseFut {
 		let (tx, rx) = channel();
-		let send_res = self.ssp_tx().send((Some(tx), Ssp::request(payload, correlation_id))).map_err(|_| Error::LogicError);
-		rx.map_err(|_| Error::LogicError).and_then(move |ssp| async move {
+		let send_res = ssp_tx
+			.send((Some(tx), Ssp::request(payload, correlation_id)))
+			.map_err(|_| NetError::Disconnected);
+		rx.map_err(|_| NetError::Disconnected).map(move |result| {
 			send_res?;
-			let ssp = ssp?;
+			let ssp = result.flatten()?;
 			debug_assert_eq!(ssp.correlation_id.id, correlation_id);
-			match ssp.payload {
-				Payload::Err(e) => Err(e),
-				p => Ok((p, if ssp.correlation_id.end {0} else {correlation_id}))
-			}
+			Ok((ssp.payload, if ssp.correlation_id.end {0} else {correlation_id}))
 		})
 	}
 	
 	/// Sends a message in response to some request from the other side.
 	/// This ends a correlation, so if you need to keep sending messages,
 	/// use [Self::ws_request].
-	fn send_response(&mut self, payload: Payload, correlation_id: u32) -> Result<(), Error> {
+	fn send_response(&mut self, payload: Payload, correlation_id: u32) -> Result<(), NetError> {
 		debug_assert_ne!(correlation_id, 0);
-		self.ssp_tx().send((None, Ssp::response(payload, correlation_id))).map_err(|_| Error::LogicError)
+		Self::send_response_raw(self.ssp_tx(), payload, correlation_id)
+	}
+	
+	fn send_response_raw(ssp_tx: &SspTx, payload: Payload, correlation_id: u32) -> Result<(), NetError> {
+		ssp_tx
+			.send((None, Ssp::response(payload, correlation_id)))
+			.map_err(|_| NetError::Disconnected)
 	}
 	
 	/// A one-off message to send with no expected response.
-	fn send_event(&mut self, payload: Payload) -> Result<(), Error> {
-		self.ssp_tx().send((None, Ssp::event(payload))).map_err(|_| Error::LogicError)
+	fn send_event(&mut self, payload: Payload) -> Result<(), NetError> {
+		self.ssp_tx()
+			.send((None, Ssp::event(payload)))
+			.map_err(|_| NetError::Disconnected)
 	}
 	
 	/// Sends an Ack in response if correlation_id is not 0
-	fn send_response_ack(&mut self, correlation_id: u32) -> Result<(), Error> {
+	fn send_response_ack(&mut self, correlation_id: u32) -> Result<(), NetError> {
 		if correlation_id == 0 {return Ok(());}
 		self.send_response(Payload::Ack, correlation_id)
 	}
@@ -158,27 +170,28 @@ mod ws_client {
 	pub type WsReader = SplitStream<WebSocket>;
 	pub type WsWriter = SplitSink<WebSocket, Message>;
 
-	pub async fn ws_connect() -> Result<(WsWriter, WsReader), Error> {
-		Ok(WebSocket::open(URL_SERVER_WS).map_err(|_| Error::NetworkError)?.split())
+	pub async fn ws_connect() -> Result<(WsWriter, WsReader), NetError> {
+		Ok(WebSocket::open(URL_SERVER_WS)
+			.map_err(|_| NetError::Disconnected)?.split())
 	}
 
-	pub async fn ws_send(ws: &mut WsWriter, ssp: &Ssp) -> Result<(), Error> {
+	pub async fn ws_send(ws: &mut WsWriter, ssp: &Ssp) -> Result<(), NetError> {
 		let bytes = BytesMut::new();
 		let bytes = ssp.encode(bytes)?;
 		ws.send(Message::Bytes(bytes.to_vec()))
 			.await
-			.map_err(|_| Error::NetworkError)
+			.map_err(|_| NetError::Disconnected)
 	}
 
-	pub async fn ws_next(ws: &mut WsReader) -> Result<Ssp, Error> {
+	pub async fn ws_next(ws: &mut WsReader) -> Result<Ssp, NetError> {
 		let msg = ws
 			.next()
 			.await
-			.ok_or(Error::Disconnected)?
-			.map_err(|_| Error::NetworkError)?;
+			.ok_or(NetError::Disconnected)?
+			.map_err(|_| NetError::Disconnected)?;
 		match msg {
 			Message::Bytes(bytes) => Ssp::decode(&bytes),
-			_ => Err(Error::NetworkError),
+			_ => Err(NetError::Disconnected),
 		}
 	}
 }
@@ -188,20 +201,13 @@ mod ws_server_and_client {
 	use {
 		bytes::BytesMut,
 		crate::*,
-		sockudo_ws::{SplitReader, SplitWriter, WebSocketStream, Config},
+		sockudo_ws::{SplitReader, SplitWriter, WebSocketStream, Config, handshake,},
 		tokio::net::TcpStream,
-		
 	};
 	#[cfg(feature = "client")]
 	use {
 		std::sync::Arc,
 		tokio_rustls::{rustls, TlsConnector, client::TlsStream},
-		url::Url,
-		sockudo_ws::handshake::client_handshake,
-	};
-	#[cfg(not(feature = "client"))]
-	use {
-		sockudo_ws::handshake::server_handshake,
 	};
 	
 	#[cfg(feature = "client")]
@@ -231,63 +237,67 @@ mod ws_server_and_client {
 		}
 	}
 	
-	#[cfg(feature = "client")]
-	pub async fn ws_connect() -> Result<(WsReader, WsWriter), Error> {
-		let url = Url::parse(URL_SERVER_WS).expect("invalid ws url");
-		let host = url.host_str().expect("url needs a host").to_string();
-		let port = url.port_or_known_default().unwrap_or(443); // 443 for wss
-		let path = if url.query().is_some() {
-			format!("{}?{}", url.path(), url.query().unwrap())
-		} else {
-			url.path().to_string()
+	pub async fn ws_connect() -> Result<(WsReader, WsWriter), NetError> {
+		let mut stream = TcpStream::connect((SETBACK_PROXY, 443))
+			.await
+			.map_err(|_| NetError::Disconnected)?;
+		stream.set_nodelay(true)
+			.map_err(|_| NetError::Disconnected)?;
+		
+		#[cfg(feature = "client")]
+		let mut stream = {
+			let mut roots = rustls::RootCertStore::empty();
+			roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+			let tls_config = rustls::ClientConfig::builder()
+				.with_root_certificates(roots)
+				.with_no_client_auth();
+			let connector = TlsConnector::from(Arc::new(tls_config));
+			let server_name = rustls::pki_types::ServerName::try_from(SETBACK_PROXY)
+				.map_err(|_| NetError::Disconnected)?;
+			connector.connect(server_name, stream)
+				.await
+				.map_err(|_| NetError::Disconnected)?
 		};
 		
-		let tcp = TcpStream::connect((host.as_str(), port)).await.map_err(|_| Error::NetworkError)?;
-		tcp.set_nodelay(true).map_err(|_| Error::LogicError)?;
+		handshake::client_handshake(&mut stream, SETBACK_PROXY, "/", None)
+			.await
+			.map_err(|_| NetError::Disconnected)?;
 		
-		let mut roots = rustls::RootCertStore::empty();
-		roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-		let tls_config = rustls::ClientConfig::builder()
-			.with_root_certificates(roots)
-			.with_no_client_auth();
-		let connector = TlsConnector::from(Arc::new(tls_config));
-		let server_name = rustls::pki_types::ServerName::try_from(host.clone()).map_err(|_| Error::NetworkError)?;
-		let mut tls_stream = connector.connect(server_name, tcp).await.map_err(|_| Error::NetworkError)?;
-		
-		client_handshake(&mut tls_stream, &host, &path, None).await.map_err(|_| Error::NetworkError)?;
-		
-		Ok(WebSocketStream::client(tls_stream, ws_config()).split())
+		Ok(WebSocketStream::client(stream, ws_config()).split())
 	}
 	
 	#[cfg(not(feature = "client"))]
-	pub async fn ws_accept(mut tcp_stream: TcpStream) -> Result<(WsReader, WsWriter), Error> {
-		tcp_stream.set_nodelay(true).map_err(|_| Error::ServerError)?;
-		server_handshake(&mut tcp_stream).await.map_err(|_| Error::NetworkError)?;
+	pub async fn ws_accept(mut tcp_stream: TcpStream) -> Result<(WsReader, WsWriter), NetError> {
+		tcp_stream.set_nodelay(true)
+			.map_err(|_| NetError::Disconnected)?;
+		handshake::server_handshake(&mut tcp_stream)
+			.await
+			.map_err(|_| NetError::Disconnected)?;
 		Ok(WebSocketStream::server(tcp_stream, ws_config()).split())
 	}
 	
-	pub async fn ws_send(ws: &mut WsWriter, ssp: &Ssp) -> Result<(), Error> {
+	pub async fn ws_send(ws: &mut WsWriter, ssp: &Ssp) -> Result<(), NetError> {
 		let bytes = BytesMut::new();
 		let bytes = ssp.encode(bytes)?;
 		ws.send_binary(bytes.freeze())
 			.await
-			.map_err(|_| Error::NetworkError)
+			.map_err(|_| NetError::Disconnected)
 		// TODO figure out what happens when ws.send_binary returns Err
 	}
 	
-	pub async fn ws_next(ws: &mut WsReader) -> Result<Ssp, Error> {
+	pub async fn ws_next(ws: &mut WsReader) -> Result<Ssp, NetError> {
 		// TODO figure out what happens when ws.next returns Err or None
 		match ws.next()
 			.await
-			.ok_or(Error::Disconnected)?
-			.map_err(|_| Error::NetworkError)?
+			.ok_or(NetError::Disconnected)?
+			.map_err(|_| NetError::Disconnected)?
 		{
-			sockudo_ws::Message::Text(_) => Err(Error::BadProtocol),
+			sockudo_ws::Message::Text(_) => Err(NetError::BadRequest),
 			sockudo_ws::Message::Binary(bytes) => Ssp::decode(&bytes),
 			sockudo_ws::Message::Ping(_)
 			| sockudo_ws::Message::Pong(_)
 			=> unreachable!("ping/pong should be handled automatically"),
-			sockudo_ws::Message::Close(_) => Err(Error::Disconnected),
+			sockudo_ws::Message::Close(_) => Err(NetError::Disconnected),
 		}
 	}
 }

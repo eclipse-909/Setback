@@ -1,3 +1,4 @@
+use std::fmt::Formatter;
 use serde::{Deserialize, Serialize};
 
 /// POST /api/login
@@ -33,10 +34,10 @@ pub struct UsernameResponse {
 /// POST /api/report
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ReportPlayerRequest {
-	username: String,
-	idx: u8,
-	reason: ReportReason,
-	description: String,
+	pub username: String,
+	pub target_idx: u8,
+	pub reason: ReportReason,
+	pub description: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -47,6 +48,19 @@ pub enum ReportReason {
 	Hacking,
 	/// A player is using external communication with teammates or opponents to influence the outcome of the game.
 	Cheating,
+}
+
+impl std::fmt::Display for ReportReason {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", match self {
+			ReportReason::Stalling =>
+				"Stalling is automatically reported, and the player is kicked from the game if they don't play for 3 turns in a game.",
+			ReportReason::Hacking =>
+				"A player is exploiting a bug or vulnerability in the game to give themselves or another player an unfair advantage.",
+			ReportReason::Cheating =>
+				"A player is using external communication with teammates or opponents to influence the outcome of the game.",
+		})
+	}
 }
 
 /// POST /api/feedback

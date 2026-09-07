@@ -50,15 +50,15 @@ sqlx = { version = "0.9.0", default-features = false, features = [
 	"macros",
 	"migrate"
 ] }
+thiserror = "2.0.20"
 tokio = "1.53.1"
-tokio-rustls = "0.26.4"
+tokio-rustls = "0.26.5"
 tokio-util = "0.7.19"
 tower-cookies = { version = "0.11.0", features = ["private"] }
 tower-http = { version = "0.7.1", features = ["cors", "fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 trybuild = "1.0.120"
-url = "2.5.8"
 uuid = { version = "1.26.0", features = ["v4"] }
 webpki-roots = "1.0.9"
 

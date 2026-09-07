@@ -1,6 +1,5 @@
 #![feature(
 	const_format_args,
-	sync_unsafe_cell,
 	allocator_api,
 	unsafe_cell_access,
 	slice_partition_dedup,

@@ -2,156 +2,151 @@ use {
 	arrayvec::ArrayVec,
 	crate::*,
 	scc::{HashMap, HashSet},
-	futures::FutureExt,
+	futures::{FutureExt, TryFutureExt},
 	std::{
 		sync::Arc,
 		time::Duration,
 		future::poll_fn,
-		task::Poll,
+		task::{Poll, Context},
+		pin::Pin,
 	},
 	tokio::{
 		sync::mpsc::*,
-		task::{JoinHandle, JoinSet},
+		task::JoinHandle,
 		time::sleep
 	},
 };
 
 type ConnArr = ArrayVec<Box<ClientConnection>, MAX_PLAYERS>;
-type ConnIdxArr = ArrayVec<(u8, Box<ClientConnection>), MAX_PLAYERS>;
-type ErrIdxArr = ArrayVec<(u8, Error), MAX_PLAYERS>;
+type ErrIdxArr = ArrayVec<(u8, NetError), MAX_PLAYERS>;
 
-trait TryPromptFut<T: PromptResult>: Future<Output=(Result<T, Error>, PromptState)> + 'static {}
-impl<T: PromptResult, F: Future<Output=(Result<T, Error>, PromptState)> + 'static> TryPromptFut<T> for F {}
-trait NotifyManyFut = Future<Output=ErrIdxArr> + 'static;
+pub trait TryPromptFut<T: PromptResult>: Future<Output=(Result<T, PromptError>, PromptState)> + Send + 'static {}
+impl<T: PromptResult, F: Future<Output=(Result<T, PromptError>, PromptState)> + Send + 'static> TryPromptFut<T> for F {}
+pub trait NotifyManyFut = Future<Output=ErrIdxArr> + Send + 'static;
 
-enum ClientIOFut<B, C, N>
-where
-	B: TryPromptFut<Bid>,
-	C: TryPromptFut<Card>,
-	N: NotifyManyFut,
-{
+pub enum ClientIOFut {
 	None,
-	PromptBid(B),
-	PromptCard(C),
-	NotifyMany(N),
+	PromptBid(Pin<Box<dyn TryPromptFut<Bid>>>),
+	PromptCard(Pin<Box<dyn TryPromptFut<Card>>>),
+	NotifyCardPlayed(PlayedCardResult),
+	GameOver,
 }
 
-impl<B, C, N> ClientIOFut<B, C, N>
-where
-	B: TryPromptFut<Bid>,
-	C: TryPromptFut<Card>,
-	N: NotifyManyFut,
-{
-	async fn result(self) -> ClientIOResult {
-		match self {
-			ClientIOFut::None => ClientIOResult::None,
-			ClientIOFut::PromptBid(f) => {
-				let (r, s) = f.await;
-				ClientIOResult::PromptBid(r, s)
-			}
-			ClientIOFut::PromptCard(f) => {
-				let (r, s) = f.await;
-				ClientIOResult::PromptCard(r, s)
-			}
-			ClientIOFut::NotifyMany(f) => ClientIOResult::NotifyMany(f.await),
+impl Future for ClientIOFut {
+	type Output = ClientIOResult;
+	
+	fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+		match self.get_mut() {
+			ClientIOFut::None => Poll::Ready(ClientIOResult::None),
+			ClientIOFut::PromptBid(f) => f.poll_unpin(cx).map(|(r, s)| ClientIOResult::PromptBid(r, s)),
+			ClientIOFut::PromptCard(f) => f.poll_unpin(cx).map(|(r, s)| ClientIOResult::PromptCard(r, s)),
+			ClientIOFut::NotifyCardPlayed(p) => Poll::Ready(ClientIOResult::NotifyCardPlayed(p.clone())),
+			ClientIOFut::GameOver => Poll::Ready(ClientIOResult::GameOver),
 		}
 	}
 }
 
-enum ClientIOResult {
+pub enum ClientIOResult {
 	None,
-	PromptBid(Result<Bid, Error>, PromptState),
-	PromptCard(Result<Card, Error>, PromptState),
-	NotifyMany(ErrIdxArr),
+	PromptBid(Result<Bid, PromptError>, PromptState),
+	PromptCard(Result<Card, PromptError>, PromptState),
+	NotifyCardPlayed(PlayedCardResult),
+	GameOver,
 }
 
 pub struct GameLoopHandle {
 	pub rejoin_tx: Sender<Box<ClientConnection>>,
-	pub task: JoinHandle<ConnArr>,
+	pub handle: JoinHandle<ConnArr>,
 }
 
 impl GameState {
-	pub fn spawn_server(mut self, reject_tx: UnboundedSender<Box<ClientConnection>>) -> GameLoopHandle {
+	pub fn spawn_server(
+		mut self,
+		reject_tx: UnboundedSender<Box<ClientConnection>>,
+		mut err_q: UnboundedReceiver<(u8, NetError)>,
+	) -> GameLoopHandle {
 		let (rejoin_tx, mut rejoin_rx) = channel(MAX_PLAYERS);
-		let task = tokio::spawn(async move {
-			let mut client_io_fut = Box::pin(self.advance_game(ClientIOResult::None).result());
+		let handle = tokio::spawn(async move {
+			let mut client_io_fut = self.advance_game(ClientIOResult::None);
 			loop {
 				tokio::select! {
-					Some(conn) = rejoin_rx.recv() => {
-						if let Some(rejoin_fut) = self.rejoin_player(conn, &reject_tx) {
-							rejoin_fut.await;
-						}
-					}
 					client_io_res = &mut client_io_fut => {
-						if matches!(client_io_res, ClientIOResult::None) {
-							return self.collect_players(); // game over
+						if matches!(client_io_res, ClientIOResult::GameOver) {
+							return self.collect_players();
 						}
-						client_io_fut = Box::pin(self.advance_game(client_io_res).result());
+						client_io_fut = self.advance_game(client_io_res);
 					}
-					result = self.recv_fallback() => {
-						// TODO
+					message = self.recv_fallback() => self.handle_fallback(message),
+					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn, &reject_tx),
+					Some((idx, err)) = err_q.recv() => {
+						match err {
+							NetError::Disconnected => self.disconnect_player(idx, true),
+							e => self.notify(Payload::Err(e.into())),
+						}
 					}
 				}
 			}
 		});
-		GameLoopHandle {rejoin_tx, task}
+		GameLoopHandle {rejoin_tx, handle}
 	}
 	
-	fn advance_game(
-		&mut self,
-		io_res: ClientIOResult
-	) -> ClientIOFut<impl TryPromptFut<Bid>, impl TryPromptFut<Card>, impl NotifyManyFut> {
-		// TODO handle io_res
-		loop {
-			match self.loop_state {
-				GameLoopState::Init => {
-					self.loop_state = GameLoopState::DealCards;
-					self.notify_all_unique(|idx,_| Payload::GameEvent(GameEvent::Init { idx })).await;
-				}
-				GameLoopState::DealCards => {
-					self.deal_cards();
-					self.loop_state = GameLoopState::Bidding;
-					self.notify_all_unique(|_, player| Payload::GameEvent(GameEvent::DealCards {
-						hand: player.hand.clone(),
-						idx: self.dealer_idx,
-					})).await;
-					// no continue because it is currently the dealer's turn, and we want the next player to start bidding.
-				}
-				GameLoopState::Bidding => {
-					let bid = self.try_prompt().await;
-					if self.player_bid(bid, &mut self.loop_state) {
-						continue;
-					}
-				}
-				GameLoopState::Playing => {
-					let card = self.try_prompt().await;
-					match self.player_played_card(card) {
-						PlayedCardResult::None => {}
-						PlayedCardResult::TurnOver => continue,
-						PlayedCardResult::RoundOver(round_scores) => {
-							if self.team_won() {
-								self.loop_state = GameLoopState::GameOver;
-							} else {
-								self.loop_state = GameLoopState::DealCards;
-							}
-							self.notify_all(Payload::GameEvent(GameEvent::RoundScores(round_scores))).await;
-							continue;
-						}
-						PlayedCardResult::GameOver(round_scores) => {
+	fn advance_game(&mut self, io_res: ClientIOResult) -> ClientIOFut {
+		match &io_res {
+			ClientIOResult::NotifyCardPlayed(play_result) => {
+				match play_result {
+					PlayedCardResult::None => {}
+					PlayedCardResult::RoundOver(round_scores) => {
+						if self.team_won() {
 							self.loop_state = GameLoopState::GameOver;
-							self.notify_all(Payload::GameEvent(GameEvent::RoundScores(round_scores))).await;
-							continue;
+						} else {
+							self.loop_state = GameLoopState::DealCards;
 						}
+						self.notify_all(Payload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
+					}
+					PlayedCardResult::GameOver(round_scores) => {
+						self.loop_state = GameLoopState::GameOver;
+						self.notify_all(Payload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
 					}
 				}
-				GameLoopState::GameOver => {
-					self.loop_state = GameLoopState::Terminated;
-					self.notify_all(Payload::GameEvent(GameEvent::GameOver)).await;
-				}
-				GameLoopState::Terminated => return ClientIOFut::None,
 			}
-			self.turn_idx = self.next_turn();
+			ClientIOResult::GameOver => {
+				self.loop_state = GameLoopState::Terminated;
+				return ClientIOFut::GameOver;
+			}
+			ClientIOResult::None
+			// prompts will be handled when the loop state matches that prompt type
+			| ClientIOResult::PromptBid(_, _)
+			| ClientIOResult::PromptCard(_, _)
+			=> {}
 		}
+		match self.loop_state {
+			GameLoopState::Init => {
+				self.loop_state = GameLoopState::DealCards;
+				self.increment_turn();
+				self.notify_all_unique(|idx,_| Payload::GameEvent(GameEvent::Init { idx }));
+				ClientIOFut::None
+			}
+			GameLoopState::DealCards => {
+				self.deal_cards();
+				self.loop_state = GameLoopState::Bidding;
+				self.increment_turn();
+				let dealer_idx = self.dealer_idx;
+				self.notify_all_unique(|_, player| Payload::GameEvent(GameEvent::DealCards {
+					hand: player.hand.clone(),
+					idx: dealer_idx,
+				}));
+				ClientIOFut::None
+			}
+			GameLoopState::Bidding => self.prompt::<Bid>(io_res),
+			GameLoopState::Playing => self.prompt::<Card>(io_res),
+			GameLoopState::GameOver => {
+				self.loop_state = GameLoopState::Terminated;
+				self.notify_all(Payload::GameEvent(GameEvent::GameOver));
+				ClientIOFut::None
+			}
+			GameLoopState::Terminated => ClientIOFut::GameOver,
+		}
+		
 	}
 	
 	fn collect_players(self) -> ConnArr {
@@ -184,15 +179,9 @@ impl GameState {
 			turn_num: self.turn_num,
 			dealer_idx: self.dealer_idx,
 			round_num: self.round_num,
-			loop_state: self.loop_state
+			loop_state: self.loop_state,
+			err_q: self.err_q.clone(),
 		})
-	}
-	
-	fn is_ai_turn(&self) -> bool {
-		matches!(
-			self.setup.players[self.turn_idx as usize].player_type,
-			PlayerType::Ai { .. }
-		)
 	}
 	
 	fn start_turn_timer(&self) -> PromptState {
@@ -204,80 +193,119 @@ impl GameState {
 	
 	// these functions are not marked async because we don't want to move self into the futures they return
 	
-	/// If it's an AI's turn, this function returns Ok(T) immediately.
-	/// If it's a human's turn, this function returns Err(Future) immediately.
-	/// The future will return with some information that must be validated and handled properly.
-	/// This function should be called in a loop to reprompt the player until time runs out.
-	fn try_prompt<T: PromptResult>(&mut self, mut state: PromptState) -> Result<T, impl TryPromptFut<T>> {
+	fn prompt<T: PromptResult>(&mut self, io_res: ClientIOResult) -> ClientIOFut {
+		match T::match_io_res_prompt(io_res) {
+			Some((prompt_result, prompt_state)) => match prompt_result {
+				Ok(value) => {
+					if value.is_valid(self) {
+						let play_result = value.notify_play(self, prompt_state.correlation_id);
+						T::play_res_to_io_fut(play_result)
+					} else {
+						self.try_prompt::<T>(prompt_state)
+					}
+				}
+				Err(err) => {
+					match err {
+						PromptError::Net(NetError::Disconnected) => {
+							self.disconnect_player(self.turn_idx, true);
+							ClientIOFut::None
+						}
+						PromptError::Net(NetError::TimedOut) => {
+							if let PlayerType::HumanConnection {conn} = &mut self
+								.setup
+								.players[self.turn_idx as usize]
+								.player_type
+							{
+								conn.timeout_strikes += 1;
+								if conn.timeout_strikes == TIMEOUT_STRIKES {
+									let username = conn.username.clone();
+									let report = ReportPlayerRequest {
+										username,
+										target_idx: self.turn_idx,
+										reason: ReportReason::Stalling,
+										description: "Automatically reported for violating 3-strikes policy".to_string(),
+									};
+									// the player reports themselves which I think is very funny
+									self.report_player(self.turn_idx, report, CorrelationId {id: 0, end: true});
+									// yeet bozo
+									self.disconnect_player(self.turn_idx, false);
+								}
+							}
+							let play_result = T::ai_play(self).notify_play(self, 0);
+							T::play_res_to_io_fut(play_result)
+						}
+						PromptError::Net(NetError::BadRequest)
+						| PromptError::Invalid => self.try_prompt::<T>(prompt_state),
+					}
+				}
+			}
+			None => self.try_prompt::<T>(self.start_turn_timer()),
+		}
+	}
+	
+	fn try_prompt<T: PromptResult>(&mut self, mut prompt_state: PromptState) -> ClientIOFut {
 		let conn = match self.setup.players[self.turn_idx as usize].player_type {
-			PlayerType::Ai {..} => return Ok(T::ai_play(self)),
+			PlayerType::Ai {..} => {
+				let play_result = T::ai_play(self).notify_play(self, prompt_state.correlation_id);
+				return T::play_res_to_io_fut(play_result);
+			}
 			PlayerType::HumanConnection {ref mut conn} => conn,
 			_ => unreachable!(),
 		};
-		let res_fut = conn.send_prompt(state.correlation_id);
-		Err(async move {
+		let res_fut = conn.send_prompt(prompt_state.correlation_id);
+		T::map_client_io_fut(async move {
 			tokio::select! {
 				result = res_fut => {
 					match result {
 						Ok((t, id)) => {
-							state.correlation_id = id;
-							(Ok(t), state)
+							prompt_state.correlation_id = id;
+							(Ok(t), prompt_state)
 						}
-						Err(e) => (Err(e), state),
+						Err(e) => (Err(e), prompt_state),
 					}
 				}
-				_ = &mut state.timeout => (Err(Error::TimedOut), state),
+				_ = &mut prompt_state.timeout => (Err(NetError::TimedOut.into()), prompt_state),
 			}
 		})
 	}
 	
-	fn notify(&mut self, payload: Payload) -> Option<impl NotifyFut> {
+	/// Notifies the current turn player
+	fn notify(&mut self, payload: Payload) {
+		let err_q = self.err_q.clone();
+		let idx = self.turn_idx;
 		let PlayerType::HumanConnection {conn} = &mut self
-			.setup.players[self.turn_idx as usize]
+			.setup.players[idx as usize]
 			.player_type
-		else {return None};
-		Some(conn.send_expect_ack(payload))
+		else {return};
+		let fut = conn.send_expect_ack(payload).inspect_err(move |e| err_q.send((idx, *e)).unwrap());
+		tokio::spawn(fut);
 	}
 	
-	fn notify_all(&mut self, payload: Payload) -> impl NotifyManyFut {
-		self.notify_all_but(payload, u8::MAX)
+	fn notify_all(&mut self, payload: Payload) {
+		self.notify_all_but(payload, u8::MAX);
 	}
 	
-	fn notify_all_but(&mut self, payload: Payload, exclude: u8) -> impl NotifyManyFut {
-		self.notify_all_unique_but(move |_,_| payload.clone(), exclude)
+	pub fn notify_all_but(&mut self, payload: Payload, exclude: u8) {
+		self.notify_all_unique_but(move |_,_| payload.clone(), exclude);
 	}
 	
-	fn notify_all_unique(&mut self, payload_fn: impl FnMut(u8, &Player) -> Payload) -> impl NotifyManyFut {
-		self.notify_all_unique_but(payload_fn, u8::MAX)
+	fn notify_all_unique(&mut self, payload_fn: impl FnMut(u8, &Player) -> Payload) {
+		self.notify_all_unique_but(payload_fn, u8::MAX);
 	}
 	
-	fn notify_all_unique_but(&mut self, mut payload_fn: impl FnMut(u8, &Player) -> Payload, exclude: u8) -> impl NotifyManyFut {
-		let mut join_set = JoinSet::new();
-		let mut idx_by_id = ArrayVec::<_, MAX_PLAYERS>::new_const();
-		for (i, player) in self.setup.players.iter_mut().enumerate() {
-			if i == exclude as usize {continue;}
-			let payload = payload_fn(i as u8, player);
-			let PlayerType::HumanConnection {conn} = &mut player.player_type else {continue;};
-			let handle = join_set.spawn(
-				conn.send_expect_ack(payload)
-					.map(move |result| result.map_err(move |err| (i as u8, err)))
-			);
-			idx_by_id.push((handle.id(), i));
-		}
-		async move {
-			let mut results = ArrayVec::new_const();
-			while let Some(res) = join_set.join_next_with_id().await {
-				match res {
-					Ok((_, Ok(_))) => {}
-					Ok((_, Err(err))) => results.push(err),
-					Err(join_err) => {
-						let idx = idx_by_id.iter().find(|(i, _)| *i == join_err.id()).unwrap().1;
-						results.push((idx as u8, Error::LogicError))
-					},
-				}
-			}
-			results
-		}
+	fn notify_all_unique_but(&mut self, mut payload_fn: impl FnMut(u8, &Player) -> Payload, exclude: u8) {
+		self.setup
+			.players
+			.iter_mut()
+			.enumerate()
+			.filter(|(i,_)| *i != exclude as usize)
+			.for_each(|(i, player)| {
+				let payload = payload_fn(i as u8, player);
+				let PlayerType::HumanConnection {conn} = &mut player.player_type else {return;};
+				let err_q = self.err_q.clone();
+				let fut = conn.send_expect_ack(payload).inspect_err(move |e| err_q.send((i as u8, *e)).unwrap());
+				tokio::spawn(fut);
+			});
 	}
 	
 	/// Attempts to let a player rejoin the game.
@@ -285,7 +313,7 @@ impl GameState {
 		&mut self,
 		conn: Box<ClientConnection>,
 		reject_tx: &UnboundedSender<Box<ClientConnection>>
-	) -> Option<impl NotifyManyFut> {
+	) {
 		if conn.account_id != 0 && let Some(player_idx) = self
 			.setup
 			.players
@@ -297,29 +325,17 @@ impl GameState {
 			let hand = player.hand.clone();
 			let username = player.username();
 			// send snapshot to rejoined player
-			let notify_snapshot_fut = self.notify(Payload::Snapshot(self.snapshot(), hand));
+			self.notify(Payload::Snapshot(self.snapshot(), hand));
 			// send rejoin update to all other players
 			let player_idx = player_idx as u8;
-			Some(self.notify_all_but(Payload::Reconnected {player_idx, username}, player_idx)
-				.then(move |mut errors| async move {
-					if let Some(notify_snapshot_fut) = notify_snapshot_fut && let Err(e) = notify_snapshot_fut.await {
-						errors.push((player_idx, e));
-					}
-					errors
-				}))
+			self.notify_all_but(Payload::Reconnected {player_idx, username}, player_idx);
 		} else {
 			_ = reject_tx.send(conn);
-			None
 		}
 	}
 	
-	fn disconnect_player(&mut self, idx: u8, allow_reconnect: bool) -> impl NotifyManyFut {
+	fn disconnect_player(&mut self, idx: u8, allow_reconnect: bool) {
 		self.setup.players[idx as usize].disconnect(allow_reconnect);
-		self.check_human_remains();
-		self.notify_player_disconnected(idx)
-	}
-	
-	fn check_human_remains(&mut self) {
 		if !self
 			.setup
 			.players
@@ -328,22 +344,11 @@ impl GameState {
 		{
 			self.loop_state = GameLoopState::Terminated;
 		}
-	}
-	
-	fn notify_player_disconnected(&mut self, idx: u8) -> impl NotifyManyFut {
-		self.notify_all(Payload::Disconnected {player_idx: idx})
-	}
-	
-	fn handle_err(&mut self, err: Error) {
-		todo!()
-	}
-	
-	fn handle_errs(&mut self, errs: ErrIdxArr) {
-		todo!()
+		self.notify_all(Payload::Disconnected {player_idx: idx});
 	}
 	
 	/// Returns None if all channels are closed.
-	async fn recv_fallback(&mut self) -> Option<(usize, Result<Ssp, Error>)> {
+	async fn recv_fallback(&mut self) -> Option<(u8, Result<Ssp, NetError>)> {
 		poll_fn(|cx| {
 			let mut any_open = false;
 			for (i, rx) in self
@@ -357,8 +362,8 @@ impl GameState {
 				})
 			{
 				match rx.poll_recv(cx) {
-					Poll::Ready(Some(item)) => return Poll::Ready(Some((i, item))),
-					Poll::Ready(None) => return Poll::Ready(Some((i, Err(Error::Disconnected)))),
+					Poll::Ready(Some(item)) => return Poll::Ready(Some((i as u8, item))),
+					Poll::Ready(None) => return Poll::Ready(Some((i as u8, Err(NetError::Disconnected)))),
 					Poll::Pending => any_open = true,
 				}
 			}
@@ -368,6 +373,71 @@ impl GameState {
 				Poll::Ready(None)
 			}
 		}).await
+	}
+	
+	fn handle_fallback(&mut self, message: Option<(u8, Result<Ssp, NetError>)>) {
+		let Some((player_idx, message)) = message else {
+			self.loop_state = GameLoopState::Terminated;
+			return;
+		};
+		let ssp = match message {
+			Ok(ssp) => ssp,
+			Err(e) => return self.err_q.send((player_idx, e)).unwrap(),
+		};
+		match ssp.payload {
+			Payload::ReportPlayer(report) => self.report_player(player_idx, report, ssp.correlation_id),
+			Payload::LeaveGame => self.disconnect_player(player_idx, false),
+			_ => {}
+		}
+	}
+	
+	fn report_player(&mut self, reporter_idx: u8, report: ReportPlayerRequest, correlation_id: CorrelationId) {
+		let target_is_human = matches!(
+			self.setup
+				.players[report.target_idx as usize]
+				.player_type,
+			PlayerType::HumanConnection {..}
+		);
+		let err_q = self.err_q.clone();
+		let PlayerType::HumanConnection {conn} = &mut self
+			.setup
+			.players[reporter_idx as usize]
+			.player_type
+		else {return};
+		if !target_is_human && correlation_id.id != 0 && !correlation_id.end {
+			if let Err(err) = conn.send_response(Payload::Err(Error::BadPlayerIndex), correlation_id.id) {
+				err_q.send((reporter_idx, err)).unwrap();
+			}
+			return;
+		}
+		let auth_token = conn.auth_token.clone();
+		let ssp_tx = conn.ssp_tx().clone();
+		tokio::spawn(async move {
+			let response = async move {
+				// TODO this will be a private api call
+				// SAFETY:
+				// Must link with server
+				unsafe {&SETBACK_API}.post(URL_API_REPORT_PLAYER)
+					.bearer_auth(auth_token)
+					.json(&report)
+					.send()
+					.await
+					.map_err(|_| Error::ApiErr)?
+					.error_for_status()
+					.map_err(Error::from)?;
+				Ok(())
+			}.await;
+			if correlation_id.id != 0 && !correlation_id.end {
+				let payload = if let Err(err) = response {
+					Payload::Err(err)
+				} else {
+					Payload::Ack
+				};
+				if let Err(err) = ClientConnection::send_response_raw(&ssp_tx, payload, correlation_id.id) {
+					err_q.send((reporter_idx, err)).unwrap();
+				}
+			}
+		});
 	}
 }
 

@@ -4,6 +4,7 @@ use {
 	rand::seq::{IndexedRandom, SliceRandom},
 	serde::{Deserialize, Serialize},
 	tracing::{error, info},
+	tokio::sync::mpsc::UnboundedSender,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -31,10 +32,16 @@ pub struct GameState {
 	pub round_num: u8,
 	/// Makes it easier to keep track of states in this state machine
 	pub loop_state: GameLoopState,
+	#[cfg(not(feature = "client"))]
+	#[serde(skip_serializing)]
+	#[serde(deserialize_with = "deserialize_err_q_panic")]
+	pub err_q: ErrQ,
 }
 
+pub type ErrQ = UnboundedSender<(u8, NetError)>;
+
 #[repr(u8)]
-#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum GameLoopState {
 	Init,
 	DealCards,
@@ -68,7 +75,7 @@ pub trait PromptResponder {
 impl GameState {
 	/// ## Safety
 	/// No mutable pointers to player type must exist.
-	#[cfg(not(feature = "test-dep"))]
+	#[cfg(not(feature = "test-libsetback"))]
 	fn human_idx(&self) -> u8 {
 		self.setup
 			.players
@@ -77,7 +84,7 @@ impl GameState {
 			.unwrap() as u8
 	}
 
-	#[cfg(feature = "test-dep")]
+	#[cfg(feature = "test-libsetback")]
 	fn human_idx(&self) -> u8 {
 		// there is no human player in tests
 		u8::MAX
@@ -89,27 +96,27 @@ impl GameState {
 		mut event_response_rx: Err,
 	) {
 		let human_idx = self.human_idx();
-		let mut loop_state = GameLoopState::DealCards;
 		loop {
 			// Tip: `continue` can be used to not increment the turn index.
-			match loop_state {
+			match self.loop_state {
 				GameLoopState::Init => {
 					event_emitter
 						.send(GameEvent::Init { idx: human_idx })
 						.unwrap();
-					loop_state = GameLoopState::DealCards;
+					self.loop_state = GameLoopState::DealCards;
+					self.increment_turn();
 				}
 				GameLoopState::DealCards => {
 					self.deal_cards();
-					#[cfg(not(feature = "test-dep"))]
 					event_emitter
 						.send(GameEvent::DealCards {
 							hand: self.setup.players[human_idx as usize].hand.clone(),
 							idx: self.turn_idx,
 						})
 						.unwrap();
-					loop_state = GameLoopState::Bidding;
-					// no continue because it is currently the dealer's turn and we want the next player to start bidding.
+					self.loop_state = GameLoopState::Bidding;
+					// it is currently the dealer's turn and we want the next player to start bidding.
+					self.increment_turn();
 				}
 				GameLoopState::Bidding => {
 					let mut bid_err = None;
@@ -118,10 +125,10 @@ impl GameState {
 							event_emitter.send(GameEvent::PromptBid(bid_err)).unwrap();
 							match event_response_rx.recv().await {
 								Ok(GameEvent::PlayerBid { bid, .. }) => {
-									if self.validate_bid(bid) {
+									if self.bid_is_valid(bid) {
 										break bid;
 									}
-									bid_err = Some(Error::BadBid);
+									bid_err = Some(PromptError::Invalid);
 								}
 								Ok(_) => continue,
 								Err(e) => {
@@ -135,16 +142,13 @@ impl GameState {
 					};
 					// It feels redundant to let the player know what they just bid,
 					// but this tells the player that their bid was valid.
-					#[cfg(not(feature = "test-dep"))]
 					event_emitter
 						.send(GameEvent::PlayerBid {
 							idx: self.turn_idx,
 							bid,
 						})
 						.unwrap();
-					if self.player_bid(bid, &mut loop_state) {
-						continue;
-					}
+					self.player_bid(bid);
 				}
 				GameLoopState::Playing => {
 					let mut card_err = None;
@@ -153,10 +157,10 @@ impl GameState {
 							event_emitter.send(GameEvent::PromptCard(card_err)).unwrap();
 							match event_response_rx.recv().await {
 								Ok(GameEvent::PlayerPlayedCard { card, .. }) => {
-									if self.validate_card(card) {
+									if self.card_is_valid(card) {
 										break card;
 									}
-									card_err = Some(Error::BadCard);
+									card_err = Some(PromptError::Invalid);
 								}
 								Ok(_) => continue,
 								Err(e) => {
@@ -170,7 +174,6 @@ impl GameState {
 					};
 					// It feels redundant to let the player know which card they played,
 					// but this tells the player that their card was valid.
-					#[cfg(not(feature = "test-dep"))]
 					event_emitter
 						.send(GameEvent::PlayerPlayedCard {
 							idx: self.turn_idx,
@@ -178,39 +181,40 @@ impl GameState {
 						})
 						.unwrap();
 					match self.player_played_card(card) {
+						PlayedCardResult::None => {}
 						PlayedCardResult::RoundOver(round_scores) => {
-							#[cfg(not(feature = "test-dep"))]
 							event_emitter
 								.send(GameEvent::RoundScores(round_scores))
 								.unwrap();
 							if self.team_won() {
-								loop_state = GameLoopState::GameOver;
+								self.loop_state = GameLoopState::GameOver;
 							} else {
-								loop_state = GameLoopState::DealCards;
+								self.loop_state = GameLoopState::DealCards;
 							}
-							continue;
 						}
-						PlayedCardResult::TurnOver => continue,
-						PlayedCardResult::None => {}
+						PlayedCardResult::GameOver(round_scores) => {
+							event_emitter
+								.send(GameEvent::RoundScores(round_scores))
+								.unwrap();
+							self.loop_state = GameLoopState::GameOver;
+						}
 					}
 				}
 				GameLoopState::GameOver => {
-					#[cfg(not(feature = "test-dep"))]
 					event_emitter.send(GameEvent::GameOver).unwrap();
 					info!("Game over");
 					return;
 				}
 				GameLoopState::Terminated => return,
 			}
-			self.turn_idx = self.next_turn();
 		}
 	}
 }
 
 impl GameState {
-	pub fn next_turn(&self) -> u8 {
+	pub fn increment_turn(&mut self) {
 		let turn_idx = self.turn_idx + 1;
-		if turn_idx as usize == self.setup.players.len() {
+		self.turn_idx = if turn_idx as usize == self.setup.players.len() {
 			0
 		} else {
 			turn_idx
@@ -384,15 +388,15 @@ impl GameState {
 	}
 
 	/// Returns true if valid, false if invalid. This function is idempotent.
-	pub fn validate_bid(&self, bid: Bid) -> bool {
+	pub fn bid_is_valid(&self, bid: Bid) -> bool {
 		bid == Bid::Pass
 			|| (bid > self.highest_bid && (bid != Bid::Override || self.setup.rules.dealer_override))
 	}
 
 	/// Returns true if valid, false if invalid. This function is idempotent.
-	pub fn validate_card(&self, card: Card) -> bool {
+	pub fn card_is_valid(&self, card: Card) -> bool {
 		let player = &self.setup.players[self.turn_idx as usize];
-		let has_card = player.hand.iter().any(|c| *c == card);
+		let has_card = player.hand.contains(&card);
 		let can_follow = player.can_follow(self.lead);
 		let is_owner = self.owner_idx == self.turn_idx;
 		let is_lead = card.suit == self.lead;
@@ -404,33 +408,31 @@ impl GameState {
 	///
 	/// Returns true if bidding should end, and the turn index should not be incremented following this function.
 	/// Returns false if the next player needs to bid.
-	pub fn player_bid(&mut self, bid: Bid, loop_state: &mut GameLoopState) -> bool {
-		debug_assert!(self.validate_bid(bid));
+	pub fn player_bid(&mut self, bid: Bid) {
+		debug_assert!(self.bid_is_valid(bid));
 		info!("player {} bid {}", self.turn_idx, bid.to_points());
-		if *loop_state == GameLoopState::GameOver {
-			return true;
-		}
 		if bid != Bid::Pass {
 			self.highest_bid = bid;
 			self.highest_bidder_idx = self.turn_idx;
 			if (bid == Bid::Four && !self.setup.rules.dealer_override)
 				|| (bid == Bid::Override && self.setup.rules.dealer_override)
 			{
-				return true;
+				self.loop_state = GameLoopState::Playing;
+				return;
 			}
 		}
 		// if all players have bid, end the turn...
-		let turn_should_end = self.turn_idx == self.dealer_idx;
-		if turn_should_end {
+		if self.turn_idx == self.dealer_idx {
 			if self.highest_bid == Bid::Pass {
-				*loop_state = GameLoopState::DealCards;
+				self.loop_state = GameLoopState::DealCards;
 			} else {
-				*loop_state = GameLoopState::Playing;
+				self.loop_state = GameLoopState::Playing;
 				self.turn_idx = self.highest_bidder_idx;
 				self.owner_idx = self.highest_bidder_idx;
 			}
+		} else {
+			self.increment_turn();
 		}
-		turn_should_end
 	}
 
 	/// The card must have already been validated because it will be taken from the player's hand and moved to the pile.
@@ -438,7 +440,7 @@ impl GameState {
 	/// Returns Some if card playing for the round should end, and the turn index should not be incremented following this function.
 	/// Returns None if the next player needs to play a card.
 	pub fn player_played_card(&mut self, card: Card) -> PlayedCardResult {
-		debug_assert!(self.validate_card(card));
+		debug_assert!(self.card_is_valid(card));
 		info!("player {} played the {card:?}", self.turn_idx);
 		let hand = &mut self.setup.players[self.turn_idx as usize].hand;
 		let remove_idx = hand.iter().position(|c| *c == card).unwrap(); // validate_card already looks for the card in the hand
@@ -570,8 +572,9 @@ impl GameState {
 				info!("Round ended - {round_scores:?}");
 				return PlayedCardResult::RoundOver(round_scores);
 			}
-			return PlayedCardResult::TurnOver;
+			return PlayedCardResult::None;
 		}
+		self.increment_turn();
 		PlayedCardResult::None
 	}
 
@@ -589,9 +592,14 @@ impl GameState {
 	}
 }
 
+#[derive(Clone)]
 pub enum PlayedCardResult {
 	None,
-	TurnOver,
 	RoundOver(RoundScores),
 	GameOver(RoundScores),
 }
+
+#[cfg(not(feature = "client"))]
+fn deserialize_err_q_panic<'de, D: serde::Deserializer<'de>>(_: D)
+	-> Result<UnboundedSender<(u8, NetError)>, D::Error>
+{ Err(serde::de::Error::custom("unknown field `err_q`")) }

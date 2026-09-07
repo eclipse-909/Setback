@@ -20,7 +20,6 @@ pub struct Arena<'arena> {
 
 impl<'arena> Arena<'arena> {
 	/// Creates an empty [Arena].
-	#[inline(always)]
 	#[allow(clippy::new_without_default)]
 	pub const fn new() -> Self {
 		Self {
@@ -34,7 +33,6 @@ impl<'arena> Arena<'arena> {
 	}
 
 	/// Creates an empty [Arena] with an initial capacity of at least the given amount.
-	#[inline(always)]
 	pub fn new_with_capacity(bytes: usize) -> Self {
 		Self {
 			allocator: ArenaAlloc {
@@ -79,7 +77,6 @@ impl<'arena> Arena<'arena> {
 
 impl<'arena> Deref for Arena<'arena> {
 	type Target = ArenaAlloc<'arena>;
-	#[inline(always)]
 	fn deref(&self) -> &Self::Target {
 		&self.allocator
 	}
@@ -88,7 +85,6 @@ impl<'arena> Deref for Arena<'arena> {
 /// Fat pointer to the heap-allocated memory.
 type ArenaSegment = Box<[MaybeUninit<u8>]>;
 
-#[inline(always)]
 fn new_mem_chunk(cap: usize) -> ArenaSegment {
 	Box::new_uninit_slice((cap / PAGE_SIZE + 1) * PAGE_SIZE)
 }
@@ -159,7 +155,6 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 	}
 
 	/// Memory cannot be deallocated individually from an arena. This function is a no-op.
-	#[inline(always)]
 	unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
 
 	/// Same as [Allocator::grow] but no memory is deallocated here.

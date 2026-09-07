@@ -26,10 +26,10 @@ tokio = { workspace = true, features = ["sync"] }
 scc.workspace = true
 sockudo-ws.workspace = true
 rustls.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-rustls.workspace = true
 tokio-util.workspace = true
-url.workspace = true
 webpki-roots.workspace = true
 
 [dev-dependencies]
@@ -38,7 +38,7 @@ tracing-subscriber.workspace = true
 
 [features]
 client = [] # turn off client feature for server
-test-dep = []
+test-libsetback = []
 
 [[example]]
 name = "singleplayer"

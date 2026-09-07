@@ -23,7 +23,7 @@ struct Empty;
 
 impl EventEmitter for Empty {
 	fn send(&self, _event: GameEvent) -> Result<(), Error> {
-		Err(Error::LogicError)
+		Ok(())
 	}
 }
 impl EventResponseReceiver for Empty {

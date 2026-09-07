@@ -67,6 +67,7 @@ pub const MAX_CLIENTS: usize = 10_000;
 pub const MAX_GAMES: usize = 10_000;
 /// Time between receiving a SIGINT and process exiting.
 pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_hours(4);
+pub const TIMEOUT_STRIKES: u8 = 3;
 
 // files
 

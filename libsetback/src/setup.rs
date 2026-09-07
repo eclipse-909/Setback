@@ -142,7 +142,7 @@ impl GameSetup {
 			matches!(pt, PlayerType::HumanEmpty),
 			"Player must be an empty human slot before setting a client connection"
 		);
-		*pt = PlayerType::HumanConnection { conn: Some(conn) };
+		*pt = PlayerType::HumanConnection { conn };
 	}
 
 	/// Initializes a game loop that hasn't started yet.
@@ -150,7 +150,10 @@ impl GameSetup {
 	/// The setup is in an invalid state
 	/// like multiple humans in singleplayer or empty human slots in multiplayer
 	#[allow(clippy::result_large_err)]
-	pub fn init(mut self) -> Result<GameState, Self> {
+	pub fn init(
+		mut self,
+		#[cfg(not(feature = "client"))] err_q: ErrQ,
+	) -> Result<GameState, Self> {
 		info!("Attempting to initialize game");
 		// verify that the players are in the correct state
 		// Singleplayer
@@ -190,12 +193,12 @@ impl GameSetup {
 					"PlayerType should be one of SingleplayerSelf, HumanConnection, HumanEmpty, or Ai"
 				),
 			});
-		#[cfg(all(feature = "client", not(feature = "test-dep")))]
+		#[cfg(all(feature = "client", not(feature = "test-libsetback")))]
 		if num_singleplayer != 1 || self.0.players.len() - 1 != num_ai {
 			error!("Incorrect player configuration - humans: {num_singleplayer}, AIs: {num_ai}");
 			return Err(self);
 		}
-		#[cfg(all(feature = "client", feature = "test-dep"))]
+		#[cfg(all(feature = "client", feature = "test-libsetback"))]
 		if num_ai != self.0.players.len() {
 			warn!("Incorrect player configuration - all players should be AI for tests");
 			return Err(self);
@@ -253,6 +256,7 @@ impl GameSetup {
 			round_num: 0,
 			setup: self.0,
 			loop_state: GameLoopState::Init,
+			#[cfg(not(feature = "client"))] err_q,
 		})
 	}
 }

@@ -37,12 +37,12 @@ impl Ssp {
 		Self::new(payload, CorrelationId::event())
 	}
 
-	pub fn encode<E: Extend<u8>>(&self, e: E) -> Result<E, Error> {
-		postcard::to_extend(self, e).map_err(|_| Error::BadEncoding)
+	pub fn encode<E: Extend<u8>>(&self, e: E) -> Result<E, NetError> {
+		postcard::to_extend(self, e).map_err(|_| NetError::BadRequest)
 	}
 
-	pub fn decode(bytes: &[u8]) -> Result<Self, Error> {
-		postcard::from_bytes(bytes).map_err(|_| Error::BadEncoding)
+	pub fn decode(bytes: &[u8]) -> Result<Self, NetError> {
+		postcard::from_bytes(bytes).map_err(|_| NetError::BadRequest)
 	}
 }
 
@@ -80,14 +80,14 @@ pub enum Payload {
 	/// Server responds with Ack if authentication was successful.
 	/// Server responds with Err if authentication was unsuccessful.
 	Authenticate { version: Version, auth_token: String },
-	/// Client <--Disconnect--- Server
+	/// Client <--Disconnected--- Server
 	///
 	/// Spontaneous
 	///
 	/// Informs you when another player disconnects and provides the index of that player.
 	/// The server internally uses Error::Disconnected to track when players disconnect.
 	Disconnected { player_idx: u8 },
-	/// Client <--Disconnect--- Server
+	/// Client <--Reconnected--- Server
 	///
 	/// Spontaneous
 	///
