@@ -8,7 +8,7 @@ use {
 pub struct Player {
 	pub player_type: PlayerType,
 	pub hand: ArrayVec<Card, CARDS_PER_PLAYER>,
-	/// This is some arbitrary integer during the setup because team numbers can be arbitrary and nonconsecutive.
+	/// This is some arbitrary integer while in the lobby because team numbers can be arbitrary and nonconsecutive.
 	/// Once the game starts, team ids are normalized to be consecutive and zero-based,
 	/// meaning they can be used as an index into an array of teams.
 	pub team_id: u8,
@@ -26,7 +26,7 @@ pub enum PlayerType {
 		/// In that case, just don't display it.
 		username: String,
 	} = 0,
-	/// A slot for a human player in a multiplayer game setup that doesn't have a connection yet.
+	/// A slot for a human player in a multiplayer lobby that doesn't have a connection yet.
 	#[cfg(not(feature = "client"))]
 	HumanEmpty = 1,
 	/// A connected player in multiplayer.
@@ -137,7 +137,7 @@ impl Player {
 			PlayerType::HumanConnection { conn } => conn.username.clone(),
 			#[cfg(not(feature = "client"))]
 			PlayerType::HumanEmpty => "Waiting for player...".to_string(),
-			PlayerType::Ai { .. } => "CPU".to_string(),
+			PlayerType::Ai { .. } => AI_NAME.to_string(),
 		}
 	}
 	
@@ -150,9 +150,9 @@ impl Player {
 			PlayerType::Ai { account_id: if allow_reconnect {id} else {0} }
 		) else {return;};
 		if allow_reconnect {
-			_ = conn.send_err(NetError::Disconnected.into());
+			_ = conn.send_err::<GamePayload>(NetError::Disconnected.into());
 		} else {
-			_ = conn.send_event(Payload::LeaveGame);
+			_ = conn.send_event(GamePayload::LeaveGame);
 		}
 	}
 }

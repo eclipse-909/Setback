@@ -1,7 +1,7 @@
 use {
 	crate::{UI_SCALE, components::*},
 	dioxus::prelude::*,
-	libsetback::*,
+	setback::*,
 };
 
 //TODO these values need to be loaded from the user's saved settings

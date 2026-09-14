@@ -9,7 +9,7 @@ use {
 		routing::{get, post},
 	},
 	http::{Method, header::HeaderValue},
-	libsetback::SETBACK_PROXY,
+	setback::SETBACK_PROXY,
 	std::net::{IpAddr, Ipv4Addr, SocketAddr},
 	tower_cookies::{CookieManagerLayer, cookie::Key},
 	tower_http::cors::CorsLayer,

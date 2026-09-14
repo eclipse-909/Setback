@@ -25,8 +25,6 @@ pub trait ResponseFut = Future<Output=Result<(Payload, u32), NetError>> + 'stati
 pub trait WebSocketeer {
 	/// this is how you send all messages
 	fn ssp_tx(&self) -> &SspTx;
-	/// this is how you read messages that don't (yet) belong to a correlation
-	fn fallback_rx(&mut self) -> &mut FallbackRx;
 	/// # Important!
 	/// The client must start at 1 and the server must start at 3.
 	/// This prevents collisions by making them
@@ -38,12 +36,12 @@ pub trait WebSocketeer {
 		*self.correlation_id()
 	}
 	
-	async fn run_rw_handler(
+	fn run_rw_handler(
 		mut reader: WsReader,
 		mut writer: WsWriter,
 		mut ssp_rx: SspRx,
 		fallback_tx: FallbackTx,
-	) {
+	) -> impl Future<Output=()> {async move {
 		// TODO maybe there could be better error handling?
 		// Right now it just disconnects the moment something goes wrong.
 		let mut correlation_map = CorrelationMap::default();
@@ -88,7 +86,7 @@ pub trait WebSocketeer {
 				}
 			}
 		}
-	}
+	}}
 	
 	// these functions are not marked async because we don't want to move self into the futures they return
 	
@@ -96,7 +94,7 @@ pub trait WebSocketeer {
 	/// Returns the payload of the response and a correlation id.
 	/// The correlation id is 0 if the other side is not expecting a response.
 	/// If the correlation id is not 0, you must send another message.
-	fn send_new_request(&mut self, payload: Payload) -> impl ResponseFut {
+	fn send_new_request(&mut self, payload: impl Into<Payload>) -> impl ResponseFut {
 		self.send_request(payload, 0)
 	}
 	
@@ -106,7 +104,7 @@ pub trait WebSocketeer {
 	/// Returns the payload of the response and a correlation id.
 	/// The correlation id is 0 if the other side is not expecting a response.
 	/// If the correlation id is not 0, you must send another message.
-	fn send_request(&mut self, payload: Payload, mut correlation_id: u32) -> impl ResponseFut {
+	fn send_request(&mut self, payload: impl Into<Payload>, mut correlation_id: u32) -> impl ResponseFut {
 		if correlation_id == 0 {
 			correlation_id = self.auto_inc_id();
 		}
@@ -114,7 +112,7 @@ pub trait WebSocketeer {
 	}
 	
 	/// Correlation id must not be 0!
-	fn send_request_raw(ssp_tx: &SspTx, payload: Payload, correlation_id: u32) -> impl ResponseFut {
+	fn send_request_raw(ssp_tx: &SspTx, payload: impl Into<Payload>, correlation_id: u32) -> impl ResponseFut {
 		let (tx, rx) = channel();
 		let send_res = ssp_tx
 			.send((Some(tx), Ssp::request(payload, correlation_id)))
@@ -130,28 +128,28 @@ pub trait WebSocketeer {
 	/// Sends a message in response to some request from the other side.
 	/// This ends a correlation, so if you need to keep sending messages,
 	/// use [Self::ws_request].
-	fn send_response(&mut self, payload: Payload, correlation_id: u32) -> Result<(), NetError> {
+	fn send_response(&mut self, payload: impl Into<Payload>, correlation_id: u32) -> Result<(), NetError> {
 		debug_assert_ne!(correlation_id, 0);
 		Self::send_response_raw(self.ssp_tx(), payload, correlation_id)
 	}
 	
-	fn send_response_raw(ssp_tx: &SspTx, payload: Payload, correlation_id: u32) -> Result<(), NetError> {
+	fn send_response_raw(ssp_tx: &SspTx, payload: impl Into<Payload>, correlation_id: u32) -> Result<(), NetError> {
 		ssp_tx
 			.send((None, Ssp::response(payload, correlation_id)))
 			.map_err(|_| NetError::Disconnected)
 	}
 	
 	/// A one-off message to send with no expected response.
-	fn send_event(&mut self, payload: Payload) -> Result<(), NetError> {
+	fn send_event(&mut self, payload: impl Into<Payload>) -> Result<(), NetError> {
 		self.ssp_tx()
 			.send((None, Ssp::event(payload)))
 			.map_err(|_| NetError::Disconnected)
 	}
 	
 	/// Sends an Ack in response if correlation_id is not 0
-	fn send_response_ack(&mut self, correlation_id: u32) -> Result<(), NetError> {
+	fn send_response_ack<P: PayloadCommon>(&mut self, correlation_id: u32) -> Result<(), NetError> {
 		if correlation_id == 0 {return Ok(());}
-		self.send_response(Payload::Ack, correlation_id)
+		self.send_response(P::ack(), correlation_id)
 	}
 }
 
@@ -162,7 +160,7 @@ pub trait WebSocketeer {
 mod ws_client {
 	use {
 		bytes::BytesMut,
-		crate::{Error, URL_SERVER_WS, ssp::Ssp},
+		crate::*,
 		futures::{SinkExt, StreamExt, stream::{SplitStream, SplitSink}},
 		gloo::net::websocket::{Message, futures::WebSocket},
 	};
@@ -170,9 +168,10 @@ mod ws_client {
 	pub type WsReader = SplitStream<WebSocket>;
 	pub type WsWriter = SplitSink<WebSocket, Message>;
 
-	pub async fn ws_connect() -> Result<(WsWriter, WsReader), NetError> {
-		Ok(WebSocket::open(URL_SERVER_WS)
-			.map_err(|_| NetError::Disconnected)?.split())
+	pub async fn ws_connect() -> Result<(WsReader, WsWriter), NetError> {
+		let (w, r) = WebSocket::open(URL_SERVER_WS)
+			.map_err(|_| NetError::Disconnected)?.split();
+		Ok((r, w))
 	}
 
 	pub async fn ws_send(ws: &mut WsWriter, ssp: &Ssp) -> Result<(), NetError> {

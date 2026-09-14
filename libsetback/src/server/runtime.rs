@@ -1,21 +1,29 @@
 use {
-	arrayvec::ArrayVec,
 	crate::*,
-	scc::{HashMap, HashSet},
+	arrayvec::ArrayVec,
 	futures::{FutureExt, TryFutureExt},
 	std::{
-		sync::Arc,
-		time::Duration,
 		future::poll_fn,
-		task::{Poll, Context},
 		pin::Pin,
+		task::{Context, Poll},
+		time::Duration,
 	},
 	tokio::{
 		sync::mpsc::*,
 		task::JoinHandle,
-		time::sleep
+		time::sleep,
 	},
 };
+
+pub type GspTx = UnboundedSender<Gsp>;
+pub type GspRx = UnboundedReceiver<Gsp>;
+
+/// Game-Server Protocol
+pub enum Gsp {
+	StartGame,
+	TerminateGame,
+	RejectRejoin(Box<ClientConnection>),
+}
 
 type ConnArr = ArrayVec<Box<ClientConnection>, MAX_PLAYERS>;
 type ErrIdxArr = ArrayVec<(u8, NetError), MAX_PLAYERS>;
@@ -60,9 +68,9 @@ pub struct GameLoopHandle {
 }
 
 impl GameState {
-	pub fn spawn_server(
+	pub fn start_game(
 		mut self,
-		reject_tx: UnboundedSender<Box<ClientConnection>>,
+		gsp_tx: GspTx,
 		mut err_q: UnboundedReceiver<(u8, NetError)>,
 	) -> GameLoopHandle {
 		let (rejoin_tx, mut rejoin_rx) = channel(MAX_PLAYERS);
@@ -72,16 +80,17 @@ impl GameState {
 				tokio::select! {
 					client_io_res = &mut client_io_fut => {
 						if matches!(client_io_res, ClientIOResult::GameOver) {
+							gsp_tx.send(Gsp::TerminateGame).unwrap();
 							return self.collect_players();
 						}
 						client_io_fut = self.advance_game(client_io_res);
 					}
 					message = self.recv_fallback() => self.handle_fallback(message),
-					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn, &reject_tx),
+					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn, &gsp_tx),
 					Some((idx, err)) = err_q.recv() => {
 						match err {
 							NetError::Disconnected => self.disconnect_player(idx, true),
-							e => self.notify(Payload::Err(e.into())),
+							e => self.notify(GamePayload::Err(e.into())),
 						}
 					}
 				}
@@ -101,11 +110,11 @@ impl GameState {
 						} else {
 							self.loop_state = GameLoopState::DealCards;
 						}
-						self.notify_all(Payload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
+						self.notify_all(GamePayload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
 					}
 					PlayedCardResult::GameOver(round_scores) => {
 						self.loop_state = GameLoopState::GameOver;
-						self.notify_all(Payload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
+						self.notify_all(GamePayload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
 					}
 				}
 			}
@@ -123,7 +132,7 @@ impl GameState {
 			GameLoopState::Init => {
 				self.loop_state = GameLoopState::DealCards;
 				self.increment_turn();
-				self.notify_all_unique(|idx,_| Payload::GameEvent(GameEvent::Init { idx }));
+				self.notify_all_unique(|idx,_| GamePayload::GameEvent(GameEvent::Init { idx }));
 				ClientIOFut::None
 			}
 			GameLoopState::DealCards => {
@@ -131,7 +140,7 @@ impl GameState {
 				self.loop_state = GameLoopState::Bidding;
 				self.increment_turn();
 				let dealer_idx = self.dealer_idx;
-				self.notify_all_unique(|_, player| Payload::GameEvent(GameEvent::DealCards {
+				self.notify_all_unique(|_, player| GamePayload::GameEvent(GameEvent::DealCards {
 					hand: player.hand.clone(),
 					idx: dealer_idx,
 				}));
@@ -141,7 +150,7 @@ impl GameState {
 			GameLoopState::Playing => self.prompt::<Card>(io_res),
 			GameLoopState::GameOver => {
 				self.loop_state = GameLoopState::Terminated;
-				self.notify_all(Payload::GameEvent(GameEvent::GameOver));
+				self.notify_all(GamePayload::GameEvent(GameEvent::GameOver));
 				ClientIOFut::None
 			}
 			GameLoopState::Terminated => ClientIOFut::GameOver,
@@ -150,7 +159,7 @@ impl GameState {
 	}
 	
 	fn collect_players(self) -> ConnArr {
-		self.setup
+		self.lobby_state
 			.players
 			.into_iter()
 			.filter_map(|p| match p.player_type {
@@ -161,10 +170,12 @@ impl GameState {
 	}
 
 	/// Makes a copy of the game loop without sensitive data like the player's hand or the deck.
-	fn snapshot(&self) -> Box<Self> {
+	fn snapshot(&self, player_idx: u8) -> Box<Self> {
+		let mut snapshot = self.lobby_state.snapshot();
+		snapshot.players[player_idx as usize].hand = self.lobby_state.players[player_idx as usize].hand.clone();
 		Box::new(Self {
-			// setup and deck are not fully cloned to prevent the user from accessing protected data
-			setup: self.setup.snapshot(),
+			// lobby and deck are not fully cloned to prevent the user from accessing protected data
+			lobby_state: snapshot,
 			deck: ArrayVec::new_const(),
 			// the rest are fully cloned
 			teams: self.teams.clone(),
@@ -187,7 +198,7 @@ impl GameState {
 	fn start_turn_timer(&self) -> PromptState {
 		PromptState {
 			correlation_id: 0,
-			timeout: Box::pin(sleep(Duration::from_secs(self.setup.rules.turn_time as u64))),
+			timeout: Box::pin(sleep(Duration::from_secs(self.lobby_state.rules.turn_time as u64))),
 		}
 	}
 	
@@ -212,7 +223,7 @@ impl GameState {
 						}
 						PromptError::Net(NetError::TimedOut) => {
 							if let PlayerType::HumanConnection {conn} = &mut self
-								.setup
+								.lobby_state
 								.players[self.turn_idx as usize]
 								.player_type
 							{
@@ -234,8 +245,9 @@ impl GameState {
 							let play_result = T::ai_play(self).notify_play(self, 0);
 							T::play_res_to_io_fut(play_result)
 						}
-						PromptError::Net(NetError::BadRequest)
-						| PromptError::Invalid => self.try_prompt::<T>(prompt_state),
+						PromptError::Net(NetError::BadRequest | NetError::ServerError)
+						| PromptError::Invalid
+						=> self.try_prompt::<T>(prompt_state),
 					}
 				}
 			}
@@ -244,7 +256,7 @@ impl GameState {
 	}
 	
 	fn try_prompt<T: PromptResult>(&mut self, mut prompt_state: PromptState) -> ClientIOFut {
-		let conn = match self.setup.players[self.turn_idx as usize].player_type {
+		let conn = match self.lobby_state.players[self.turn_idx as usize].player_type {
 			PlayerType::Ai {..} => {
 				let play_result = T::ai_play(self).notify_play(self, prompt_state.correlation_id);
 				return T::play_res_to_io_fut(play_result);
@@ -270,31 +282,32 @@ impl GameState {
 	}
 	
 	/// Notifies the current turn player
-	fn notify(&mut self, payload: Payload) {
+	fn notify(&mut self, payload: GamePayload) {
 		let err_q = self.err_q.clone();
 		let idx = self.turn_idx;
 		let PlayerType::HumanConnection {conn} = &mut self
-			.setup.players[idx as usize]
+			.lobby_state
+			.players[idx as usize]
 			.player_type
 		else {return};
 		let fut = conn.send_expect_ack(payload).inspect_err(move |e| err_q.send((idx, *e)).unwrap());
 		tokio::spawn(fut);
 	}
 	
-	fn notify_all(&mut self, payload: Payload) {
+	fn notify_all(&mut self, payload: GamePayload) {
 		self.notify_all_but(payload, u8::MAX);
 	}
 	
-	pub fn notify_all_but(&mut self, payload: Payload, exclude: u8) {
+	pub fn notify_all_but(&mut self, payload: GamePayload, exclude: u8) {
 		self.notify_all_unique_but(move |_,_| payload.clone(), exclude);
 	}
 	
-	fn notify_all_unique(&mut self, payload_fn: impl FnMut(u8, &Player) -> Payload) {
+	fn notify_all_unique(&mut self, payload_fn: impl FnMut(u8, &Player) -> GamePayload) {
 		self.notify_all_unique_but(payload_fn, u8::MAX);
 	}
 	
-	fn notify_all_unique_but(&mut self, mut payload_fn: impl FnMut(u8, &Player) -> Payload, exclude: u8) {
-		self.setup
+	fn notify_all_unique_but(&mut self, mut payload_fn: impl FnMut(u8, &Player) -> GamePayload, exclude: u8) {
+		self.lobby_state
 			.players
 			.iter_mut()
 			.enumerate()
@@ -312,39 +325,38 @@ impl GameState {
 	fn rejoin_player(
 		&mut self,
 		conn: Box<ClientConnection>,
-		reject_tx: &UnboundedSender<Box<ClientConnection>>
+		gsp_tx: &GspTx,
 	) {
 		if conn.account_id != 0 && let Some(player_idx) = self
-			.setup
+			.lobby_state
 			.players
 			.iter_mut()
 			.position(|p| matches!(p.player_type, PlayerType::Ai {account_id} if conn.account_id == account_id))
 		{
-			let player = &mut self.setup.players[player_idx];
+			let player = &mut self.lobby_state.players[player_idx];
+			let player_idx = player_idx as u8;
 			player.player_type = PlayerType::HumanConnection {conn};
-			let hand = player.hand.clone();
 			let username = player.username();
 			// send snapshot to rejoined player
-			self.notify(Payload::Snapshot(self.snapshot(), hand));
+			self.notify(GamePayload::Snapshot {game_state: self.snapshot(player_idx), player_idx});
 			// send rejoin update to all other players
-			let player_idx = player_idx as u8;
-			self.notify_all_but(Payload::Reconnected {player_idx, username}, player_idx);
+			self.notify_all_but(GamePayload::PlayerRejoined {player_idx, username}, player_idx);
 		} else {
-			_ = reject_tx.send(conn);
+			_ = gsp_tx.send(Gsp::RejectRejoin(conn));
 		}
 	}
 	
 	fn disconnect_player(&mut self, idx: u8, allow_reconnect: bool) {
-		self.setup.players[idx as usize].disconnect(allow_reconnect);
+		self.lobby_state.players[idx as usize].disconnect(allow_reconnect);
 		if !self
-			.setup
+			.lobby_state
 			.players
 			.iter()
 			.any(|p| matches!(p.player_type, PlayerType::HumanConnection{..}))
 		{
 			self.loop_state = GameLoopState::Terminated;
 		}
-		self.notify_all(Payload::Disconnected {player_idx: idx});
+		self.notify_all(GamePayload::PlayerDisconnected {player_idx: idx});
 	}
 	
 	/// Returns None if all channels are closed.
@@ -352,7 +364,7 @@ impl GameState {
 		poll_fn(|cx| {
 			let mut any_open = false;
 			for (i, rx) in self
-				.setup
+				.lobby_state
 				.players
 				.iter_mut()
 				.enumerate()
@@ -384,28 +396,28 @@ impl GameState {
 			Ok(ssp) => ssp,
 			Err(e) => return self.err_q.send((player_idx, e)).unwrap(),
 		};
-		match ssp.payload {
-			Payload::ReportPlayer(report) => self.report_player(player_idx, report, ssp.correlation_id),
-			Payload::LeaveGame => self.disconnect_player(player_idx, false),
+		match ssp.payload.try_game() {
+			Ok(GamePayload::ReportPlayer(report)) => self.report_player(player_idx, report, ssp.correlation_id),
+			Ok(GamePayload::LeaveGame) => self.disconnect_player(player_idx, false),
 			_ => {}
 		}
 	}
 	
 	fn report_player(&mut self, reporter_idx: u8, report: ReportPlayerRequest, correlation_id: CorrelationId) {
 		let target_is_human = matches!(
-			self.setup
+			self.lobby_state
 				.players[report.target_idx as usize]
 				.player_type,
 			PlayerType::HumanConnection {..}
 		);
 		let err_q = self.err_q.clone();
 		let PlayerType::HumanConnection {conn} = &mut self
-			.setup
+			.lobby_state
 			.players[reporter_idx as usize]
 			.player_type
 		else {return};
 		if !target_is_human && correlation_id.id != 0 && !correlation_id.end {
-			if let Err(err) = conn.send_response(Payload::Err(Error::BadPlayerIndex), correlation_id.id) {
+			if let Err(err) = conn.send_response(GamePayload::Err(Error::BadPlayerIndex), correlation_id.id) {
 				err_q.send((reporter_idx, err)).unwrap();
 			}
 			return;
@@ -429,39 +441,14 @@ impl GameState {
 			}.await;
 			if correlation_id.id != 0 && !correlation_id.end {
 				let payload = if let Err(err) = response {
-					Payload::Err(err)
+					GamePayload::Err(err)
 				} else {
-					Payload::Ack
+					GamePayload::Ack
 				};
 				if let Err(err) = ClientConnection::send_response_raw(&ssp_tx, payload, correlation_id.id) {
 					err_q.send((reporter_idx, err)).unwrap();
 				}
 			}
 		});
-	}
-}
-
-pub type ClientStore = HashSet<u32>;
-pub type GameSetupStore = HashMap<u32, SetupState>;
-pub type GameRuntimeStore = HashMap<u32, GameLoopHandle>;
-
-/// State for the setback server.
-///
-/// The client store holds clients that aren't in a game.
-/// Clients in a game will be owned by that game in either
-/// the game setup store or game runtime store.
-pub struct State {
-	pub client_store: ClientStore,
-	pub game_setup_store: GameSetupStore,
-	pub game_runtime_store: GameRuntimeStore,
-}
-
-impl State {
-	pub fn new() -> Arc<Self> {
-		Arc::new(Self {
-			client_store: HashSet::new(),
-			game_setup_store: HashMap::new(),
-			game_runtime_store: HashMap::new(),
-		})
 	}
 }

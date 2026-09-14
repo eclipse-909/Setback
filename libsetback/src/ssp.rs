@@ -1,5 +1,4 @@
 use {
-	arrayvec::ArrayVec,
 	crate::*,
 	serde::{Deserialize, Serialize},
 };
@@ -19,21 +18,21 @@ pub struct Ssp {
 }
 
 impl Ssp {
-	pub const fn new(payload: Payload, correlation_id: CorrelationId) -> Self {
+	pub fn new(payload: impl Into<Payload>, correlation_id: CorrelationId) -> Self {
 		Self {
 			src_id: 0,
 			correlation_id,
-			payload,
+			payload: payload.into(),
 		}
 	}
 
-	pub const fn request(payload: Payload, correlation_id: u32) -> Self {
+	pub fn request(payload: impl Into<Payload>, correlation_id: u32) -> Self {
 		Self::new(payload, CorrelationId::request(correlation_id))
 	}
-	pub const fn response(payload: Payload, correlation_id: u32) -> Self {
+	pub fn response(payload: impl Into<Payload>, correlation_id: u32) -> Self {
 		Self::new(payload, CorrelationId::response(correlation_id))
 	}
-	pub const fn event(payload: Payload) -> Self {
+	pub fn event(payload: impl Into<Payload>) -> Self {
 		Self::new(payload, CorrelationId::event())
 	}
 
@@ -64,35 +63,109 @@ impl CorrelationId {
 	}
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub enum Payload {
+	Handshake(HandshakePayload),
+	Server(ServerPayload),
+	Lobby(LobbyPayload),
+	Game(GamePayload),
+}
+
+impl Payload {
+	pub fn try_handshake(self) -> Result<HandshakePayload, NetError> {
+		match self {
+			Self::Handshake(p) => Ok(p),
+			#[cfg(feature = "client")]
+			_ => Err(NetError::ServerError),
+			#[cfg(not(feature = "client"))]
+			_ => Err(NetError::BadRequest.into()),
+		}
+	}
+	
+	pub fn try_server(self) -> Result<ServerPayload, NetError> {
+		match self {
+			Self::Server(p) => Ok(p),
+			#[cfg(feature = "client")]
+			_ => Err(NetError::ServerError),
+			#[cfg(not(feature = "client"))]
+			_ => Err(NetError::BadRequest.into()),
+		}
+	}
+	
+	pub fn try_lobby(self) -> Result<LobbyPayload, NetError> {
+		match self {
+			Self::Lobby(p) => Ok(p),
+			#[cfg(feature = "client")]
+			_ => Err(NetError::ServerError),
+			#[cfg(not(feature = "client"))]
+			_ => Err(NetError::BadRequest.into()),
+		}
+	}
+	
+	pub fn try_game(self) -> Result<GamePayload, NetError> {
+		match self {
+			Self::Game(p) => Ok(p),
+			#[cfg(feature = "client")]
+			_ => Err(NetError::ServerError),
+			#[cfg(not(feature = "client"))]
+			_ => Err(NetError::BadRequest.into()),
+		}
+	}
+	
+	pub fn is_ack(&self) -> bool {
+		match self {
+			Payload::Handshake(p) => matches!(p, HandshakePayload::Ack),
+			Payload::Server(p) => matches!(p, ServerPayload::Ack),
+			Payload::Lobby(p) => matches!(p, LobbyPayload::Ack),
+			Payload::Game(p) => matches!(p, GamePayload::Ack),
+		}
+	}
+}
+
+impl From<HandshakePayload> for Payload {
+	fn from(value: HandshakePayload) -> Self {
+		Self::Handshake(value)
+	}
+}
+
+impl From<ServerPayload> for Payload {
+	fn from(value: ServerPayload) -> Self {
+		Self::Server(value)
+	}
+}
+
+impl From<LobbyPayload> for Payload {
+	fn from(value: LobbyPayload) -> Self {
+		Self::Lobby(value)
+	}
+}
+
+impl From<GamePayload> for Payload {
+	fn from(value: GamePayload) -> Self {
+		Self::Game(value)
+	}
+}
+
+// Documentation Key:
 // Request - client sends message to server and gets a response.
 // Response - server sends message to client in response to a request.
 // Spontaneous - server sends message to client and client may or may not need to respond.
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub enum Payload {
+pub enum HandshakePayload {
 	/// Client ---Authenticate--> Server
 	///
 	/// Client <--Ack--- Server
 	///
 	/// Request only
 	///
+	/// Handshake only
+	///
 	/// Client must send this immediately after attempting to connect to the server.
 	/// Client sends its account id as src_id and sends the auth token it got from logging into the API.
 	/// Server responds with Ack if authentication was successful.
 	/// Server responds with Err if authentication was unsuccessful.
 	Authenticate { version: Version, auth_token: String },
-	/// Client <--Disconnected--- Server
-	///
-	/// Spontaneous
-	///
-	/// Informs you when another player disconnects and provides the index of that player.
-	/// The server internally uses Error::Disconnected to track when players disconnect.
-	Disconnected { player_idx: u8 },
-	/// Client <--Reconnected--- Server
-	///
-	/// Spontaneous
-	///
-	/// Informs you when another player reconnects and provides the index and username of that player.
-	Reconnected { player_idx: u8, username: String },
 	/// Client ---Any--> Server
 	///
 	/// Client <--Ack--- Server
@@ -101,6 +174,13 @@ pub enum Payload {
 	///
 	/// If a request doesn't respond with useful data, the server will send back Ack as a signal that everything is ok.
 	/// If the client sends Ack to the server, the server will never respond even if the CorrelationId.end is false.
+	Ack,
+	Err(Error),
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub enum ServerPayload {
+	/// Used to respond to any request to indicate the message was received successfully.
 	Ack,
 	/// Client ---Any--> Server
 	///
@@ -124,10 +204,10 @@ pub enum Payload {
 	/// Response only
 	///
 	/// Any time there is an error and the original payload needs to be resent.
-	ErrRetry(Error, Box<Payload>),
+	ErrRetry(Error, Box<ServerPayload>),
 	/// Client ---CreateGame--> Server
 	///
-	/// Client <--Game--- Server
+	/// Client <--Lobby--- Server
 	///
 	/// Request only
 	///
@@ -135,12 +215,12 @@ pub enum Payload {
 	CreateGame { password: String },
 	/// Client ---JoinGame--> Server
 	///
-	/// Client <--Game--- Server
+	/// Client <--Lobby--- Server
 	///
 	/// Request only
 	///
 	/// Client requests to join game.
-	JoinGame { code: u32, password: String },
+	JoinGame { code: String, password: String },
 	/// Client ---RejoinGame--> Server
 	///
 	/// Client <--Snapshot--- Server
@@ -149,45 +229,7 @@ pub enum Payload {
 	///
 	/// Client requests to rejoin game.
 	/// This is only used if the client has disconnected from an ongoing game and wants to rejoin.
-	RejoinGame { code: u32, password: String },
-	/// Client ---CreateGame--> Server
-	///
-	/// Client <--Game--- Server
-	///
-	/// Response only
-	///
-	/// OR
-	///
-	/// Client ---JoinGame--> Server
-	///
-	/// Client <--Game--- Server
-	///
-	/// Response only
-	///
-	/// Server sends game info when client creates or joins a game.
-	///
-	/// OR
-	///
-	/// Host-Client ---Game--> Server
-	///
-	/// Host-Client <--Ack--- Server
-	///
-	/// Other-Clients <--Game--- Server
-	///
-	/// Host-request and spontaneous
-	///
-	/// Host can update the settings in the lobby which gets sent to the server.
-	/// The server updates its state and propagates the message to all other clients.
-	Game(Box<SetupState>),
-	/// Client ---RejoinGame--> Server
-	///
-	/// Client <--Snapshot--- Server
-	///
-	/// Response only
-	///
-	/// Client requests to rejoin game.
-	/// This is only used if the client has disconnected from an ongoing game and wants to rejoin.
-	Snapshot(Box<GameState>, ArrayVec<Card, CARDS_PER_PLAYER>),
+	RejoinGame { code: String, password: String },
 	/// Client ---SearchGames--> Server
 	///
 	/// Client <--PublicGames--- Server
@@ -204,39 +246,62 @@ pub enum Payload {
 	///
 	/// Client requests a list of public games and receives a list of PublicGames.
 	PublicGames(Vec<PublicGame>),
-	/// Client ---UpdatePlayerTeam--> Server
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub enum LobbyPayload {
+	/// Used to respond to any request to indicate the message was received successfully.
+	Ack,
+	/// Client ---Any--> Server
 	///
-	/// Client <--Ack--- Server
+	/// Client <--Err--- Server
 	///
-	/// Other-Clients <--UpdatePlayerTeam--- Server
+	/// Response only
 	///
-	/// Request and response
+	/// OR
 	///
-	/// The host or a player can update the team of that player.
-	UpdatePlayerTeam { player_idx: u8, team: u8 },
-	/// Host-Client ---UpdatePlayerType--> Server
+	/// Client <--Err--- Server
+	///
+	/// Spontaneous
+	///
+	/// Any time the server has an error, it sends this to the client.
+	/// The client does not send client-side errors to the server.
+	Err(Error),
+	/// Client ---Any--> Server
+	///
+	/// Client <--ErrRetry--- Server
+	///
+	/// Response only
+	///
+	/// Any time there is an error and the original payload needs to be resent.
+	ErrRetry(Error, Box<LobbyPayload>),
+	/// Client ---CreateGame--> Server
+	///
+	/// Client <--Lobby--- Server
+	///
+	/// OR
+	///
+	/// Client ---JoinGame--> Server
+	///
+	/// Client <--Lobby--- Server
+	///
+	/// Response only
+	///
+	/// Server sends game info when client creates or joins a game.
+	///
+	/// OR
+	///
+	/// Host-Client ---Lobby--> Server
 	///
 	/// Host-Client <--Ack--- Server
 	///
-	/// Other-Clients <--UpdatePlayerType--- Server
+	/// Other-Clients <--Lobby--- Server
 	///
-	/// Request and response
+	/// Host-request and spontaneous
 	///
-	/// The host can update whether a player is a human or not.
-	/// This either results in turning a bot into an empty human slot
-	/// or kicking a player
-	UpdatePlayerType { player_idx: u8, is_human: bool },
-	/// Client ---Ready--> Server
-	///
-	/// Client <--Ack--- Server
-	///
-	/// Other-Clients <--Ready--- Server
-	///
-	/// Request and spontaneous
-	///
-	/// When a client is ready, the server updates the state and propagates it to all other clients.
-	/// Index doesn't need to be provided in request, but will be provided in response from server.
-	Ready { is_ready: bool, player_idx: u8 },
+	/// Host can update the settings in the lobby which gets sent to the server.
+	/// The server updates its state and propagates the message to all other clients.
+	Lobby {lobby: Box<LobbyState>, player_idx: u8},
 	/// Host-Client ---AddPlayer--> Server
 	///
 	/// Host-Client <--Ack--- Server
@@ -277,12 +342,113 @@ pub enum Payload {
 	///
 	/// The host can reinsert a player into a different position, shifting others if necessary.
 	ReinsertPlayer { player_idx: u8, new_player_idx: u8 },
+	/// Client ---UpdatePlayerTeam--> Server
+	///
+	/// Client <--Ack--- Server
+	///
+	/// Other-Clients <--UpdatePlayerTeam--- Server
+	///
+	/// Request and response
+	///
+	/// The host or a player can update the team of that player.
+	UpdatePlayerTeam { player_idx: u8, team: u8 },
+	/// Host-Client ---UpdatePlayerType--> Server
+	///
+	/// Host-Client <--Ack--- Server
+	///
+	/// Other-Clients <--UpdatePlayerType--- Server
+	///
+	/// Request and response
+	///
+	/// The host can update whether a player is a human or not.
+	///
+	/// When in the lobby this either results in turning a bot into an empty human slot
+	/// or kicking a player.
+	///
+	/// When in the game, this is either due to a player disconnecting or rejoining.
+	UpdatePlayerType { player_idx: u8, is_human: bool },
+	/// Client <--PlayerJoined--- Server
+	///
+	/// Spontaneous
+	///
+	/// Informs you when another player joins and provides the index of that player.
+	PlayerJoined { player_idx: u8, username: String },
+	/// Client <--PlayerDisconnected--- Server
+	///
+	/// Spontaneous
+	///
+	/// Informs you when another player disconnects and provides the index of that player.
+	/// The server internally uses NetError::Disconnected to track when players disconnect.
+	PlayerDisconnected { player_idx: u8 },
+	/// Client ---Ready--> Server
+	///
+	/// Client <--Ack--- Server
+	///
+	/// Other-Clients <--Ready--- Server
+	///
+	/// Request and spontaneous
+	///
+	/// When a client is ready, the server updates the state and propagates it to all other clients.
+	/// Index doesn't need to be provided in request, but will be provided in response from server.
+	/// The countdown starts when all players are ready.
+	Ready { is_ready: bool, player_idx: u8 },
 	/// Client <--Start--- Server
 	///
 	/// Spontaneous
 	///
 	/// Server tells clients when countdown ends.
 	Start,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub enum GamePayload {
+	/// Used to respond to any request to indicate the message was received successfully.
+	Ack,
+	/// Client ---Any--> Server
+	///
+	/// Client <--Err--- Server
+	///
+	/// Response only
+	///
+	/// OR
+	///
+	/// Client <--Err--- Server
+	///
+	/// Spontaneous
+	///
+	/// Any time the server has an error, it sends this to the client.
+	/// The client does not send client-side errors to the server.
+	Err(Error),
+	/// Client ---Any--> Server
+	///
+	/// Client <--ErrRetry--- Server
+	///
+	/// Response only
+	///
+	/// Any time there is an error and the original payload needs to be resent.
+	ErrRetry(Error, Box<GamePayload>),
+	/// Client <--PlayerDisconnected--- Server
+	///
+	/// Spontaneous
+	///
+	/// Informs you when another player disconnects and provides the index of that player.
+	/// The server internally uses NetError::Disconnected to track when players disconnect.
+	PlayerDisconnected { player_idx: u8 },
+	/// Client <--PlayerRejoined--- Server
+	///
+	/// Spontaneous
+	///
+	/// Informs you when another player reconnects and provides the index and username of that player.
+	PlayerRejoined { player_idx: u8, username: String },
+	/// Client ---RejoinGame--> Server
+	///
+	/// Client <--Snapshot--- Server
+	///
+	/// Response only
+	///
+	/// Client requests to rejoin game.
+	/// This is only used if the client has disconnected from an ongoing game and wants to rejoin.
+	Snapshot {game_state: Box<GameState>, player_idx: u8},
 	/// Client <--GameEvent--- Server
 	///
 	/// Client ---GameEvent--> Server
@@ -313,4 +479,45 @@ pub enum Payload {
 	///
 	/// A client is intentionally leaving the game meaning they will not be allowed to rejoin.
 	LeaveGame,
+}
+
+pub trait PayloadCommon: Into<Payload> {
+	fn ack() -> Self;
+	fn err(e: Error) -> Self;
+}
+
+impl PayloadCommon for HandshakePayload {
+	fn ack() -> Self {
+		Self::Ack
+	}
+	fn err(e: Error) -> Self {
+		Self::Err(e)
+	}
+}
+
+impl PayloadCommon for ServerPayload {
+	fn ack() -> Self {
+		Self::Ack
+	}
+	fn err(e: Error) -> Self {
+		Self::Err(e)
+	}
+}
+
+impl PayloadCommon for LobbyPayload {
+	fn ack() -> Self {
+		Self::Ack
+	}
+	fn err(e: Error) -> Self {
+		Self::Err(e)
+	}
+}
+
+impl PayloadCommon for GamePayload {
+	fn ack() -> Self {
+		Self::Ack
+	}
+	fn err(e: Error) -> Self {
+		Self::Err(e)
+	}
 }

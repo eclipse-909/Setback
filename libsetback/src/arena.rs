@@ -20,7 +20,6 @@ pub struct Arena<'arena> {
 
 impl<'arena> Arena<'arena> {
 	/// Creates an empty [Arena].
-	#[allow(clippy::new_without_default)]
 	pub const fn new() -> Self {
 		Self {
 			allocator: ArenaAlloc {

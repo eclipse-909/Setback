@@ -3,6 +3,9 @@ name = "libsetback"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "setback"
+
 # This library needs to target WASM so don't just throw dependencies in here
 [dependencies]
 arrayvec.workspace = true
@@ -11,22 +14,24 @@ const_format.workspace = true
 dioxus.workspace = true
 futures.workspace = true
 konst.workspace = true
+nanoid.workspace = true
 postcard.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-getrandom.workspace = true
+getrandom-v043.workspace = true
+getrandom-v034.workspace = true
 gloo.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "macros"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 scc.workspace = true
 sockudo-ws.workspace = true
 rustls.workspace = true
-thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-rustls.workspace = true
 tokio-util.workspace = true

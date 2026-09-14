@@ -4,14 +4,15 @@ use {
 		io::Write,
 		net::{Ipv4Addr, SocketAddrV4},
 		process::exit,
-		time::Instant
+		time::Instant,
+		sync::Arc
 	},
 	reqwest::Client,
 	tokio::net::TcpListener,
 	tracing::{error, info, warn},
 };
 
-pub use libsetback::*;
+pub use setback::*;
 
 const BIN_VERSION: Version = pkg_version!();
 extern "Rust" static SETBACK_API: LazyCell<Client> = LazyCell::new(|| Client::builder().cookie_store(true).build().unwrap());
@@ -43,6 +44,8 @@ fn main() {
 		.build()
 		.unwrap();
 	
+	let (state, reject_rx) = State::new();
+	
 	rt.block_on(async move {
 		tokio::select! {
 			res = tokio::signal::ctrl_c() => if let Err(e) = res {
@@ -50,7 +53,8 @@ fn main() {
 			} else {
 				info!("Terminating via SIGINT")
 			},
-			_ = listen() => unreachable!(),
+			_ = tcp_listen(state) => unreachable!(),
+			_ = reject_listen(reject_rx, state) => unreachable!(),
 		}
 	});
 	info!("Initiating shutdown");
@@ -60,20 +64,27 @@ fn main() {
 	_ = std::io::stdout().flush();
 }
 
-async fn listen() -> ! {
+async fn tcp_listen(state: Arc<State>) -> ! {
 	let tcp_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
 		.await
 		.unwrap_or_else(crash!("Could not bind tcp listener. Error: {}", e));
-	let state = State::new();
 	loop {
 		match tcp_listener.accept().await {
 			Ok((stream, addr)) => {
 				// ClientConnection::new will upgrade to ws and authenticate the client
 				if let Some(client) = ClientConnection::new(stream, addr).await {
-					client.spawn_handler(state.clone());
+					client.spawn_server_handler(state.clone());
 				}
 			}
 			Err(e) => warn!("Could not accept client. Error: {e}"),
 		}
+	}
+}
+
+/// This happens when a client tries to rejoin an ongoing game but fails,
+/// so they are rejected from that game and their handler needs to be restarted.
+async fn reject_listen(mut reject_rx: GspRx, state: Arc<State>) -> ! {
+	loop {
+		reject_rx.recv().await.unwrap().spawn_handler(state.clone());
 	}
 }

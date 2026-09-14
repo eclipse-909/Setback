@@ -12,6 +12,8 @@ pub enum NetError {
 	BadRequest,
 	#[error("Timed Out")]
 	TimedOut,
+	#[error("Internal server error")]
+	ServerError,
 }
 
 #[repr(u8)]
@@ -42,8 +44,6 @@ pub enum Error {
 	Unauthenticated,
 	#[error("This account is already logged in. If this is a mistake, please change your password immediately")]
 	AlreadyConnected,
-	#[error("Internal server error")]
-	ServerError,
 	#[error("Logical error. Please report this")]
 	LogicError,
 	#[error("The server is down. Please try again later")]

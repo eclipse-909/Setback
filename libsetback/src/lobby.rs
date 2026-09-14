@@ -5,8 +5,8 @@ use {
 	tracing::{error, info, warn},
 };
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct SetupRules {
+#[derive(Deserialize, Serialize, Debug)]
+pub struct LobbyRules {
 	/// Every other player is on a team. The alternative being custom teams.
 	pub std_team_mode: bool,
 	pub win_by_2: bool,
@@ -16,43 +16,55 @@ pub struct SetupRules {
 	pub max_players: u8,
 	/// In seconds. 0 means unlimited time. The maximum allowed time on the server is [MAX_TURN_TIME_SERVER] seconds.
 	pub turn_time: u8,
+	pub code: String,
+	pub password: String,
 }
 
 /// Setup data is created and modified when setting up a game.
 /// The rules should be read-only when the game is being played.
-/// See [GameSetup] for the wrapper struct that should be used during setup.
+/// See [Lobby] for the wrapper struct that should be used in the lobby.
 #[derive(Deserialize, Serialize, Debug)]
-pub struct SetupState {
-	pub rules: SetupRules,
+pub struct LobbyState {
+	pub rules: LobbyRules,
 	pub players: ArrayVec<Player, MAX_PLAYERS>,
 }
 
-impl SetupState {
+impl LobbyState {
 	pub fn snapshot(&self) -> Self {
 		Self {
-			rules: self.rules.clone(),
+			rules: LobbyRules {
+				std_team_mode: self.rules.std_team_mode,
+				win_by_2: self.rules.win_by_2,
+				negative_scores: self.rules.negative_scores,
+				dealer_override: self.rules.dealer_override,
+				max_score: self.rules.max_score,
+				max_players: self.rules.max_players,
+				turn_time: self.rules.turn_time,
+				code: self.rules.code.clone(),
+				// password must never be cloned
+				password: String::new(),
+			},
 			players: self.players.iter().map(|p| p.snapshot()).collect(),
 		}
 	}
 }
 
-impl Clone for SetupState {
+impl Clone for LobbyState {
 	fn clone(&self) -> Self {
 		self.snapshot()
 	}
 }
 
-/// This struct just exists to wrap [SetupState] and provide methods for convenience while setting up a game.
+/// This struct just exists to wrap [LobbyState] and provide methods for convenience while setting up a game.
 /// These methods should not be called during a game, so it adds type safety to guarantee that they won't accidentally be used.
 #[derive(Deserialize, Serialize, Debug, Clone)]
-#[repr(transparent)]
-pub struct GameSetup(SetupState);
+pub struct Lobby(pub LobbyState);
 
-impl GameSetup {
-	/// Default rules for a game. These can be changed by the host during setup.
-	const fn new() -> Self {
-		Self(SetupState {
-			rules: SetupRules {
+impl Lobby {
+	/// Default rules for a game. These can be changed by the host in the lobby.
+	pub const fn new(code: String, password: String) -> Self {
+		Self(LobbyState {
+			rules: LobbyRules {
 				std_team_mode: true,
 				win_by_2: false,
 				negative_scores: true,
@@ -60,42 +72,32 @@ impl GameSetup {
 				max_score: MAX_SCORE,
 				max_players: MAX_PLAYERS as u8,
 				turn_time: DEFAULT_TURN_TIME,
+				code,
+				password,
 			},
 			players: ArrayVec::new_const(),
 		})
 	}
 
-	pub fn new_ai_only() -> Self {
+	pub fn create_ai_only() -> Self {
 		info!("Creating AI only game");
-		let mut setup_data = Self::new();
+		let mut lobby = Self::new(String::new(), String::new());
 		for _ in 0..MAX_PLAYERS {
-			setup_data.add_ai();
+			lobby.add_ai();
 		}
-		setup_data
+		lobby
 	}
 
 	#[cfg(feature = "client")]
-	pub fn new_singleplayer(username: String) -> Self {
+	pub fn create_singleplayer(username: String) -> Self {
 		info!("Creating singleplayer game");
 		let sp_self = Player::new_singleplayer_self(0, username);
-		let mut setup_data = Self::new();
-		setup_data.0.players.push(sp_self);
+		let mut lobby = Self::new(String::new(), String::new());
+		lobby.0.players.push(sp_self);
 		for _ in 0..MAX_PLAYERS - 1 {
-			setup_data.add_ai();
+			lobby.add_ai();
 		}
-		setup_data
-	}
-
-	#[cfg(not(feature = "client"))]
-	pub fn new_multiplayer(host: Box<ClientConnection>) -> Self {
-		info!("Creating multiplayer game");
-		let host = Player::new_host_connected(host, 0);
-		let mut setup_data = Self::new();
-		setup_data.0.players.push(host);
-		for _ in 0..MAX_PLAYERS - 1 {
-			setup_data.add_ai();
-		}
-		setup_data
+		lobby
 	}
 
 	pub fn add_ai(&mut self) {
@@ -105,49 +107,15 @@ impl GameSetup {
 			.push(Player::new_ai(self.0.players.len() as u8 & 1));
 	}
 
-	#[cfg(not(feature = "client"))]
-	pub fn add_human(&mut self) {
-		info!("Adding human player");
-		self.0
-			.players
-			.push(Player::new_human_empty(self.0.players.len() as u8 & 1));
-	}
-
-	/// Updates a player's status as AI or human.
-	#[cfg(not(feature = "client"))]
-	pub fn update_human(&mut self, index: usize, is_human: bool) {
-		info!(
-			"Setting player at index {index} to {}",
-			if is_human { "empty human" } else { "AI" }
-		);
-		self.0.players[index].player_type = if is_human {
-			PlayerType::HumanEmpty
-		} else {
-			PlayerType::Ai { account_id: 0 }
-		};
-	}
-
 	/// Updates a player's team.
 	pub fn update_team(&mut self, index: usize, team_id: u8) {
 		info!("Setting player at index {index} to team {team_id}");
 		self.0.players[index].team_id = team_id;
 	}
 
-	/// Makes this player type a networked client.
-	#[cfg(not(feature = "client"))]
-	pub fn set_client(&mut self, index: usize, conn: Box<ClientConnection>) {
-		info!("Setting empty human at index {index} to connected human client");
-		let pt = &mut self.0.players[index].player_type;
-		debug_assert!(
-			matches!(pt, PlayerType::HumanEmpty),
-			"Player must be an empty human slot before setting a client connection"
-		);
-		*pt = PlayerType::HumanConnection { conn };
-	}
-
 	/// Initializes a game loop that hasn't started yet.
 	/// ## Error
-	/// The setup is in an invalid state
+	/// The lobby is in an invalid state
 	/// like multiple humans in singleplayer or empty human slots in multiplayer
 	#[allow(clippy::result_large_err)]
 	pub fn init(
@@ -254,7 +222,7 @@ impl GameSetup {
 			turn_num: 0,
 			dealer_idx: rand::random_range(0..self.0.players.len() as u8),
 			round_num: 0,
-			setup: self.0,
+			lobby_state: self.0,
 			loop_state: GameLoopState::Init,
 			#[cfg(not(feature = "client"))] err_q,
 		})

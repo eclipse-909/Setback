@@ -1,7 +1,7 @@
 use {
 	crate::{components::*, *},
 	dioxus::prelude::*,
-	libsetback::*,
+	setback::*,
 };
 
 #[component]

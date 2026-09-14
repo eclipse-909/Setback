@@ -28,7 +28,6 @@ pub struct SetbackClient {
 
 impl WebSocketeer for SetbackClient {
 	fn ssp_tx(&self) -> &SspTx {&self.ssp_tx}
-	fn fallback_rx(&mut self) -> &mut FallbackRx {&mut self.fallback_rx}
 	fn correlation_id(&mut self) -> &mut u32 {&mut self.correlation_id}
 }
 
@@ -52,7 +51,7 @@ impl SetbackClient {
 			.map_err(Error::from)?
 			.json::<LoginResponse>()
 			.await
-			.map_err(|_| Error::ServerError)?;
+			.map_err(|_| NetError::ServerError)?;
 		info!("Logged into api");
 
 		info!("Connecting to Setback server");
@@ -62,7 +61,7 @@ impl SetbackClient {
 		// No need to use correlation yet because this handshake is required before arbitrary communication
 		info!("Authenticating with Setback server");
 		ws::ws_send(&mut writer, &Ssp::new(
-			Payload::Authenticate {
+			HandshakePayload::Authenticate {
 				version: SSP_VERSION,
 				auth_token: session.auth_token.clone(),
 			},
@@ -73,10 +72,21 @@ impl SetbackClient {
 		let auth_res = ws::ws_next(&mut reader).await.inspect_err(|e| {
 			error!("Failed to authenticate: {e}");
 		})?;
-		if auth_res.correlation_id != CorrelationId::event() || !matches!(auth_res.payload, Payload::Ack) {
+		if auth_res.correlation_id != CorrelationId::event() {
 			error!("Failed to authenticate");
-			return Err(Error::ServerError);
+			return Err(NetError::ServerError.into());
 		};
+		match auth_res.payload.try_handshake()? {
+			HandshakePayload::Ack => {}
+			HandshakePayload::Err(e) => {
+				error!("Failed to authenticate");
+				return Err(e);
+			}
+			_ => {
+				error!("Failed to authenticate");
+				return Err(NetError::ServerError.into());
+			}
+		}
 		info!("Authenticated with Setback server");
 		
 		let (ssp_tx, ssp_rx) = unbounded_channel();
@@ -111,67 +121,83 @@ impl SetbackClient {
 		info!("Logged out");
 		Ok(())
 	}
-
-	async fn send_expect_game_setup(&mut self, payload: Payload) -> Result<Box<SetupState>, Error> {
+	
+	// Generic payloads
+	
+	async fn send_expect_ack<P: PayloadCommon>(&mut self, payload: P) -> Result<(), NetError> {
 		let (response, id) = self.send_new_request(payload).await?;
-		let setup = match response {
-			Payload::Game(game) => Ok(game),
-			Payload::Err(err) => Err(err),
-			_ => Err(Error::ServerError),
+		if !response.is_ack() {
+			return Err(NetError::BadRequest);
+		}
+		self.send_response_ack::<P>(id)
+	}
+	
+	// Server payloads
+
+	async fn send_expect_lobby_state(&mut self, payload: ServerPayload) -> Result<(Box<LobbyState>, u8), Error> {
+		let (response, id) = self.send_new_request(payload).await?;
+		let lobby = match response {
+			// switches protocols
+			Payload::Lobby(LobbyPayload::Lobby {lobby, player_idx}) => Ok((lobby, player_idx)),
+			Payload::Server(ServerPayload::Err(err)) => Err(err),
+			_ => Err(NetError::ServerError.into()),
 		};
-		self.send_response_ack(id)?;
-		setup
+		self.send_response_ack::<ServerPayload>(id)?;
+		lobby
 	}
 
-	pub async fn send_create_game(&mut self, password: String) -> Result<Box<SetupState>, Error> {
-		self.send_expect_game_setup(Payload::CreateGame { password }).await
+	pub async fn send_create_game(&mut self, password: String) -> Result<(Box<LobbyState>, u8), Error> {
+		self.send_expect_lobby_state(ServerPayload::CreateGame { password }).await
 	}
 
 	pub async fn send_join_game(
 		&mut self,
-		code: u32,
+		code: String,
 		password: String,
-	) -> Result<Box<SetupState>, Error> {
-		self.send_expect_game_setup(Payload::JoinGame { code, password }).await
+	) -> Result<(Box<LobbyState>, u8), Error> {
+		self.send_expect_lobby_state(ServerPayload::JoinGame { code, password }).await
 	}
 
 	pub async fn send_rejoin_game(
 		&mut self,
-		code: u32,
+		code: String,
 		password: String,
-	) -> Result<Box<SetupState>, Error> {
-		self.send_expect_game_setup(Payload::RejoinGame { code, password }).await
+	) -> Result<(Box<GameState>, u8), Error> {
+		let payload = ServerPayload::RejoinGame { code, password };
+		let (response, id) = self.send_new_request(payload).await?;
+		let game = match response {
+			// switches protocols
+			Payload::Game(GamePayload::Snapshot {game_state, player_idx}) => Ok((game_state, player_idx)),
+			Payload::Server(ServerPayload::Err(err)) => Err(err),
+			_ => Err(NetError::ServerError.into()),
+		};
+		self.send_response_ack::<ServerPayload>(id)?;
+		game
 	}
 
 	pub async fn send_search_games(
 		&mut self,
 		filter: GameFilter,
 	) -> Result<Vec<PublicGame>, Error> {
-		let (response, id) = self.send_new_request(Payload::SearchGames(filter)).await?;
-		let games = match response {
-			Payload::PublicGames(games) => Ok(games),
-			Payload::Err(err) => Err(err),
-			_ => Err(Error::ServerError),
+		let (response, id) = self.send_new_request(ServerPayload::SearchGames(filter)).await?;
+		let games = match response.try_server()? {
+			ServerPayload::PublicGames(games) => Ok(games),
+			ServerPayload::Err(err) => Err(err),
+			_ => Err(NetError::ServerError.into()),
 		};
-		self.send_response_ack(id)?;
+		self.send_response_ack::<ServerPayload>(id)?;
 		games
 	}
-
-	async fn send_expect_ack(&mut self, payload: Payload) -> Result<(), NetError> {
-		let (response, id) = self.send_new_request(payload).await?;
-		if !matches!(response, Payload::Ack) {
-			return Err(NetError::BadRequest);
-		}
-		self.send_response_ack(id)
-	}
+	
+	// Lobby payloads
 
 	/// Host-only
-	pub async fn send_game_setup(&mut self, setup_data: SetupState) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::Game(Box::new(setup_data))).await
+	pub async fn send_lobby(&mut self, lobby: LobbyState) -> Result<(), NetError> {
+		self.send_expect_ack(LobbyPayload::Lobby {lobby: Box::new(lobby), player_idx: 0}).await
 	}
 
 	pub async fn send_update_team(&mut self, player_idx: u8, team: u8) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::UpdatePlayerTeam { player_idx, team }).await
+		self.send_expect_ack(LobbyPayload::UpdatePlayerTeam { player_idx, team }).await
 	}
 
 	/// Host-only
@@ -180,14 +206,14 @@ impl SetbackClient {
 		player_idx: u8,
 		is_human: bool,
 	) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::UpdatePlayerType {
+		self.send_expect_ack(LobbyPayload::UpdatePlayerType {
 			player_idx,
 			is_human,
 		}).await
 	}
 
 	pub async fn send_ready(&mut self, is_ready: bool) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::Ready {
+		self.send_expect_ack(LobbyPayload::Ready {
 			is_ready,
 			player_idx: 0,
 		}).await
@@ -195,12 +221,12 @@ impl SetbackClient {
 
 	/// Host-only
 	pub async fn send_add_player(&mut self) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::AddPlayer).await
+		self.send_expect_ack(LobbyPayload::AddPlayer).await
 	}
 
 	/// Host-only
 	pub async fn send_remove_player(&mut self, player_idx: u8) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::RemovePlayer { player_idx }).await
+		self.send_expect_ack(LobbyPayload::RemovePlayer { player_idx }).await
 	}
 
 	/// Host-only
@@ -209,7 +235,7 @@ impl SetbackClient {
 		player_idx_a: u8,
 		player_idx_b: u8,
 	) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::SwapPlayers {
+		self.send_expect_ack(LobbyPayload::SwapPlayers {
 			player_idx_a,
 			player_idx_b,
 		}).await
@@ -221,18 +247,20 @@ impl SetbackClient {
 		player_idx: u8,
 		new_player_idx: u8,
 	) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::ReinsertPlayer {
+		self.send_expect_ack(LobbyPayload::ReinsertPlayer {
 			player_idx,
 			new_player_idx,
 		}).await
 	}
+	
+	// In-game payloads
 
 	pub async fn send_game_event(&mut self, event: GameEvent) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::GameEvent(event)).await
+		self.send_expect_ack(GamePayload::GameEvent(event)).await
 	}
 
 	pub async fn send_report_player(&mut self, report: ReportPlayerRequest) -> Result<(), NetError> {
-		self.send_expect_ack(Payload::ReportPlayer(report)).await
+		self.send_expect_ack(GamePayload::ReportPlayer(report)).await
 	}
 }
 

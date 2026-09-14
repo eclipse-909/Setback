@@ -1,4 +1,4 @@
-use {crate::components::*, dioxus::prelude::*, libsetback::*};
+use {crate::components::*, dioxus::prelude::*, setback::*};
 
 #[derive(Props, PartialEq, Clone)]
 pub struct CardChipProps {

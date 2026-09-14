@@ -1,6 +1,6 @@
 use {
 	axum::{extract::Request, http::StatusCode, middleware::Next, response::IntoResponse},
-	libsetback::{SETBACK_PROXY, SSP_VERSION, Version},
+	setback::{SETBACK_PROXY, SSP_VERSION, Version},
 	serde::{Deserialize, Serialize},
 	tower_cookies::{
 		Cookie, Cookies,

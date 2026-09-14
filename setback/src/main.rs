@@ -17,7 +17,7 @@ fn main() {
 #[component]
 fn App() -> Element {
 	rsx! {
-		document::Meta { charset: "UTF-8" }
+		Meta { charset: "UTF-8" }
 		document::Link { rel: "icon", href: FAVICON }
 		document::Link { rel: "stylesheet", href: VARIABLES_CSS }
 		document::Link { rel: "stylesheet", href: BASE_CSS }

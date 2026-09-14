@@ -31,6 +31,7 @@ impl Version {
 
 /// This needs to be a macro rather than a const fn because `env!("CARGO_PKG_VERSION")` expands at compile time,
 /// and would always refer to libsetback when we might want it to refer to dependent packages.
+/// You need to include `konst` as a dependency.
 #[macro_export]
 macro_rules! pkg_version {
 	() => {
@@ -368,6 +369,6 @@ pub enum GameEvent {
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PublicGame {
 	pub join_code: u32,
-	pub rules: SetupRules,
+	pub rules: LobbyRules,
 	pub num_players: u8,
 }

@@ -1,7 +1,7 @@
 use {
 	crate::{Route, components::*},
 	dioxus::prelude::*,
-	libsetback::*,
+	setback::*,
 };
 
 #[component]

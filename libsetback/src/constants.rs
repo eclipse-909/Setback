@@ -4,7 +4,7 @@ use {
 	std::time::Duration,
 };
 
-// game setup
+// lobby and rules
 
 pub const JACK: u8 = 11;
 pub const QUEEN: u8 = 12;
@@ -22,6 +22,7 @@ pub const PILE_SIZE: usize = const {
 	assert!(s <= DECK_SIZE);
 	s
 };
+pub const AI_NAME: &str = "CPU";
 
 // client
 
@@ -31,8 +32,10 @@ pub const SETBACK_PROXY: &str = match option_env!("SETBACK_PROXY") {
 	Some(d) => d,
 	None => "localhost",
 };
-const SETBACK_PROD: bool =
-	matches!(option_env!("SETBACK_PROD"), Some(var) if var.len() == 1 && var.as_bytes()[0] == b'1');
+const SETBACK_PROD: bool = matches!(
+	option_env!("SETBACK_PROD"),
+	Some(var) if var.len() == 1 && var.as_bytes()[0] == b'1'
+);
 const SETBACK_ENV: &str = if SETBACK_PROD { "prod" } else { "dev" };
 macro_rules! api {
 	($path:literal) => {
@@ -68,7 +71,11 @@ pub const MAX_GAMES: usize = 10_000;
 /// Time between receiving a SIGINT and process exiting.
 pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_hours(4);
 pub const TIMEOUT_STRIKES: u8 = 3;
-
-// files
-
-pub const KEYRING_SERVICE: &str = "service-keyring-eclipse-909-setback";
+pub const GAME_CODE_LEN: usize = 6;
+pub const GAME_CODE_ALPHABET: [char; 62] = [
+	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+	'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+	'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+	'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
+	'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+];
