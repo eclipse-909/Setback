@@ -3,7 +3,6 @@ use {
 	arrayvec::ArrayVec,
 	futures::{FutureExt, TryFutureExt},
 	std::{
-		future::poll_fn,
 		pin::Pin,
 		task::{Context, Poll},
 		time::Duration,
@@ -20,9 +19,8 @@ pub type GspRx = UnboundedReceiver<Gsp>;
 
 /// Game-Server Protocol
 pub enum Gsp {
-	StartGame,
 	TerminateGame,
-	RejectRejoin(Box<ClientConnection>),
+	RemoveClient(Box<ClientConnection>),
 }
 
 type ConnArr = ArrayVec<Box<ClientConnection>, MAX_PLAYERS>;
@@ -62,7 +60,7 @@ pub enum ClientIOResult {
 	GameOver,
 }
 
-pub struct GameLoopHandle {
+pub struct GameRtHandle {
 	pub rejoin_tx: Sender<Box<ClientConnection>>,
 	pub handle: JoinHandle<ConnArr>,
 }
@@ -72,7 +70,7 @@ impl GameState {
 		mut self,
 		gsp_tx: GspTx,
 		mut err_q: UnboundedReceiver<(u8, NetError)>,
-	) -> GameLoopHandle {
+	) -> GameRtHandle {
 		let (rejoin_tx, mut rejoin_rx) = channel(MAX_PLAYERS);
 		let handle = tokio::spawn(async move {
 			let mut client_io_fut = self.advance_game(ClientIOResult::None);
@@ -85,7 +83,7 @@ impl GameState {
 						}
 						client_io_fut = self.advance_game(client_io_res);
 					}
-					message = self.recv_fallback() => self.handle_fallback(message),
+					message = Player::try_recv_fallback(&mut self.lobby_state.players) => self.handle_fallback(message),
 					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn, &gsp_tx),
 					Some((idx, err)) = err_q.recv() => {
 						match err {
@@ -96,7 +94,7 @@ impl GameState {
 				}
 			}
 		});
-		GameLoopHandle {rejoin_tx, handle}
+		GameRtHandle {rejoin_tx, handle}
 	}
 	
 	fn advance_game(&mut self, io_res: ClientIOResult) -> ClientIOFut {
@@ -342,7 +340,7 @@ impl GameState {
 			// send rejoin update to all other players
 			self.notify_all_but(GamePayload::PlayerRejoined {player_idx, username}, player_idx);
 		} else {
-			_ = gsp_tx.send(Gsp::RejectRejoin(conn));
+			_ = gsp_tx.send(Gsp::RemoveClient(conn));
 		}
 	}
 	
@@ -357,34 +355,6 @@ impl GameState {
 			self.loop_state = GameLoopState::Terminated;
 		}
 		self.notify_all(GamePayload::PlayerDisconnected {player_idx: idx});
-	}
-	
-	/// Returns None if all channels are closed.
-	async fn recv_fallback(&mut self) -> Option<(u8, Result<Ssp, NetError>)> {
-		poll_fn(|cx| {
-			let mut any_open = false;
-			for (i, rx) in self
-				.lobby_state
-				.players
-				.iter_mut()
-				.enumerate()
-				.flat_map(|(i, p)| match &mut p.player_type {
-					PlayerType::HumanConnection {conn} => Some((i, &mut conn.fallback_rx)),
-					_ => None,
-				})
-			{
-				match rx.poll_recv(cx) {
-					Poll::Ready(Some(item)) => return Poll::Ready(Some((i as u8, item))),
-					Poll::Ready(None) => return Poll::Ready(Some((i as u8, Err(NetError::Disconnected)))),
-					Poll::Pending => any_open = true,
-				}
-			}
-			if any_open {
-				Poll::Pending
-			} else {
-				Poll::Ready(None)
-			}
-		}).await
 	}
 	
 	fn handle_fallback(&mut self, message: Option<(u8, Result<Ssp, NetError>)>) {

@@ -2,6 +2,10 @@ use {
 	arrayvec::ArrayVec,
 	crate::*,
 	serde::{Deserialize, Serialize},
+	std::{
+		future::poll_fn,
+		task::Poll,
+	},
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -77,7 +81,7 @@ impl Player {
 	}
 
 	#[cfg(not(feature = "client"))]
-	pub const fn new_host_connected(conn: Box<ClientConnection>, team_id: u8) -> Self {
+	pub const fn new_host(conn: Box<ClientConnection>, team_id: u8) -> Self {
 		Self {
 			player_type: PlayerType::HumanConnection { conn },
 			hand: ArrayVec::new_const(),
@@ -154,6 +158,32 @@ impl Player {
 		} else {
 			_ = conn.send_event(GamePayload::LeaveGame);
 		}
+	}
+	
+	/// Returns None if all channels are closed.
+	pub async fn try_recv_fallback(players: &mut ArrayVec<Self, MAX_PLAYERS>) -> Option<(u8, Result<Ssp, NetError>)> {
+		poll_fn(|cx| {
+			let mut any_open = false;
+			for (i, rx) in players
+				.iter_mut()
+				.enumerate()
+				.flat_map(|(i, p)| match &mut p.player_type {
+					PlayerType::HumanConnection {conn} => Some((i, &mut conn.fallback_rx)),
+					_ => None,
+				})
+			{
+				match rx.poll_recv(cx) {
+					Poll::Ready(Some(item)) => return Poll::Ready(Some((i as u8, item))),
+					Poll::Ready(None) => return Poll::Ready(Some((i as u8, Err(NetError::Disconnected)))),
+					Poll::Pending => any_open = true,
+				}
+			}
+			if any_open {
+				Poll::Pending
+			} else {
+				Poll::Ready(None)
+			}
+		}).await
 	}
 }
 

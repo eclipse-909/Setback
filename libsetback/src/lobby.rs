@@ -117,8 +117,7 @@ impl Lobby {
 	/// ## Error
 	/// The lobby is in an invalid state
 	/// like multiple humans in singleplayer or empty human slots in multiplayer
-	#[allow(clippy::result_large_err)]
-	pub fn init(
+	pub fn finish(
 		mut self,
 		#[cfg(not(feature = "client"))] err_q: ErrQ,
 	) -> Result<GameState, Self> {

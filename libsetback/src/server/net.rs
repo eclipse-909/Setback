@@ -154,20 +154,6 @@ impl ClientConnection {
 		});
 	}
 	
-	/// Used when the client is in a lobby but the game hasn't started
-	pub fn spawn_lobby_handler(mut self, state: Arc<State>) {
-		tokio::spawn(async move {
-			todo!()
-		});
-	}
-	
-	/// Used when the client is in an ongoing game
-	pub fn spawn_game_handler(mut self, state: Arc<State>) {
-		tokio::spawn(async move {
-			todo!()
-		});
-	}
-	
 	// these functions are not marked async because we don't want to move self into the futures they return
 	
 	// Generic payloads
