@@ -52,12 +52,16 @@ pub enum Error {
 	GamesAtCapacity,
 	#[error("Game is full")]
 	GameAtCapacity,
+	#[error("Cannot rejoin a game you intentionally left")]
+	CannotRejoin,
 	#[error("Game code not found. Please check the code and try again")]
 	GameNotFound,
 	#[error("Bad player index")]
 	BadPlayerIndex,
 	#[error("Bad team number")]
 	BadTeamNumber,
+	#[error("Must be the host of the lobby to perform this action")]
+	NotHost,
 }
 
 impl From<reqwest::Error> for Error {

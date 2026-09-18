@@ -27,8 +27,7 @@ bytes = "1.12.1"
 const_format = "0.2.36"
 dioxus = "0.7.10"
 futures = "0.3.34"
-getrandom-v043 = { package = "getrandom", version = "0.4.3", features = ["wasm_js"] }
-getrandom-v034 = { package = "getrandom", version = "0.3.4", features = ["wasm_js"] }
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
 gloo = { version = "0.12.0", default-features = false, features = ["net", "timers", "futures"] }
 http = "1.5.0"
 konst = "0.4.3"

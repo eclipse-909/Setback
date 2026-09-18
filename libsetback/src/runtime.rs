@@ -32,10 +32,6 @@ pub struct GameState {
 	pub round_num: u8,
 	/// Makes it easier to keep track of states in this state machine
 	pub loop_state: GameLoopState,
-	#[cfg(not(feature = "client"))]
-	#[serde(skip_serializing)]
-	#[serde(deserialize_with = "deserialize_err_q_panic")]
-	pub err_q: ErrQ,
 }
 
 pub type ErrQ = UnboundedSender<(u8, NetError)>;
@@ -71,7 +67,7 @@ pub trait PromptResponder {
 	fn send(&self, event: GameEvent) -> Result<(), Error>;
 }
 
-#[cfg(feature = "client")]
+#[cfg(not(feature = "server"))]
 impl GameState {
 	/// ## Safety
 	/// No mutable pointers to player type must exist.
@@ -598,8 +594,3 @@ pub enum PlayedCardResult {
 	RoundOver(RoundScores),
 	GameOver(RoundScores),
 }
-
-#[cfg(not(feature = "client"))]
-fn deserialize_err_q_panic<'de, D: serde::Deserializer<'de>>(_: D)
-	-> Result<UnboundedSender<(u8, NetError)>, D::Error>
-{ Err(serde::de::Error::custom("unknown field `err_q`")) }

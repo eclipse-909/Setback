@@ -1,7 +1,7 @@
 use {
 	crate::*,
 	arrayvec::ArrayVec,
-	futures::{FutureExt, TryFutureExt},
+	futures::FutureExt,
 	std::{
 		pin::Pin,
 		task::{Context, Poll},
@@ -22,13 +22,6 @@ pub enum Gsp {
 	TerminateGame,
 	RemoveClient(Box<ClientConnection>),
 }
-
-type ConnArr = ArrayVec<Box<ClientConnection>, MAX_PLAYERS>;
-type ErrIdxArr = ArrayVec<(u8, NetError), MAX_PLAYERS>;
-
-pub trait TryPromptFut<T: PromptResult>: Future<Output=(Result<T, PromptError>, PromptState)> + Send + 'static {}
-impl<T: PromptResult, F: Future<Output=(Result<T, PromptError>, PromptState)> + Send + 'static> TryPromptFut<T> for F {}
-pub trait NotifyManyFut = Future<Output=ErrIdxArr> + Send + 'static;
 
 pub enum ClientIOFut {
 	None,
@@ -62,7 +55,7 @@ pub enum ClientIOResult {
 
 pub struct GameRtHandle {
 	pub rejoin_tx: Sender<Box<ClientConnection>>,
-	pub handle: JoinHandle<ConnArr>,
+	pub handle: JoinHandle<()>,
 }
 
 impl GameState {
@@ -79,7 +72,15 @@ impl GameState {
 					client_io_res = &mut client_io_fut => {
 						if matches!(client_io_res, ClientIOResult::GameOver) {
 							gsp_tx.send(Gsp::TerminateGame).unwrap();
-							return self.collect_players();
+							self.lobby_state
+								.players
+								.into_iter()
+								.filter_map(|p| match p.player_type {
+									PlayerType::HumanConnection {conn} => Some(conn),
+									_ => None,
+								})
+								.for_each(|conn| _ = gsp_tx.send(Gsp::RemoveClient(conn)));
+							return;
 						}
 						client_io_fut = self.advance_game(client_io_res);
 					}
@@ -88,7 +89,7 @@ impl GameState {
 					Some((idx, err)) = err_q.recv() => {
 						match err {
 							NetError::Disconnected => self.disconnect_player(idx, true),
-							e => self.notify(GamePayload::Err(e.into())),
+							e => self.lobby_state.notify(Payload::Err(e.into()), self.turn_idx),
 						}
 					}
 				}
@@ -108,11 +109,11 @@ impl GameState {
 						} else {
 							self.loop_state = GameLoopState::DealCards;
 						}
-						self.notify_all(GamePayload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
+						self.lobby_state.notify_all(GamePayload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
 					}
 					PlayedCardResult::GameOver(round_scores) => {
 						self.loop_state = GameLoopState::GameOver;
-						self.notify_all(GamePayload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
+						self.lobby_state.notify_all(GamePayload::GameEvent(GameEvent::RoundScores(round_scores.clone())));
 					}
 				}
 			}
@@ -130,7 +131,7 @@ impl GameState {
 			GameLoopState::Init => {
 				self.loop_state = GameLoopState::DealCards;
 				self.increment_turn();
-				self.notify_all_unique(|idx,_| GamePayload::GameEvent(GameEvent::Init { idx }));
+				self.lobby_state.notify_all_unique(|idx,_| GamePayload::GameEvent(GameEvent::Init { idx }));
 				ClientIOFut::None
 			}
 			GameLoopState::DealCards => {
@@ -138,7 +139,7 @@ impl GameState {
 				self.loop_state = GameLoopState::Bidding;
 				self.increment_turn();
 				let dealer_idx = self.dealer_idx;
-				self.notify_all_unique(|_, player| GamePayload::GameEvent(GameEvent::DealCards {
+				self.lobby_state.notify_all_unique(|_, player| GamePayload::GameEvent(GameEvent::DealCards {
 					hand: player.hand.clone(),
 					idx: dealer_idx,
 				}));
@@ -148,23 +149,12 @@ impl GameState {
 			GameLoopState::Playing => self.prompt::<Card>(io_res),
 			GameLoopState::GameOver => {
 				self.loop_state = GameLoopState::Terminated;
-				self.notify_all(GamePayload::GameEvent(GameEvent::GameOver));
+				self.lobby_state.notify_all(GamePayload::GameEvent(GameEvent::GameOver));
 				ClientIOFut::None
 			}
 			GameLoopState::Terminated => ClientIOFut::GameOver,
 		}
 		
-	}
-	
-	fn collect_players(self) -> ConnArr {
-		self.lobby_state
-			.players
-			.into_iter()
-			.filter_map(|p| match p.player_type {
-				PlayerType::HumanConnection {conn} => Some(conn),
-				_ => None,
-			})
-			.collect()
 	}
 
 	/// Makes a copy of the game loop without sensitive data like the player's hand or the deck.
@@ -189,7 +179,6 @@ impl GameState {
 			dealer_idx: self.dealer_idx,
 			round_num: self.round_num,
 			loop_state: self.loop_state,
-			err_q: self.err_q.clone(),
 		})
 	}
 	
@@ -279,50 +268,10 @@ impl GameState {
 		})
 	}
 	
-	/// Notifies the current turn player
-	fn notify(&mut self, payload: GamePayload) {
-		let err_q = self.err_q.clone();
-		let idx = self.turn_idx;
-		let PlayerType::HumanConnection {conn} = &mut self
-			.lobby_state
-			.players[idx as usize]
-			.player_type
-		else {return};
-		let fut = conn.send_expect_ack(payload).inspect_err(move |e| err_q.send((idx, *e)).unwrap());
-		tokio::spawn(fut);
-	}
-	
-	fn notify_all(&mut self, payload: GamePayload) {
-		self.notify_all_but(payload, u8::MAX);
-	}
-	
-	pub fn notify_all_but(&mut self, payload: GamePayload, exclude: u8) {
-		self.notify_all_unique_but(move |_,_| payload.clone(), exclude);
-	}
-	
-	fn notify_all_unique(&mut self, payload_fn: impl FnMut(u8, &Player) -> GamePayload) {
-		self.notify_all_unique_but(payload_fn, u8::MAX);
-	}
-	
-	fn notify_all_unique_but(&mut self, mut payload_fn: impl FnMut(u8, &Player) -> GamePayload, exclude: u8) {
-		self.lobby_state
-			.players
-			.iter_mut()
-			.enumerate()
-			.filter(|(i,_)| *i != exclude as usize)
-			.for_each(|(i, player)| {
-				let payload = payload_fn(i as u8, player);
-				let PlayerType::HumanConnection {conn} = &mut player.player_type else {return;};
-				let err_q = self.err_q.clone();
-				let fut = conn.send_expect_ack(payload).inspect_err(move |e| err_q.send((i as u8, *e)).unwrap());
-				tokio::spawn(fut);
-			});
-	}
-	
 	/// Attempts to let a player rejoin the game.
 	fn rejoin_player(
 		&mut self,
-		conn: Box<ClientConnection>,
+		mut conn: Box<ClientConnection>,
 		gsp_tx: &GspTx,
 	) {
 		if conn.account_id != 0 && let Some(player_idx) = self
@@ -336,12 +285,13 @@ impl GameState {
 			player.player_type = PlayerType::HumanConnection {conn};
 			let username = player.username();
 			// send snapshot to rejoined player
-			self.notify(GamePayload::Snapshot {game_state: self.snapshot(player_idx), player_idx});
+			self.lobby_state.notify(GamePayload::Snapshot {game_state: self.snapshot(player_idx), player_idx}, player_idx);
 			// send rejoin update to all other players
-			self.notify_all_but(GamePayload::PlayerRejoined {player_idx, username}, player_idx);
-		} else {
-			_ = gsp_tx.send(Gsp::RemoveClient(conn));
+			self.lobby_state.notify_all_but(GamePayload::PlayerRejoined {player_idx, username}, player_idx);
+			return;
 		}
+		_ = conn.send_err(Error::CannotRejoin);
+		_ = gsp_tx.send(Gsp::RemoveClient(conn));
 	}
 	
 	fn disconnect_player(&mut self, idx: u8, allow_reconnect: bool) {
@@ -354,7 +304,7 @@ impl GameState {
 		{
 			self.loop_state = GameLoopState::Terminated;
 		}
-		self.notify_all(GamePayload::PlayerDisconnected {player_idx: idx});
+		self.lobby_state.notify_all(GamePayload::PlayerDisconnected {player_idx: idx});
 	}
 	
 	fn handle_fallback(&mut self, message: Option<(u8, Result<Ssp, NetError>)>) {
@@ -364,7 +314,7 @@ impl GameState {
 		};
 		let ssp = match message {
 			Ok(ssp) => ssp,
-			Err(e) => return self.err_q.send((player_idx, e)).unwrap(),
+			Err(e) => return self.lobby_state.err_q.send((player_idx, e)).unwrap(),
 		};
 		match ssp.payload.try_game() {
 			Ok(GamePayload::ReportPlayer(report)) => self.report_player(player_idx, report, ssp.correlation_id),
@@ -380,14 +330,14 @@ impl GameState {
 				.player_type,
 			PlayerType::HumanConnection {..}
 		);
-		let err_q = self.err_q.clone();
+		let err_q = self.lobby_state.err_q.clone();
 		let PlayerType::HumanConnection {conn} = &mut self
 			.lobby_state
 			.players[reporter_idx as usize]
 			.player_type
 		else {return};
 		if !target_is_human && correlation_id.id != 0 && !correlation_id.end {
-			if let Err(err) = conn.send_response(GamePayload::Err(Error::BadPlayerIndex), correlation_id.id) {
+			if let Err(err) = conn.send_response(Payload::Err(Error::BadPlayerIndex), correlation_id.id) {
 				err_q.send((reporter_idx, err)).unwrap();
 			}
 			return;
@@ -411,9 +361,9 @@ impl GameState {
 			}.await;
 			if correlation_id.id != 0 && !correlation_id.end {
 				let payload = if let Err(err) = response {
-					GamePayload::Err(err)
+					Payload::Err(err)
 				} else {
-					GamePayload::Ack
+					Payload::Ack
 				};
 				if let Err(err) = ClientConnection::send_response_raw(&ssp_tx, payload, correlation_id.id) {
 					err_q.send((reporter_idx, err)).unwrap();

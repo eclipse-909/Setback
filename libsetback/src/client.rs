@@ -61,7 +61,7 @@ impl SetbackClient {
 		// No need to use correlation yet because this handshake is required before arbitrary communication
 		info!("Authenticating with Setback server");
 		ws::ws_send(&mut writer, &Ssp::new(
-			HandshakePayload::Authenticate {
+			Payload::Authenticate {
 				version: SSP_VERSION,
 				auth_token: session.auth_token.clone(),
 			},
@@ -76,9 +76,9 @@ impl SetbackClient {
 			error!("Failed to authenticate");
 			return Err(NetError::ServerError.into());
 		};
-		match auth_res.payload.try_handshake()? {
-			HandshakePayload::Ack => {}
-			HandshakePayload::Err(e) => {
+		match auth_res.payload {
+			Payload::Ack => {}
+			Payload::Err(e) => {
 				error!("Failed to authenticate");
 				return Err(e);
 			}
@@ -124,12 +124,12 @@ impl SetbackClient {
 	
 	// Generic payloads
 	
-	async fn send_expect_ack<P: PayloadCommon>(&mut self, payload: P) -> Result<(), NetError> {
+	async fn send_expect_ack(&mut self, payload: impl Into<Payload>) -> Result<(), NetError> {
 		let (response, id) = self.send_new_request(payload).await?;
-		if !response.is_ack() {
+		if !matches!(response, Payload::Ack) {
 			return Err(NetError::BadRequest);
 		}
-		self.send_response_ack::<P>(id)
+		self.send_response_ack(id)
 	}
 	
 	// Server payloads
@@ -139,10 +139,10 @@ impl SetbackClient {
 		let lobby = match response {
 			// switches protocols
 			Payload::Lobby(LobbyPayload::Lobby {lobby, player_idx}) => Ok((lobby, player_idx)),
-			Payload::Server(ServerPayload::Err(err)) => Err(err),
+			Payload::Err(err) => Err(err),
 			_ => Err(NetError::ServerError.into()),
 		};
-		self.send_response_ack::<ServerPayload>(id)?;
+		self.send_response_ack(id)?;
 		lobby
 	}
 
@@ -168,10 +168,10 @@ impl SetbackClient {
 		let game = match response {
 			// switches protocols
 			Payload::Game(GamePayload::Snapshot {game_state, player_idx}) => Ok((game_state, player_idx)),
-			Payload::Server(ServerPayload::Err(err)) => Err(err),
+			Payload::Err(err) => Err(err),
 			_ => Err(NetError::ServerError.into()),
 		};
-		self.send_response_ack::<ServerPayload>(id)?;
+		self.send_response_ack(id)?;
 		game
 	}
 
@@ -180,12 +180,12 @@ impl SetbackClient {
 		filter: GameFilter,
 	) -> Result<Vec<PublicGame>, Error> {
 		let (response, id) = self.send_new_request(ServerPayload::SearchGames(filter)).await?;
-		let games = match response.try_server()? {
-			ServerPayload::PublicGames(games) => Ok(games),
-			ServerPayload::Err(err) => Err(err),
+		let games = match response {
+			Payload::Server(ServerPayload::PublicGames(games)) => Ok(games),
+			Payload::Err(err) => Err(err),
 			_ => Err(NetError::ServerError.into()),
 		};
-		self.send_response_ack::<ServerPayload>(id)?;
+		self.send_response_ack(id)?;
 		games
 	}
 	

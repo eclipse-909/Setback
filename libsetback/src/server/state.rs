@@ -21,6 +21,8 @@ type RuntimeStore = HashMap<GameKey, GameRtHandle>;
 /// The client store holds clients that aren't in a game.
 /// Clients in a game will be owned by that game in either
 /// the lobby store or game runtime store.
+/// Literally everything is owned by this state object,
+/// so it's passed around with an Arc.
 pub struct State {
 	client_store: ClientStore,
 	pub_lobby_store: LobbyStore,
@@ -31,6 +33,8 @@ pub struct State {
 }
 
 impl State {
+	/// You should only have one state object.
+	/// It's just too much effort to use singleton pattern.
 	pub fn new() -> (Arc<Self>, GspRx, LspRx) {
 		let (gsp_tx, gsp_rx) = unbounded_channel();
 		let (lsp_tx, lsp_rx) = unbounded_channel();
@@ -47,7 +51,7 @@ impl State {
 	/// Returns true if the client could not be added.
 	pub async fn add_client(&self, client: &mut ClientConnection) -> bool {
 		if self.client_store.insert_async(client.account_id).await.is_err() {
-			_ = client.send_err::<ServerPayload>(Error::AlreadyConnected);
+			_ = client.send_err(Error::AlreadyConnected);
 			//TODO: if a client is trying to connect more than once,
 			// it could either mean they are trying to cheat by being 2 players at once in a game,
 			// or someone has hacked their account.
@@ -63,32 +67,66 @@ impl State {
 	
 	pub async fn rm_client(&self, account_id: u32) {
 		_ = self.client_store.remove_async(&account_id).await;
+		// TODO we should occasionally shrink the hashmap capacity to free up memory
 	}
 	
 	pub async fn create_game(
 		&self,
 		host_client: ClientConnection,
 		password: String,
-		lsp_tx: LspTx,
 	) -> Result<String, Error> {
 		let num_games = self.pub_lobby_store.len() + self.private_lobby_store.len() + self.runtime_store.len();
 		if num_games >= MAX_GAMES {
 			return Err(Error::GamesAtCapacity);
 		}
-		let (handle, code) = Lobby::create_multiplayer(Box::new(host_client), password.clone(), lsp_tx);
-		let lobby_store = self.lobby_store(&password);
-		let key = GameKey {code: code.clone(), password};
-		if lobby_store.contains_async(&key).await {
-			error!("Generated game code already exists");
+		let (handle, code) = Lobby::create_multiplayer(Box::new(host_client), password.clone(), self.lsp_tx.clone());
+		self.insert_lobby(handle, code, password).await
+	}
+	
+	async fn insert_lobby(
+		&self,
+		handle: LobbyRtHandle,
+		code: String,
+		password: String,
+	) -> Result<String, Error> {
+		let key = GameKey {code: code.clone(), password: password.clone()};
+		if let Err(_) = self.lobby_store(&password).insert_async(key, handle).await {
+			error!("Game code already exists");
 			return Err(Error::GamesAtCapacity);
 		}
-		_ = lobby_store.insert_async(key, handle).await;
 		Ok(code)
 	}
 	
-	pub async fn start_game(&self) {}
+	pub async fn start_game(&self, code: String, password: String) -> Result<(), Error> {
+		let key = GameKey {code: code.clone(), password: password.clone()};
+		let Some((_, lobby)) = self.lobby_store(&password).remove_async(&key).await else {
+			return Err(Error::GameNotFound);
+		};
+		let Ok((lobby, err_q)) = lobby.handle.await else {
+			return Err(NetError::ServerError.into());
+		};
+		match lobby.finish() {
+			Ok(game_state) => {
+				let handle = game_state.start_game(self.gsp_tx.clone(), err_q);
+				if let Err(_) = self.runtime_store.insert_async(key, handle).await {
+					error!("Game code already exists");
+					return Err(Error::GamesAtCapacity);
+				}
+			}
+			Err(lobby) => {
+				let handle = lobby.spawn_lobby_rt(self.lsp_tx.clone(), err_q, code.clone(), password.clone());
+				self.insert_lobby(handle, code, password).await?;
+			}
+		}
+		Ok(())
+		// TODO we should occasionally shrink the hashmap capacity to free up memory
+	}
 	
-	pub async fn rm_game(&self) {}
+	pub async fn rm_game(&self, code: String, password: String) {
+		let Some((_, game)) = self.runtime_store.remove_async(&GameKey {code, password}).await else {return};
+		_ = game.handle.await;
+		// TODO we should occasionally shrink the hashmap capacity to free up memory
+	}
 	
 	pub async fn join_game(&self, client: ClientConnection, code: String, password: String) -> JoinResult {
 		let Some(mut entry) = self.lobby_store(&password).get_async(&GameKey {code, password}).await else {

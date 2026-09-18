@@ -147,9 +147,9 @@ pub trait WebSocketeer {
 	}
 	
 	/// Sends an Ack in response if correlation_id is not 0
-	fn send_response_ack<P: PayloadCommon>(&mut self, correlation_id: u32) -> Result<(), NetError> {
+	fn send_response_ack(&mut self, correlation_id: u32) -> Result<(), NetError> {
 		if correlation_id == 0 {return Ok(());}
-		self.send_response(P::ack(), correlation_id)
+		self.send_response(Payload::Ack, correlation_id)
 	}
 }
 
@@ -203,20 +203,20 @@ mod ws_server_and_client {
 		sockudo_ws::{SplitReader, SplitWriter, WebSocketStream, Config, handshake,},
 		tokio::net::TcpStream,
 	};
-	#[cfg(feature = "client")]
+	#[cfg(not(feature = "server"))]
 	use {
 		std::sync::Arc,
 		tokio_rustls::{rustls, TlsConnector, client::TlsStream},
 	};
 	
-	#[cfg(feature = "client")]
+	#[cfg(not(feature = "server"))]
 	pub type WsReader = SplitReader<TlsStream<TcpStream>>;
-	#[cfg(feature = "client")]
+	#[cfg(not(feature = "server"))]
 	pub type WsWriter = SplitWriter<TlsStream<TcpStream>>;
 	
-	#[cfg(not(feature = "client"))]
+	#[cfg(feature = "server")]
 	pub type WsReader = SplitReader<TcpStream>;
-	#[cfg(not(feature = "client"))]
+	#[cfg(feature = "server")]
 	pub type WsWriter = SplitWriter<TcpStream>;
 	
 	/// Our payloads should be very small, but we can play around with these values
@@ -243,7 +243,7 @@ mod ws_server_and_client {
 		stream.set_nodelay(true)
 			.map_err(|_| NetError::Disconnected)?;
 		
-		#[cfg(feature = "client")]
+		#[cfg(not(feature = "server"))]
 		let mut stream = {
 			let mut roots = rustls::RootCertStore::empty();
 			roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
@@ -265,7 +265,7 @@ mod ws_server_and_client {
 		Ok(WebSocketStream::client(stream, ws_config()).split())
 	}
 	
-	#[cfg(not(feature = "client"))]
+	#[cfg(feature = "server")]
 	pub async fn ws_accept(mut tcp_stream: TcpStream) -> Result<(WsReader, WsWriter), NetError> {
 		tcp_stream.set_nodelay(true)
 			.map_err(|_| NetError::Disconnected)?;

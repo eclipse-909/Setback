@@ -65,66 +65,78 @@ impl CorrelationId {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum Payload {
-	Handshake(HandshakePayload),
+	/// Used to respond to any request to indicate the message was received successfully.
+	Ack,
+	/// Client ---Any--> Server
+	///
+	/// Client <--Err--- Server
+	///
+	/// Response only
+	///
+	/// OR
+	///
+	/// Client <--Err--- Server
+	///
+	/// Spontaneous
+	///
+	/// Any time the server has an error, it sends this to the client.
+	/// The client does not send client-side errors to the server.
+	Err(Error),
+	/// Client ---Any--> Server
+	///
+	/// Client <--ErrRetry--- Server
+	///
+	/// Response only
+	///
+	/// Any time there is an error and the original payload needs to be resent.
+	ErrRetry(Error, Box<Self>),
+	/// Client ---Authenticate--> Server
+	///
+	/// Client <--Ack--- Server
+	///
+	/// Request only
+	///
+	/// Handshake only
+	///
+	/// Client must send this immediately after attempting to connect to the server.
+	/// Client sends its account id as src_id and sends the auth token it got from logging into the API.
+	/// Server responds with Ack if authentication was successful.
+	/// Server responds with Err if authentication was unsuccessful.
+	Authenticate { version: Version, auth_token: String },
 	Server(ServerPayload),
 	Lobby(LobbyPayload),
 	Game(GamePayload),
 }
 
 impl Payload {
-	pub fn try_handshake(self) -> Result<HandshakePayload, NetError> {
-		match self {
-			Self::Handshake(p) => Ok(p),
-			#[cfg(feature = "client")]
-			_ => Err(NetError::ServerError),
-			#[cfg(not(feature = "client"))]
-			_ => Err(NetError::BadRequest.into()),
-		}
-	}
-	
 	pub fn try_server(self) -> Result<ServerPayload, NetError> {
 		match self {
 			Self::Server(p) => Ok(p),
-			#[cfg(feature = "client")]
+			#[cfg(not(feature = "server"))]
 			_ => Err(NetError::ServerError),
-			#[cfg(not(feature = "client"))]
-			_ => Err(NetError::BadRequest.into()),
+			#[cfg(feature = "server")]
+			_ => Err(NetError::BadRequest),
 		}
 	}
 	
 	pub fn try_lobby(self) -> Result<LobbyPayload, NetError> {
 		match self {
 			Self::Lobby(p) => Ok(p),
-			#[cfg(feature = "client")]
+			#[cfg(not(feature = "server"))]
 			_ => Err(NetError::ServerError),
-			#[cfg(not(feature = "client"))]
-			_ => Err(NetError::BadRequest.into()),
+			#[cfg(feature = "server")]
+			_ => Err(NetError::BadRequest),
 		}
 	}
 	
 	pub fn try_game(self) -> Result<GamePayload, NetError> {
 		match self {
 			Self::Game(p) => Ok(p),
-			#[cfg(feature = "client")]
+			#[cfg(not(feature = "server"))]
 			_ => Err(NetError::ServerError),
-			#[cfg(not(feature = "client"))]
-			_ => Err(NetError::BadRequest.into()),
+			#[cfg(feature = "server")]
+			_ => Err(NetError::BadRequest),
 		}
-	}
-	
-	pub fn is_ack(&self) -> bool {
-		match self {
-			Payload::Handshake(p) => matches!(p, HandshakePayload::Ack),
-			Payload::Server(p) => matches!(p, ServerPayload::Ack),
-			Payload::Lobby(p) => matches!(p, LobbyPayload::Ack),
-			Payload::Game(p) => matches!(p, GamePayload::Ack),
-		}
-	}
-}
-
-impl From<HandshakePayload> for Payload {
-	fn from(value: HandshakePayload) -> Self {
-		Self::Handshake(value)
 	}
 }
 
@@ -152,59 +164,7 @@ impl From<GamePayload> for Payload {
 // Spontaneous - server sends message to client and client may or may not need to respond.
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub enum HandshakePayload {
-	/// Client ---Authenticate--> Server
-	///
-	/// Client <--Ack--- Server
-	///
-	/// Request only
-	///
-	/// Handshake only
-	///
-	/// Client must send this immediately after attempting to connect to the server.
-	/// Client sends its account id as src_id and sends the auth token it got from logging into the API.
-	/// Server responds with Ack if authentication was successful.
-	/// Server responds with Err if authentication was unsuccessful.
-	Authenticate { version: Version, auth_token: String },
-	/// Client ---Any--> Server
-	///
-	/// Client <--Ack--- Server
-	///
-	/// Response only
-	///
-	/// If a request doesn't respond with useful data, the server will send back Ack as a signal that everything is ok.
-	/// If the client sends Ack to the server, the server will never respond even if the CorrelationId.end is false.
-	Ack,
-	Err(Error),
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum ServerPayload {
-	/// Used to respond to any request to indicate the message was received successfully.
-	Ack,
-	/// Client ---Any--> Server
-	///
-	/// Client <--Err--- Server
-	///
-	/// Response only
-	///
-	/// OR
-	///
-	/// Client <--Err--- Server
-	///
-	/// Spontaneous
-	///
-	/// Any time the server has an error, it sends this to the client.
-	/// The client does not send client-side errors to the server.
-	Err(Error),
-	/// Client ---Any--> Server
-	///
-	/// Client <--ErrRetry--- Server
-	///
-	/// Response only
-	///
-	/// Any time there is an error and the original payload needs to be resent.
-	ErrRetry(Error, Box<ServerPayload>),
 	/// Client ---CreateGame--> Server
 	///
 	/// Client <--Lobby--- Server
@@ -250,31 +210,6 @@ pub enum ServerPayload {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum LobbyPayload {
-	/// Used to respond to any request to indicate the message was received successfully.
-	Ack,
-	/// Client ---Any--> Server
-	///
-	/// Client <--Err--- Server
-	///
-	/// Response only
-	///
-	/// OR
-	///
-	/// Client <--Err--- Server
-	///
-	/// Spontaneous
-	///
-	/// Any time the server has an error, it sends this to the client.
-	/// The client does not send client-side errors to the server.
-	Err(Error),
-	/// Client ---Any--> Server
-	///
-	/// Client <--ErrRetry--- Server
-	///
-	/// Response only
-	///
-	/// Any time there is an error and the original payload needs to be resent.
-	ErrRetry(Error, Box<LobbyPayload>),
 	/// Client ---CreateGame--> Server
 	///
 	/// Client <--Lobby--- Server
@@ -288,20 +223,18 @@ pub enum LobbyPayload {
 	/// Response only
 	///
 	/// Server sends game info when client creates or joins a game.
-	///
-	/// OR
-	///
-	/// Host-Client ---Lobby--> Server
+	Lobby {lobby: Box<LobbyState>, player_idx: u8},
+	/// Host-Client ---LobbyRules--> Server
 	///
 	/// Host-Client <--Ack--- Server
 	///
-	/// Other-Clients <--Lobby--- Server
+	/// Other-Clients <--LobbyRules--- Server
 	///
 	/// Host-request and spontaneous
 	///
 	/// Host can update the settings in the lobby which gets sent to the server.
 	/// The server updates its state and propagates the message to all other clients.
-	Lobby {lobby: Box<LobbyState>, player_idx: u8},
+	LobbyRules {rules: LobbyRules, player_idx: u8},
 	/// Host-Client ---AddPlayer--> Server
 	///
 	/// Host-Client <--Ack--- Server
@@ -402,31 +335,6 @@ pub enum LobbyPayload {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum GamePayload {
-	/// Used to respond to any request to indicate the message was received successfully.
-	Ack,
-	/// Client ---Any--> Server
-	///
-	/// Client <--Err--- Server
-	///
-	/// Response only
-	///
-	/// OR
-	///
-	/// Client <--Err--- Server
-	///
-	/// Spontaneous
-	///
-	/// Any time the server has an error, it sends this to the client.
-	/// The client does not send client-side errors to the server.
-	Err(Error),
-	/// Client ---Any--> Server
-	///
-	/// Client <--ErrRetry--- Server
-	///
-	/// Response only
-	///
-	/// Any time there is an error and the original payload needs to be resent.
-	ErrRetry(Error, Box<GamePayload>),
 	/// Client <--PlayerDisconnected--- Server
 	///
 	/// Spontaneous
@@ -479,45 +387,4 @@ pub enum GamePayload {
 	///
 	/// A client is intentionally leaving the game meaning they will not be allowed to rejoin.
 	LeaveGame,
-}
-
-pub trait PayloadCommon: Into<Payload> {
-	fn ack() -> Self;
-	fn err(e: Error) -> Self;
-}
-
-impl PayloadCommon for HandshakePayload {
-	fn ack() -> Self {
-		Self::Ack
-	}
-	fn err(e: Error) -> Self {
-		Self::Err(e)
-	}
-}
-
-impl PayloadCommon for ServerPayload {
-	fn ack() -> Self {
-		Self::Ack
-	}
-	fn err(e: Error) -> Self {
-		Self::Err(e)
-	}
-}
-
-impl PayloadCommon for LobbyPayload {
-	fn ack() -> Self {
-		Self::Ack
-	}
-	fn err(e: Error) -> Self {
-		Self::Err(e)
-	}
-}
-
-impl PayloadCommon for GamePayload {
-	fn ack() -> Self {
-		Self::Ack
-	}
-	fn err(e: Error) -> Self {
-		Self::Err(e)
-	}
 }

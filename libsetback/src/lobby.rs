@@ -1,8 +1,10 @@
 use {
 	arrayvec::ArrayVec,
 	crate::*,
+	futures::TryFutureExt,
 	serde::{Deserialize, Serialize},
 	tracing::{error, info, warn},
+	tokio::sync::mpsc::UnboundedSender,
 };
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -20,6 +22,23 @@ pub struct LobbyRules {
 	pub password: String,
 }
 
+impl Clone for LobbyRules {
+	fn clone(&self) -> Self {
+		Self {
+			std_team_mode: self.std_team_mode,
+			win_by_2: self.win_by_2,
+			negative_scores: self.negative_scores,
+			dealer_override: self.dealer_override,
+			max_score: self.max_score,
+			max_players: self.max_players,
+			turn_time: self.turn_time,
+			code: self.code.clone(),
+			// password must never be cloned
+			password: String::new(),
+		}
+	}
+}
+
 /// Setup data is created and modified when setting up a game.
 /// The rules should be read-only when the game is being played.
 /// See [Lobby] for the wrapper struct that should be used in the lobby.
@@ -27,25 +46,62 @@ pub struct LobbyRules {
 pub struct LobbyState {
 	pub rules: LobbyRules,
 	pub players: ArrayVec<Player, MAX_PLAYERS>,
+	#[cfg(feature = "server")]
+	#[serde(skip_serializing)]
+	#[serde(deserialize_with = "deserialize_err_q_panic")]
+	pub err_q: ErrQ,
 }
 
 impl LobbyState {
 	pub fn snapshot(&self) -> Self {
 		Self {
-			rules: LobbyRules {
-				std_team_mode: self.rules.std_team_mode,
-				win_by_2: self.rules.win_by_2,
-				negative_scores: self.rules.negative_scores,
-				dealer_override: self.rules.dealer_override,
-				max_score: self.rules.max_score,
-				max_players: self.rules.max_players,
-				turn_time: self.rules.turn_time,
-				code: self.rules.code.clone(),
-				// password must never be cloned
-				password: String::new(),
-			},
+			rules: self.rules.clone(),
 			players: self.players.iter().map(|p| p.snapshot()).collect(),
+			#[cfg(feature = "server")]
+			err_q: self.err_q.clone(),
 		}
+	}
+}
+
+#[cfg(feature = "server")]
+impl LobbyState {
+	/// Sends a payload to player at idx
+	pub fn notify(&mut self, payload: impl Into<Payload> + Clone, idx: u8) {
+		let err_q = self.err_q.clone();
+		let PlayerType::HumanConnection {conn} = &mut self
+			.players[idx as usize]
+			.player_type
+		else {return};
+		let fut = conn.send_expect_ack(payload.into())
+			.inspect_err(move |e| err_q.send((idx, *e)).unwrap());
+		tokio::spawn(fut);
+	}
+	
+	pub fn notify_all(&mut self, payload: impl Into<Payload> + Clone) {
+		self.notify_all_but(payload, u8::MAX);
+	}
+	
+	pub fn notify_all_but(&mut self, payload: impl Into<Payload> + Clone, exclude: u8) {
+		self.notify_all_unique_but(move |_,_| payload.clone(), exclude);
+	}
+	
+	pub fn notify_all_unique<P: Into<Payload> + Clone>(&mut self, payload_fn: impl FnMut(u8, &Player) -> P) {
+		self.notify_all_unique_but(payload_fn, u8::MAX);
+	}
+	
+	pub fn notify_all_unique_but<P: Into<Payload> + Clone>(&mut self, mut payload_fn: impl FnMut(u8, &Player) -> P, exclude: u8) {
+		self.players
+			.iter_mut()
+			.enumerate()
+			.filter(|(i,_)| *i != exclude as usize)
+			.for_each(|(i, player)| {
+				let payload = payload_fn(i as u8, player);
+				let PlayerType::HumanConnection {conn} = &mut player.player_type else {return;};
+				let err_q = self.err_q.clone();
+				let fut = conn.send_expect_ack(payload.into())
+					.inspect_err(move |e| err_q.send((i as u8, *e)).unwrap());
+				tokio::spawn(fut);
+			});
 	}
 }
 
@@ -58,27 +114,37 @@ impl Clone for LobbyState {
 /// This struct just exists to wrap [LobbyState] and provide methods for convenience while setting up a game.
 /// These methods should not be called during a game, so it adds type safety to guarantee that they won't accidentally be used.
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct Lobby(pub LobbyState);
+pub struct Lobby {
+	pub lobby_state: LobbyState,
+}
 
 impl Lobby {
 	/// Default rules for a game. These can be changed by the host in the lobby.
-	pub const fn new(code: String, password: String) -> Self {
-		Self(LobbyState {
-			rules: LobbyRules {
-				std_team_mode: true,
-				win_by_2: false,
-				negative_scores: true,
-				dealer_override: false,
-				max_score: MAX_SCORE,
-				max_players: MAX_PLAYERS as u8,
-				turn_time: DEFAULT_TURN_TIME,
-				code,
-				password,
-			},
-			players: ArrayVec::new_const(),
-		})
+	pub const fn new(
+		code: String,
+		password: String,
+		#[cfg(feature = "server")] err_q: ErrQ,
+	) -> Self {
+		Self {
+			lobby_state: LobbyState {
+				rules: LobbyRules {
+					std_team_mode: true,
+					win_by_2: false,
+					negative_scores: true,
+					dealer_override: false,
+					max_score: MAX_SCORE,
+					max_players: MAX_PLAYERS as u8,
+					turn_time: DEFAULT_TURN_TIME,
+					code,
+					password,
+				},
+				players: ArrayVec::new_const(),
+				#[cfg(feature = "server")] err_q,
+			}
+		}
 	}
-
+	
+	#[cfg(not(feature = "server"))]
 	pub fn create_ai_only() -> Self {
 		info!("Creating AI only game");
 		let mut lobby = Self::new(String::new(), String::new());
@@ -88,12 +154,12 @@ impl Lobby {
 		lobby
 	}
 
-	#[cfg(feature = "client")]
+	#[cfg(not(feature = "server"))]
 	pub fn create_singleplayer(username: String) -> Self {
 		info!("Creating singleplayer game");
 		let sp_self = Player::new_singleplayer_self(0, username);
 		let mut lobby = Self::new(String::new(), String::new());
-		lobby.0.players.push(sp_self);
+		lobby.lobby_state.players.push(sp_self);
 		for _ in 0..MAX_PLAYERS - 1 {
 			lobby.add_ai();
 		}
@@ -102,25 +168,22 @@ impl Lobby {
 
 	pub fn add_ai(&mut self) {
 		info!("Adding AI player");
-		self.0
+		self.lobby_state
 			.players
-			.push(Player::new_ai(self.0.players.len() as u8 & 1));
+			.push(Player::new_ai(self.lobby_state.players.len() as u8 & 1));
 	}
 
 	/// Updates a player's team.
 	pub fn update_team(&mut self, index: usize, team_id: u8) {
 		info!("Setting player at index {index} to team {team_id}");
-		self.0.players[index].team_id = team_id;
+		self.lobby_state.players[index].team_id = team_id;
 	}
 
 	/// Initializes a game loop that hasn't started yet.
 	/// ## Error
 	/// The lobby is in an invalid state
 	/// like multiple humans in singleplayer or empty human slots in multiplayer
-	pub fn finish(
-		mut self,
-		#[cfg(not(feature = "client"))] err_q: ErrQ,
-	) -> Result<GameState, Self> {
+	pub fn finish(mut self) -> Result<GameState, Self> {
 		info!("Attempting to initialize game");
 		// verify that the players are in the correct state
 		// Singleplayer
@@ -131,49 +194,49 @@ impl Lobby {
 		// * cfg not feature = client
 		// * at least 2 HumanConnection
 		// * remainder are Ai or HumanConnection
-		if self.0.players.len() < MIN_PLAYERS as usize {
+		if self.lobby_state.players.len() < MIN_PLAYERS as usize {
 			warn!(
 				"Not enough players - got {}, need {MIN_PLAYERS}",
-				self.0.players.len()
+				self.lobby_state.players.len()
 			);
 			return Err(self);
 		}
-		#[cfg(feature = "client")]
+		#[cfg(not(feature = "server"))]
 		let mut num_singleplayer = 0;
-		#[cfg(not(feature = "client"))]
+		#[cfg(feature = "server")]
 		let mut num_human_connection = 0;
-		#[cfg(not(feature = "client"))]
+		#[cfg(feature = "server")]
 		let mut num_human_empty = 0;
 		let mut num_ai = 0;
-		self.0
+		self.lobby_state
 			.players
 			.iter_mut()
 			.for_each(|p| match p.player_type {
-				#[cfg(feature = "client")]
+				#[cfg(not(feature = "server"))]
 				PlayerType::SingleplayerSelf { .. } => num_singleplayer += 1,
-				#[cfg(not(feature = "client"))]
+				#[cfg(feature = "server")]
 				PlayerType::HumanConnection { .. } => num_human_connection += 1,
-				#[cfg(not(feature = "client"))]
+				#[cfg(feature = "server")]
 				PlayerType::HumanEmpty => num_human_empty += 1,
 				PlayerType::Ai { .. } => num_ai += 1,
 				_ => unreachable!(
 					"PlayerType should be one of SingleplayerSelf, HumanConnection, HumanEmpty, or Ai"
 				),
 			});
-		#[cfg(all(feature = "client", not(feature = "test-libsetback")))]
-		if num_singleplayer != 1 || self.0.players.len() - 1 != num_ai {
+		#[cfg(all(not(feature = "server"), not(feature = "test-libsetback")))]
+		if num_singleplayer != 1 || self.lobby_state.players.len() - 1 != num_ai {
 			error!("Incorrect player configuration - humans: {num_singleplayer}, AIs: {num_ai}");
 			return Err(self);
 		}
-		#[cfg(all(feature = "client", feature = "test-libsetback"))]
-		if num_ai != self.0.players.len() {
+		#[cfg(all(not(feature = "server"), feature = "test-libsetback"))]
+		if num_ai != self.lobby_state.players.len() {
 			warn!("Incorrect player configuration - all players should be AI for tests");
 			return Err(self);
 		}
-		#[cfg(not(feature = "client"))]
+		#[cfg(feature = "server")]
 		if num_human_connection < 2
-			|| num_human_empty == 0
-			|| self.0.players.len() - num_human_connection != num_ai
+			|| num_human_empty > 0
+			|| self.lobby_state.players.len() - num_human_connection != num_ai
 		{
 			error!(
 				"Incorrect player configuration - empty humans: {}, connected humans: {}, AIs: {}",
@@ -183,15 +246,19 @@ impl Lobby {
 		}
 
 		// normalize team numbers so there are no gaps
-		let mut team_ids: ArrayVec<u8, MAX_PLAYERS> =
-			self.0.players.iter().map(|p| p.team_id).collect();
+		let mut team_ids: ArrayVec<u8, MAX_PLAYERS> = self
+			.lobby_state
+			.players
+			.iter()
+			.map(|p| p.team_id)
+			.collect();
 		team_ids.sort();
 		team_ids.partition_dedup();
 		let mut team_id_map = [0; MAX_PLAYERS];
 		for (index, id) in team_ids.iter().enumerate() {
 			team_id_map[*id as usize] = index as u8;
 		}
-		for player in self.0.players.iter_mut() {
+		for player in self.lobby_state.players.iter_mut() {
 			player.team_id = team_id_map[player.team_id as usize];
 		}
 
@@ -202,9 +269,9 @@ impl Lobby {
 		}
 
 		// don't allow infinite time on the server
-		#[cfg(not(feature = "client"))]
-		if self.0.rules.turn_time == 0 || self.0.rules.turn_time > MAX_TURN_TIME_SERVER {
-			self.0.rules.turn_time = MAX_TURN_TIME_SERVER;
+		#[cfg(feature = "server")]
+		if self.lobby_state.rules.turn_time == 0 || self.lobby_state.rules.turn_time > MAX_TURN_TIME_SERVER {
+			self.lobby_state.rules.turn_time = MAX_TURN_TIME_SERVER;
 		}
 
 		Ok(GameState {
@@ -219,11 +286,17 @@ impl Lobby {
 			highest_bid: Bid::Pass,
 			turn_idx: 0,
 			turn_num: 0,
-			dealer_idx: rand::random_range(0..self.0.players.len() as u8),
+			dealer_idx: rand::random_range(0..self.lobby_state.players.len() as u8),
 			round_num: 0,
-			lobby_state: self.0,
+			lobby_state: self.lobby_state,
 			loop_state: GameLoopState::Init,
-			#[cfg(not(feature = "client"))] err_q,
 		})
 	}
+}
+
+#[cfg(feature = "server")]
+fn deserialize_err_q_panic<'de, D: serde::Deserializer<'de>>(_: D)
+	-> Result<UnboundedSender<(u8, NetError)>, D::Error>
+{
+	Err(serde::de::Error::custom("unknown field `err_q`"))
 }

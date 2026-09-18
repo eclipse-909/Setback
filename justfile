@@ -12,23 +12,17 @@ cloc:
 		--not-match-d=".*\.bak" \
 		.
 
-# run a cargo command with the default cargo options and args
-cargo cmd package="all":
-	if [[ "{{package}}" == "all" ]]; then
-	{{CARGO}} {{cmd}} --workspace
-	else
-	{{CARGO}} {{cmd}} -p "{{package}}"
-	fi
-
-# run the Setback game client
-run-game: (cargo "run" "setback")
-
 # run setbackd with docker compose
-run-server:
+setbackd:
 	docker compose -f compose/compose.local.yml up -d --build
 	xdg-open http://localhost:8080/ # Traefik dashboard
 	xdg-open http://localhost:8081  # phpmyadmin
 	xdg-open https://localhost      # setback_api
+
+build-lib $RUSTFLAGS="-Awarnings":
+	{{CARGO}} build -q -p libsetback
+	{{CARGO}} build -q -p libsetback --target wasm32-unknown-unknown
+	{{CARGO}} build -q -p libsetback -F server
 
 # generate self-signed certificates (necessary for running setbackd locally)
 gencerts:

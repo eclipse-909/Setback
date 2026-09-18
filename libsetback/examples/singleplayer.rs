@@ -1,10 +1,11 @@
 use {
 	arrayvec::ArrayVec,
-	libsetback::*,
+	setback::*,
 	std::io::Write,
 	tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
 };
 
+#[cfg(not(feature = "server"))]
 #[tokio::main]
 async fn main() {
 	let log_path = std::path::Path::new(concat!(
@@ -24,12 +25,10 @@ async fn main() {
 	let (prompt_responder, event_response_rx) = unbounded_channel();
 	let event_emitter = Sender(event_emitter);
 	let event_response_rx = Receiver(event_response_rx);
-	tokio::spawn(
-		GameSetup::new_singleplayer(String::from("example"))
-			.init()
-			.expect("Game cannot start in invalid state")
-			.run_singleplayer(event_emitter, event_response_rx),
-	);
+	tokio::spawn(Lobby::create_singleplayer(String::from("example"))
+		.finish()
+		.expect("Game cannot start in invalid state")
+		.run_singleplayer(event_emitter, event_response_rx));
 	let mut my_hand = ArrayVec::new();
 	let mut my_idx = u8::MAX;
 	let mut input_buf = String::new();

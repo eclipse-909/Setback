@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
 konst.workspace = true
-libsetback = { path = "../libsetback", features = ["client"] }
+libsetback.workspace = true
 uuid.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]

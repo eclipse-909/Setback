@@ -13,8 +13,6 @@ bytes.workspace = true
 const_format.workspace = true
 dioxus.workspace = true
 futures.workspace = true
-konst.workspace = true
-nanoid.workspace = true
 postcard.workspace = true
 rand.workspace = true
 reqwest.workspace = true
@@ -23,15 +21,15 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-getrandom-v043.workspace = true
-getrandom-v034.workspace = true
+getrandom.workspace = true
 gloo.workspace = true
 tokio = { workspace = true, features = ["sync", "macros"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-scc.workspace = true
-sockudo-ws.workspace = true
+nanoid = { workspace = true, optional = true }
 rustls.workspace = true
+scc = { workspace = true, optional = true }
+sockudo-ws.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-rustls.workspace = true
 tokio-util.workspace = true
@@ -42,16 +40,15 @@ trybuild.workspace = true
 tracing-subscriber.workspace = true
 
 [features]
-client = [] # turn off client feature for server
+server = ["dep:nanoid", "dep:scc"]
 test-libsetback = []
 
 [[example]]
 name = "singleplayer"
-required-features = ["client"]
 
 [[test]]
 name = "ai_only"
-required-features = ["client"]
+required-features = ["test-libsetback"]
 
 [lints]
 workspace = true

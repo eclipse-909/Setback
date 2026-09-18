@@ -24,14 +24,14 @@ pub struct Player {
 pub enum PlayerType {
 	/// Yourself in singleplayer.
 	#[serde(skip)]
-	#[cfg(feature = "client")]
+	#[cfg(not(feature = "server"))]
 	SingleplayerSelf {
 		/// Username may be empty if the username could not be read from the file.
 		/// In that case, just don't display it.
 		username: String,
 	} = 0,
 	/// A slot for a human player in a multiplayer lobby that doesn't have a connection yet.
-	#[cfg(not(feature = "client"))]
+	#[cfg(feature = "server")]
 	HumanEmpty = 1,
 	/// A connected player in multiplayer.
 	/// This gets serialized into HumanPlayer because the [ClientConnection] struct is not serializable.
@@ -39,7 +39,7 @@ pub enum PlayerType {
 	/// Futures will take ownership of the inner boxed ClientConnection and they leave behind None.
 	/// When the future completes, the ClientConnection is restored.
 	#[serde(skip_deserializing)]
-	#[cfg(not(feature = "client"))]
+	#[cfg(feature = "server")]
 	HumanConnection {
 		/// See [PlayerType::HumanConnection]
 		#[serde(serialize_with = "serialize_conn_as_player")]
@@ -61,7 +61,7 @@ pub enum PlayerType {
 
 impl Player {
 	/// The sender returned is used to respond to prompts
-	#[cfg(feature = "client")]
+	#[cfg(not(feature = "server"))]
 	pub fn new_singleplayer_self(team_id: u8, username: String) -> Self {
 		Self {
 			player_type: PlayerType::SingleplayerSelf { username },
@@ -71,7 +71,7 @@ impl Player {
 	}
 
 	///Empty slot for a human player in multiplayer.
-	#[cfg(not(feature = "client"))]
+	#[cfg(feature = "server")]
 	pub const fn new_human_empty(team_id: u8) -> Self {
 		Self {
 			player_type: PlayerType::HumanEmpty,
@@ -80,7 +80,7 @@ impl Player {
 		}
 	}
 
-	#[cfg(not(feature = "client"))]
+	#[cfg(feature = "server")]
 	pub const fn new_host(conn: Box<ClientConnection>, team_id: u8) -> Self {
 		Self {
 			player_type: PlayerType::HumanConnection { conn },
@@ -112,14 +112,14 @@ impl Player {
 	pub fn snapshot(&self) -> Self {
 		Self {
 			player_type: match &self.player_type {
-				#[cfg(not(feature = "client"))]
+				#[cfg(feature = "server")]
 				PlayerType::HumanConnection { conn } => {
 					PlayerType::HumanPlayer {
 						username: conn.username.clone(),
 						ready: conn.ready,
 					}
 				},
-				#[cfg(feature = "client")]
+				#[cfg(not(feature = "server"))]
 				PlayerType::HumanPlayer { username, ready } => PlayerType::HumanPlayer {
 					username: username.clone(),
 					ready: *ready,
@@ -134,18 +134,18 @@ impl Player {
 	
 	pub fn username(&self) -> String {
 		match &self.player_type {
-			#[cfg(feature = "client")]
+			#[cfg(not(feature = "server"))]
 			PlayerType::SingleplayerSelf { username, .. } => username.clone(),
 			PlayerType::HumanPlayer { username, .. } => username.clone(),
-			#[cfg(not(feature = "client"))]
+			#[cfg(feature = "server")]
 			PlayerType::HumanConnection { conn } => conn.username.clone(),
-			#[cfg(not(feature = "client"))]
+			#[cfg(feature = "server")]
 			PlayerType::HumanEmpty => "Waiting for player...".to_string(),
 			PlayerType::Ai { .. } => AI_NAME.to_string(),
 		}
 	}
 	
-	#[cfg(not(feature = "client"))]
+	#[cfg(feature = "server")]
 	pub fn disconnect(&mut self, allow_reconnect: bool) {
 		let PlayerType::HumanConnection {conn} = &mut self.player_type else {return;};
 		let id = conn.account_id;
@@ -154,13 +154,14 @@ impl Player {
 			PlayerType::Ai { account_id: if allow_reconnect {id} else {0} }
 		) else {return;};
 		if allow_reconnect {
-			_ = conn.send_err::<GamePayload>(NetError::Disconnected.into());
+			_ = conn.send_err(NetError::Disconnected.into());
 		} else {
 			_ = conn.send_event(GamePayload::LeaveGame);
 		}
 	}
 	
 	/// Returns None if all channels are closed.
+	#[cfg(feature = "server")]
 	pub async fn try_recv_fallback(players: &mut ArrayVec<Self, MAX_PLAYERS>) -> Option<(u8, Result<Ssp, NetError>)> {
 		poll_fn(|cx| {
 			let mut any_open = false;
@@ -187,7 +188,7 @@ impl Player {
 	}
 }
 
-#[cfg(not(feature = "client"))]
+#[cfg(feature = "server")]
 fn serialize_conn_as_player<S>(conn: &ClientConnection, serializer: S) -> Result<S::Ok, S::Error>
 where
 	S: serde::Serializer,

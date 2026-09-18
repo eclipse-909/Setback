@@ -1,5 +1,6 @@
-use {libsetback::*, std::fs};
+use {setback::*, std::fs};
 
+#[cfg(not(feature = "server"))]
 #[tokio::test]
 async fn test_ai_only() {
 	let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/logs/ai_only.log"));
@@ -12,8 +13,8 @@ async fn test_ai_only() {
 		.compact()
 		.init();
 
-	GameSetup::new_ai_only()
-		.init()
+	Lobby::create_ai_only()
+		.finish()
 		.expect("Game cannot start in invalid state")
 		.run_singleplayer(Empty, Empty)
 		.await;
