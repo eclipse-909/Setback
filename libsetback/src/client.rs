@@ -39,7 +39,6 @@ impl SetbackClient {
 	/// If you send a message to the server that expects a response, you can just call the async function that sends the message,
 	/// and awaiting that function will return the response from the server if all goes well.
 	pub async fn new(credentials: LoginRequest) -> Result<Self, Error> {
-		info!("Logging into api");
 		let api = setback_api();
 		let session = api
 			.post(URL_API_LOGIN)
@@ -52,14 +51,12 @@ impl SetbackClient {
 			.json::<LoginResponse>()
 			.await
 			.map_err(|_| NetError::ServerError)?;
-		info!("Logged into api");
+		info!("Logged in as {}", session.username);
 
-		info!("Connecting to Setback server");
 		let (mut reader, mut writer) = ws::ws_connect().await?;
 		info!("Connected to Setback server");
 		
 		// No need to use correlation yet because this handshake is required before arbitrary communication
-		info!("Authenticating with Setback server");
 		ws::ws_send(&mut writer, &Ssp::new(
 			Payload::Authenticate {
 				version: SSP_VERSION,
@@ -108,7 +105,6 @@ impl SetbackClient {
 		&self,
 		auth_token: &str,
 	) -> Result<(), Error> {
-		info!("Logging out");
 		#[cfg(not(feature = "test-libsetback"))]
 		self.api
 			.get(URL_API_LOGOUT)

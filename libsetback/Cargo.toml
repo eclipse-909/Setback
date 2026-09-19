@@ -37,18 +37,10 @@ webpki-roots.workspace = true
 
 [dev-dependencies]
 trybuild.workspace = true
-tracing-subscriber.workspace = true
 
 [features]
 server = ["dep:nanoid", "dep:scc"]
 test-libsetback = []
-
-[[example]]
-name = "singleplayer"
-
-[[test]]
-name = "ai_only"
-required-features = ["test-libsetback"]
 
 [lints]
 workspace = true

@@ -2,7 +2,6 @@ use {
 	crate::*,
 	std::sync::Arc,
 	scc::{HashMap, HashSet},
-	tokio::sync::mpsc::unbounded_channel,
 	tracing::error
 };
 
@@ -28,28 +27,22 @@ pub struct State {
 	pub_lobby_store: LobbyStore,
 	private_lobby_store: LobbyStore,
 	runtime_store: RuntimeStore,
-	gsp_tx: GspTx,
-	lsp_tx: LspTx,
 }
 
 impl State {
 	/// You should only have one state object.
 	/// It's just too much effort to use singleton pattern.
-	pub fn new() -> (Arc<Self>, GspRx, LspRx) {
-		let (gsp_tx, gsp_rx) = unbounded_channel();
-		let (lsp_tx, lsp_rx) = unbounded_channel();
-		(Arc::new(Self {
+	pub fn new() -> Arc<Self> {
+		Arc::new(Self {
 			client_store: HashSet::new(),
 			pub_lobby_store: HashMap::new(),
 			private_lobby_store: HashMap::new(),
 			runtime_store: HashMap::new(),
-			gsp_tx,
-			lsp_tx,
-		}), gsp_rx, lsp_rx)
+		})
 	}
 	
 	/// Returns true if the client could not be added.
-	pub async fn add_client(&self, client: &mut ClientConnection) -> bool {
+	pub async fn add_client(self: Arc<Self>, mut client: ClientConnection) -> bool {
 		if self.client_store.insert_async(client.account_id).await.is_err() {
 			_ = client.send_err(Error::AlreadyConnected);
 			//TODO: if a client is trying to connect more than once,
@@ -62,16 +55,17 @@ impl State {
 			// which would confirm the cause.
 			return true;
 		}
+		client.spawn_server_handler(self);
 		false
 	}
 	
 	pub async fn rm_client(&self, account_id: u32) {
 		_ = self.client_store.remove_async(&account_id).await;
-		// TODO we should occasionally shrink the hashmap capacity to free up memory
+		// TODO we should occasionally shrink the hashset capacity to free up memory
 	}
 	
-	pub async fn create_game(
-		&self,
+	pub async fn create_lobby(
+		self: Arc<Self>,
 		host_client: ClientConnection,
 		password: String,
 	) -> Result<String, Error> {
@@ -79,7 +73,7 @@ impl State {
 		if num_games >= MAX_GAMES {
 			return Err(Error::GamesAtCapacity);
 		}
-		let (handle, code) = Lobby::create_multiplayer(Box::new(host_client), password.clone(), self.lsp_tx.clone());
+		let (handle, code) = Lobby::create_multiplayer(Box::new(host_client), password.clone(), self.clone());
 		self.insert_lobby(handle, code, password).await
 	}
 	
@@ -90,14 +84,14 @@ impl State {
 		password: String,
 	) -> Result<String, Error> {
 		let key = GameKey {code: code.clone(), password: password.clone()};
-		if let Err(_) = self.lobby_store(&password).insert_async(key, handle).await {
+		if self.lobby_store(&password).insert_async(key, handle).await.is_err() {
 			error!("Game code already exists");
 			return Err(Error::GamesAtCapacity);
 		}
 		Ok(code)
 	}
 	
-	pub async fn start_game(&self, code: String, password: String) -> Result<(), Error> {
+	pub async fn start_game(self: Arc<Self>, code: String, password: String) -> Result<(), Error> {
 		let key = GameKey {code: code.clone(), password: password.clone()};
 		let Some((_, lobby)) = self.lobby_store(&password).remove_async(&key).await else {
 			return Err(Error::GameNotFound);
@@ -107,14 +101,14 @@ impl State {
 		};
 		match lobby.finish() {
 			Ok(game_state) => {
-				let handle = game_state.start_game(self.gsp_tx.clone(), err_q);
-				if let Err(_) = self.runtime_store.insert_async(key, handle).await {
+				let handle = game_state.start_game(self.clone(), err_q);
+				if self.runtime_store.insert_async(key, handle).await.is_err() {
 					error!("Game code already exists");
 					return Err(Error::GamesAtCapacity);
 				}
 			}
 			Err(lobby) => {
-				let handle = lobby.spawn_lobby_rt(self.lsp_tx.clone(), err_q, code.clone(), password.clone());
+				let handle = lobby.spawn_lobby_rt(self.clone(), err_q);
 				self.insert_lobby(handle, code, password).await?;
 			}
 		}
@@ -122,13 +116,17 @@ impl State {
 		// TODO we should occasionally shrink the hashmap capacity to free up memory
 	}
 	
-	pub async fn rm_game(&self, code: String, password: String) {
-		let Some((_, game)) = self.runtime_store.remove_async(&GameKey {code, password}).await else {return};
-		_ = game.handle.await;
+	pub async fn rm_lobby(&self, code: String, password: String) {
+		_ = self.lobby_store(&password).remove_async(&GameKey {code, password}).await;
 		// TODO we should occasionally shrink the hashmap capacity to free up memory
 	}
 	
-	pub async fn join_game(&self, client: ClientConnection, code: String, password: String) -> JoinResult {
+	pub async fn rm_game(&self, code: String, password: String) {
+		_ = self.runtime_store.remove_async(&GameKey {code, password}).await;
+		// TODO we should occasionally shrink the hashmap capacity to free up memory
+	}
+	
+	pub async fn join_lobby(&self, client: ClientConnection, code: String, password: String) -> JoinResult {
 		let Some(mut entry) = self.lobby_store(&password).get_async(&GameKey {code, password}).await else {
 			return JoinResult::BadCodeOrPassword(client);
 		};
@@ -149,7 +147,7 @@ impl State {
 	}
 	
 	fn lobby_store(&self, password: &str) -> &LobbyStore {
-		if password == "" {
+		if password.is_empty() {
 			&self.pub_lobby_store
 		} else {
 			&self.private_lobby_store

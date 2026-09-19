@@ -19,10 +19,11 @@ setbackd:
 	xdg-open http://localhost:8081  # phpmyadmin
 	xdg-open https://localhost      # setback_api
 
-build-lib $RUSTFLAGS="-Awarnings":
-	{{CARGO}} build -q -p libsetback
-	{{CARGO}} build -q -p libsetback --target wasm32-unknown-unknown
-	{{CARGO}} build -q -p libsetback -F server
+# check libsetback for compiler errors only, does not show warnings
+check-lib $RUSTFLAGS="-Awarnings":
+	{{CARGO}} check -q -p libsetback --all-targets
+	{{CARGO}} check -q -p libsetback --target wasm32-unknown-unknown
+	{{CARGO}} check -q -p libsetback -F server
 
 # generate self-signed certificates (necessary for running setbackd locally)
 gencerts:

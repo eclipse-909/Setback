@@ -1,25 +1,41 @@
+#![feature(panic_update_hook)]
+
 use {
 	arrayvec::ArrayVec,
 	setback::*,
-	std::io::Write,
+	std::{
+		io::Write,
+		fs::{self, File},
+		path::Path
+	},
 	tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
 };
 
-#[cfg(not(feature = "server"))]
 #[tokio::main]
 async fn main() {
-	let log_path = std::path::Path::new(concat!(
+	let log_path = Path::new(concat!(
 		env!("CARGO_MANIFEST_DIR"),
 		"/logs/singleplayer.log"
 	));
-	std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
-	let log_file = std::fs::File::create(log_path).unwrap();
+	fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+	let log_file = File::create(log_path).unwrap();
 	tracing_subscriber::fmt()
 		.with_writer(log_file)
 		.with_ansi(false)
 		.with_level(true)
 		.compact()
 		.init();
+	
+	std::panic::update_hook(move |prev, info| {
+		let log_path = Path::new(concat!(
+			env!("CARGO_MANIFEST_DIR"),
+			"/logs/singleplayer-backtrace.log"
+		));
+		fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+		let mut log_file = File::create(log_path).unwrap();
+		_ = write!(log_file, "{info}");
+		prev(info);
+	});
 
 	let (event_emitter, mut event_subscriber) = unbounded_channel();
 	let (prompt_responder, event_response_rx) = unbounded_channel();

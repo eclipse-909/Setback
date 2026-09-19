@@ -3,7 +3,7 @@ use {
 	crate::*,
 	futures::TryFutureExt,
 	serde::{Deserialize, Serialize},
-	tracing::{error, info, warn},
+	tracing::{error, debug},
 	tokio::sync::mpsc::UnboundedSender,
 };
 
@@ -59,6 +59,13 @@ impl LobbyState {
 			players: self.players.iter().map(|p| p.snapshot()).collect(),
 			#[cfg(feature = "server")]
 			err_q: self.err_q.clone(),
+		}
+	}
+	
+	pub fn cx(&self) -> LobbyLogCx<'_> {
+		LobbyLogCx {
+			code: &self.rules.code,
+			public: self.rules.password.is_empty(),
 		}
 	}
 }
@@ -146,7 +153,7 @@ impl Lobby {
 	
 	#[cfg(not(feature = "server"))]
 	pub fn create_ai_only() -> Self {
-		info!("Creating AI only game");
+		debug!("Creating AI only game");
 		let mut lobby = Self::new(String::new(), String::new());
 		for _ in 0..MAX_PLAYERS {
 			lobby.add_ai();
@@ -156,7 +163,7 @@ impl Lobby {
 
 	#[cfg(not(feature = "server"))]
 	pub fn create_singleplayer(username: String) -> Self {
-		info!("Creating singleplayer game");
+		debug!("Creating singleplayer game");
 		let sp_self = Player::new_singleplayer_self(0, username);
 		let mut lobby = Self::new(String::new(), String::new());
 		lobby.lobby_state.players.push(sp_self);
@@ -167,7 +174,6 @@ impl Lobby {
 	}
 
 	pub fn add_ai(&mut self) {
-		info!("Adding AI player");
 		self.lobby_state
 			.players
 			.push(Player::new_ai(self.lobby_state.players.len() as u8 & 1));
@@ -175,7 +181,6 @@ impl Lobby {
 
 	/// Updates a player's team.
 	pub fn update_team(&mut self, index: usize, team_id: u8) {
-		info!("Setting player at index {index} to team {team_id}");
 		self.lobby_state.players[index].team_id = team_id;
 	}
 
@@ -184,7 +189,7 @@ impl Lobby {
 	/// The lobby is in an invalid state
 	/// like multiple humans in singleplayer or empty human slots in multiplayer
 	pub fn finish(mut self) -> Result<GameState, Self> {
-		info!("Attempting to initialize game");
+		debug!(cx = %self.cx(), "Attempting to initialize game");
 		// verify that the players are in the correct state
 		// Singleplayer
 		// * cfg feature = client
@@ -195,7 +200,8 @@ impl Lobby {
 		// * at least 2 HumanConnection
 		// * remainder are Ai or HumanConnection
 		if self.lobby_state.players.len() < MIN_PLAYERS as usize {
-			warn!(
+			error!(
+				cx = %self.cx(),
 				"Not enough players - got {}, need {MIN_PLAYERS}",
 				self.lobby_state.players.len()
 			);
@@ -225,12 +231,12 @@ impl Lobby {
 			});
 		#[cfg(all(not(feature = "server"), not(feature = "test-libsetback")))]
 		if num_singleplayer != 1 || self.lobby_state.players.len() - 1 != num_ai {
-			error!("Incorrect player configuration - humans: {num_singleplayer}, AIs: {num_ai}");
+			error!(cx = %self.cx(), "Incorrect player configuration - humans: {num_singleplayer}, AIs: {num_ai}");
 			return Err(self);
 		}
 		#[cfg(all(not(feature = "server"), feature = "test-libsetback"))]
 		if num_ai != self.lobby_state.players.len() {
-			warn!("Incorrect player configuration - all players should be AI for tests");
+			error!(cx = %self.cx(), "Incorrect player configuration - all players should be AI for tests");
 			return Err(self);
 		}
 		#[cfg(feature = "server")]
@@ -239,6 +245,7 @@ impl Lobby {
 			|| self.lobby_state.players.len() - num_human_connection != num_ai
 		{
 			error!(
+				cx = %self.cx(),
 				"Incorrect player configuration - empty humans: {}, connected humans: {}, AIs: {}",
 				num_human_empty, num_human_connection, num_ai
 			);
@@ -291,6 +298,21 @@ impl Lobby {
 			lobby_state: self.lobby_state,
 			loop_state: GameLoopState::Init,
 		})
+	}
+	
+	pub fn cx(&self) -> LobbyLogCx<'_> {
+		self.lobby_state.cx()
+	}
+}
+
+pub struct LobbyLogCx<'lobby> {
+	code: &'lobby str,
+	public: bool,
+}
+
+impl std::fmt::Display for LobbyLogCx<'_> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "code:{},pub:{}", self.code, self.public)
 	}
 }
 

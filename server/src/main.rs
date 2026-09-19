@@ -1,11 +1,10 @@
 use {
 	std::{
-		cell::LazyCell,
 		io::Write,
 		net::{Ipv4Addr, SocketAddrV4},
+		mem::MaybeUninit,
 		process::exit,
 		time::Instant,
-		sync::Arc
 	},
 	reqwest::Client,
 	tokio::net::TcpListener,
@@ -15,7 +14,17 @@ use {
 pub use setback::*;
 
 const BIN_VERSION: Version = pkg_version!();
-extern "Rust" static SETBACK_API: LazyCell<Client> = LazyCell::new(|| Client::builder().cookie_store(true).build().unwrap());
+static mut SETBACK_API: MaybeUninit<Client> = MaybeUninit::uninit();
+
+pub extern "Rust" fn setback_api() -> Client {
+	// SAFETY:
+	// Must link with libsetback.
+	// SETBACK_API must never be mutated while this function is being called.
+	unsafe {
+		#[allow(static_mut_refs)]
+		SETBACK_API.assume_init_ref().clone()
+	}
+}
 
 macro_rules! crash {
 	($fmt:expr) => {{
@@ -44,17 +53,21 @@ fn main() {
 		.build()
 		.unwrap();
 	
-	let (state, reject_rx) = State::new();
-	
 	rt.block_on(async move {
+		// SAFETY:
+		// There are no other references to SETBACK_API.
+		unsafe {
+			#[allow(static_mut_refs)]
+			SETBACK_API.write(Client::builder().cookie_store(true).build().unwrap());
+		}
+		
 		tokio::select! {
 			res = tokio::signal::ctrl_c() => if let Err(e) = res {
 				error!("Terminating via SIGINT - {e}")
 			} else {
 				info!("Terminating via SIGINT")
 			},
-			_ = tcp_listen(state) => unreachable!(),
-			_ = reject_listen(reject_rx, state) => unreachable!(),
+			_ = tcp_listen() => unreachable!(),
 		}
 	});
 	info!("Initiating shutdown");
@@ -64,27 +77,20 @@ fn main() {
 	_ = std::io::stdout().flush();
 }
 
-async fn tcp_listen(state: Arc<State>) -> ! {
+async fn tcp_listen() -> ! {
 	let tcp_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
 		.await
 		.unwrap_or_else(crash!("Could not bind tcp listener. Error: {}", e));
+	let state = State::new();
 	loop {
 		match tcp_listener.accept().await {
 			Ok((stream, addr)) => {
 				// ClientConnection::new will upgrade to ws and authenticate the client
 				if let Some(client) = ClientConnection::new(stream, addr).await {
-					client.spawn_server_handler(state.clone());
+					state.clone().add_client(client).await;
 				}
 			}
 			Err(e) => warn!("Could not accept client. Error: {e}"),
 		}
-	}
-}
-
-/// This happens when a client tries to rejoin an ongoing game but fails,
-/// so they are rejected from that game and their handler needs to be restarted.
-async fn reject_listen(mut reject_rx: GspRx, state: Arc<State>) -> ! {
-	loop {
-		reject_rx.recv().await.unwrap().spawn_handler(state.clone());
 	}
 }

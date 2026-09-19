@@ -3,7 +3,6 @@ use {
 	futures::{FutureExt, TryFutureExt},
 	reqwest::Client,
 	std::{
-		cell::LazyCell,
 		net::SocketAddr,
 		pin::Pin,
 		sync::Arc,
@@ -15,13 +14,13 @@ use {
 		mpsc::unbounded_channel,
 		time::Sleep,
 	},
-	tracing::info,
+	tracing::debug,
 };
 
 // SAFETY:
 // Must link with server
 unsafe extern "Rust" {
-	pub static SETBACK_API: LazyCell<Client>;
+	pub fn setback_api() -> &'static Client;
 }
 
 pub struct PromptState {
@@ -60,6 +59,7 @@ impl ClientConnection {
 	/// Their token will be validated. They are sent Ack if successful or Err
 	/// if unauthenticated.
 	pub async fn new(tcp_stream: TcpStream, client_addr: SocketAddr) -> Option<Self> {
+		debug!("Client is connecting to server");
 		let (mut reader, mut writer) = ws::ws_accept(tcp_stream).await.ok()?;
 		
 		//TODO:
@@ -89,7 +89,7 @@ impl ClientConnection {
 		let (username, account_id, auth_token) = match res {
 			Ok(r) => r,
 			Err(err) => {
-				info!("Authentication failed for client - Error: {err}");
+				debug!("Authentication failed for client - Error: {err}");
 				ws::ws_send(
 					&mut writer,
 					&Ssp::new(Payload::Err(err), CorrelationId::event()),
@@ -118,10 +118,6 @@ impl ClientConnection {
 	/// Used when the client is connected to the server but not in a lobby or a game
 	pub fn spawn_server_handler(mut self, state: Arc<State>) {
 		tokio::spawn(async move {
-			if state.add_client(&mut self).await {
-				return;
-			}
-			
 			// DO NOT RETURN FROM THIS LOOP, USE BREAK INSTEAD
 			loop {
 				let Some(res) = self.fallback_rx.recv().await else { break };
@@ -228,7 +224,7 @@ impl ClientConnection {
 	async fn get_username(auth_token: &str) -> Result<UsernameResponse, Error> {
 		// SAFETY:
 		// Must link with server
-		unsafe {&SETBACK_API}.get(URL_API_USERNAME)
+		unsafe {setback_api()}.get(URL_API_USERNAME)
 			.bearer_auth(auth_token)
 			.send()
 			.await
@@ -251,7 +247,7 @@ impl std::fmt::Debug for ClientConnection {
 	}
 }
 
-#[cfg(not(feature = "client"))]
+#[cfg(feature = "server")]
 pub trait PromptResult: Copy + Send {
 	type PlayResult;
 	fn prompt_event(err: Option<PromptError>) -> GameEvent;
@@ -277,7 +273,7 @@ pub trait PromptResult: Copy + Send {
 	}
 }
 
-#[cfg(not(feature = "client"))]
+#[cfg(feature = "server")]
 impl PromptResult for Bid {
 	type PlayResult = ();
 	fn prompt_event(err: Option<PromptError>) -> GameEvent {
@@ -314,7 +310,7 @@ impl PromptResult for Bid {
 	fn play_res_to_io_fut(_: Self::PlayResult) -> ClientIOFut { ClientIOFut::None }
 }
 
-#[cfg(not(feature = "client"))]
+#[cfg(feature = "server")]
 impl PromptResult for Card {
 	type PlayResult = PlayedCardResult;
 	fn prompt_event(err: Option<PromptError>) -> GameEvent {

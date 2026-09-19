@@ -6,22 +6,15 @@ use {
 		pin::Pin,
 		task::{Context, Poll},
 		time::Duration,
+		sync::Arc,
 	},
 	tokio::{
 		sync::mpsc::*,
 		task::JoinHandle,
 		time::sleep,
 	},
+	tracing::debug,
 };
-
-pub type GspTx = UnboundedSender<Gsp>;
-pub type GspRx = UnboundedReceiver<Gsp>;
-
-/// Game-Server Protocol
-pub enum Gsp {
-	TerminateGame,
-	RemoveClient(Box<ClientConnection>),
-}
 
 pub enum ClientIOFut {
 	None,
@@ -61,9 +54,10 @@ pub struct GameRtHandle {
 impl GameState {
 	pub fn start_game(
 		mut self,
-		gsp_tx: GspTx,
+		state: Arc<State>,
 		mut err_q: UnboundedReceiver<(u8, NetError)>,
 	) -> GameRtHandle {
+		debug!(cx = %self.cx(), "Starting game");
 		let (rejoin_tx, mut rejoin_rx) = channel(MAX_PLAYERS);
 		let handle = tokio::spawn(async move {
 			let mut client_io_fut = self.advance_game(ClientIOResult::None);
@@ -71,7 +65,11 @@ impl GameState {
 				tokio::select! {
 					client_io_res = &mut client_io_fut => {
 						if matches!(client_io_res, ClientIOResult::GameOver) {
-							gsp_tx.send(Gsp::TerminateGame).unwrap();
+							debug!(cx = %self.cx(), "Terminating game");
+							state.rm_game(
+								self.lobby_state.rules.code.clone(),
+								self.lobby_state.rules.password.clone(),
+							).await;
 							self.lobby_state
 								.players
 								.into_iter()
@@ -79,13 +77,13 @@ impl GameState {
 									PlayerType::HumanConnection {conn} => Some(conn),
 									_ => None,
 								})
-								.for_each(|conn| _ = gsp_tx.send(Gsp::RemoveClient(conn)));
+								.for_each(|conn| conn.spawn_server_handler(state.clone()));
 							return;
 						}
 						client_io_fut = self.advance_game(client_io_res);
 					}
 					message = Player::try_recv_fallback(&mut self.lobby_state.players) => self.handle_fallback(message),
-					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn, &gsp_tx),
+					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn, state.clone()),
 					Some((idx, err)) = err_q.recv() => {
 						match err {
 							NetError::Disconnected => self.disconnect_player(idx, true),
@@ -154,7 +152,6 @@ impl GameState {
 			}
 			GameLoopState::Terminated => ClientIOFut::GameOver,
 		}
-		
 	}
 
 	/// Makes a copy of the game loop without sensitive data like the player's hand or the deck.
@@ -272,7 +269,7 @@ impl GameState {
 	fn rejoin_player(
 		&mut self,
 		mut conn: Box<ClientConnection>,
-		gsp_tx: &GspTx,
+		state: Arc<State>
 	) {
 		if conn.account_id != 0 && let Some(player_idx) = self
 			.lobby_state
@@ -280,6 +277,8 @@ impl GameState {
 			.iter_mut()
 			.position(|p| matches!(p.player_type, PlayerType::Ai {account_id} if conn.account_id == account_id))
 		{
+			let account_id = conn.account_id;
+			debug!(cx = %self.cx(), account_id, "Player rejoined game at index {player_idx}");
 			let player = &mut self.lobby_state.players[player_idx];
 			let player_idx = player_idx as u8;
 			player.player_type = PlayerType::HumanConnection {conn};
@@ -291,10 +290,11 @@ impl GameState {
 			return;
 		}
 		_ = conn.send_err(Error::CannotRejoin);
-		_ = gsp_tx.send(Gsp::RemoveClient(conn));
+		conn.spawn_server_handler(state);
 	}
 	
 	fn disconnect_player(&mut self, idx: u8, allow_reconnect: bool) {
+		debug!(cx = %self.cx(), "Player at index {idx} disconnected");
 		self.lobby_state.players[idx as usize].disconnect(allow_reconnect);
 		if !self
 			.lobby_state
@@ -349,7 +349,7 @@ impl GameState {
 				// TODO this will be a private api call
 				// SAFETY:
 				// Must link with server
-				unsafe {&SETBACK_API}.post(URL_API_REPORT_PLAYER)
+				unsafe {setback_api()}.post(URL_API_REPORT_PLAYER)
 					.bearer_auth(auth_token)
 					.json(&report)
 					.send()

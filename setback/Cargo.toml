@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+arrayvec.workspace = true
 dioxus = { workspace = true, features = ["router"] }
 konst.workspace = true
 libsetback.workspace = true
+tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
@@ -19,6 +21,13 @@ tokio = { workspace = true, features = ["full"] }
 default = ["desktop"]
 web = ["dioxus/web", "uuid/js"]
 desktop = ["dioxus/desktop"]
+
+[[example]]
+name = "singleplayer"
+
+[[test]]
+name = "ai_only"
+required-features = ["libsetback/test-libsetback"]
 
 [lints]
 workspace = true

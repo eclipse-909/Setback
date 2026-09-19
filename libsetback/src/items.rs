@@ -143,7 +143,7 @@ index: 0-based index of card in hand
 		let strings: Vec<&str> = string.split(' ').collect();
 		match strings.len() {
 			1 => {
-				if let Ok(idx) = strings[1].parse::<u8>() {
+				if let Ok(idx) = strings[0].parse::<u8>() {
 					return Some(Err(idx));
 				}
 			}

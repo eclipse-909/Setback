@@ -3,7 +3,7 @@ use {
 	crate::*,
 	rand::seq::{IndexedRandom, SliceRandom},
 	serde::{Deserialize, Serialize},
-	tracing::{error, info},
+	tracing::debug,
 	tokio::sync::mpsc::UnboundedSender,
 };
 
@@ -86,16 +86,20 @@ impl GameState {
 		u8::MAX
 	}
 
-	pub async fn run_singleplayer<Ee: EventEmitter, Err: EventResponseReceiver>(
+	pub async fn run_singleplayer<
+		#[cfg(not(feature = "test-libsetback"))] Ee: EventEmitter,
+		#[cfg(not(feature = "test-libsetback"))] Err: EventResponseReceiver
+	>(
 		mut self,
-		event_emitter: Ee,
-		mut event_response_rx: Err,
+		#[cfg(not(feature = "test-libsetback"))] event_emitter: Ee,
+		#[cfg(not(feature = "test-libsetback"))] mut event_response_rx: Err,
 	) {
 		let human_idx = self.human_idx();
 		loop {
 			// Tip: `continue` can be used to not increment the turn index.
 			match self.loop_state {
 				GameLoopState::Init => {
+					#[cfg(not(feature = "test-libsetback"))]
 					event_emitter
 						.send(GameEvent::Init { idx: human_idx })
 						.unwrap();
@@ -104,6 +108,7 @@ impl GameState {
 				}
 				GameLoopState::DealCards => {
 					self.deal_cards();
+					#[cfg(not(feature = "test-libsetback"))]
 					event_emitter
 						.send(GameEvent::DealCards {
 							hand: self.lobby_state.players[human_idx as usize].hand.clone(),
@@ -115,8 +120,11 @@ impl GameState {
 					self.increment_turn();
 				}
 				GameLoopState::Bidding => {
-					let mut bid_err = None;
+					#[cfg(feature = "test-libsetback")]
+					let bid = self.ai_bid();
+					#[cfg(not(feature = "test-libsetback"))]
 					let bid = if self.turn_idx == human_idx {
+						let mut bid_err = None;
 						loop {
 							event_emitter.send(GameEvent::PromptBid(bid_err)).unwrap();
 							match event_response_rx.recv().await {
@@ -126,11 +134,7 @@ impl GameState {
 									}
 									bid_err = Some(PromptError::Invalid);
 								}
-								Ok(_) => continue,
-								Err(e) => {
-									error!("Failed to get response from player: {e}");
-									continue;
-								}
+								Ok(_) | Err(_) => continue,
 							}
 						}
 					} else {
@@ -138,6 +142,7 @@ impl GameState {
 					};
 					// It feels redundant to let the player know what they just bid,
 					// but this tells the player that their bid was valid.
+					#[cfg(not(feature = "test-libsetback"))]
 					event_emitter
 						.send(GameEvent::PlayerBid {
 							idx: self.turn_idx,
@@ -147,8 +152,11 @@ impl GameState {
 					self.player_bid(bid);
 				}
 				GameLoopState::Playing => {
-					let mut card_err = None;
+					#[cfg(feature = "test-libsetback")]
+					let card = self.ai_play_card();
+					#[cfg(not(feature = "test-libsetback"))]
 					let card = if self.turn_idx == human_idx {
+						let mut card_err = None;
 						loop {
 							event_emitter.send(GameEvent::PromptCard(card_err)).unwrap();
 							match event_response_rx.recv().await {
@@ -158,11 +166,7 @@ impl GameState {
 									}
 									card_err = Some(PromptError::Invalid);
 								}
-								Ok(_) => continue,
-								Err(e) => {
-									error!("Failed to get response from player: {e}");
-									continue;
-								}
+								Ok(_) | Err(_) => continue,
 							}
 						}
 					} else {
@@ -170,6 +174,7 @@ impl GameState {
 					};
 					// It feels redundant to let the player know which card they played,
 					// but this tells the player that their card was valid.
+					#[cfg(not(feature = "test-libsetback"))]
 					event_emitter
 						.send(GameEvent::PlayerPlayedCard {
 							idx: self.turn_idx,
@@ -179,6 +184,7 @@ impl GameState {
 					match self.player_played_card(card) {
 						PlayedCardResult::None => {}
 						PlayedCardResult::RoundOver(round_scores) => {
+							#[cfg(not(feature = "test-libsetback"))]
 							event_emitter
 								.send(GameEvent::RoundScores(round_scores))
 								.unwrap();
@@ -189,6 +195,7 @@ impl GameState {
 							}
 						}
 						PlayedCardResult::GameOver(round_scores) => {
+							#[cfg(not(feature = "test-libsetback"))]
 							event_emitter
 								.send(GameEvent::RoundScores(round_scores))
 								.unwrap();
@@ -197,8 +204,9 @@ impl GameState {
 					}
 				}
 				GameLoopState::GameOver => {
+					#[cfg(not(feature = "test-libsetback"))]
 					event_emitter.send(GameEvent::GameOver).unwrap();
-					info!("Game over");
+					debug!(cx = %self.cx(), "Game over");
 					return;
 				}
 				GameLoopState::Terminated => return,
@@ -237,7 +245,7 @@ impl GameState {
 		for player in self.lobby_state.players.iter_mut() {
 			player.hand.extend(self.deck.drain(..CARDS_PER_PLAYER));
 		}
-		info!("player {} dealt the cards", self.turn_idx);
+		debug!(cx = %self.cx(), "player {} dealt the cards", self.turn_idx);
 		debug_assert_eq!(
 			self.deck.len(),
 			DECK_SIZE - (self.lobby_state.players.len() * CARDS_PER_PLAYER)
@@ -406,7 +414,7 @@ impl GameState {
 	/// Returns false if the next player needs to bid.
 	pub fn player_bid(&mut self, bid: Bid) {
 		debug_assert!(self.bid_is_valid(bid));
-		info!("player {} bid {}", self.turn_idx, bid.to_points());
+		debug!(cx = %self.cx(), "player {} bid {}", self.turn_idx, bid.to_points());
 		if bid != Bid::Pass {
 			self.highest_bid = bid;
 			self.highest_bidder_idx = self.turn_idx;
@@ -437,7 +445,7 @@ impl GameState {
 	/// Returns None if the next player needs to play a card.
 	pub fn player_played_card(&mut self, card: Card) -> PlayedCardResult {
 		debug_assert!(self.card_is_valid(card));
-		info!("player {} played the {card:?}", self.turn_idx);
+		debug!(cx = %self.cx(), "player {} played the {card:?}", self.turn_idx);
 		let hand = &mut self.lobby_state.players[self.turn_idx as usize].hand;
 		let remove_idx = hand.iter().position(|c| *c == card).unwrap(); // validate_card already looks for the card in the hand
 		hand.swap_remove(remove_idx);
@@ -565,7 +573,7 @@ impl GameState {
 					round_team_game_scores,
 					total_team_scores: self.teams.iter().map(|team| team.score).collect(),
 				};
-				info!("Round ended - {round_scores:?}");
+				debug!(cx = %self.cx(), "Round ended - {round_scores:?}");
 				return PlayedCardResult::RoundOver(round_scores);
 			}
 			return PlayedCardResult::None;
@@ -585,6 +593,10 @@ impl GameState {
 		}
 		highest_score as i16 > self.lobby_state.rules.max_score as i16
 			&& (highest_score > second_highest_score + 1 || !self.lobby_state.rules.win_by_2)
+	}
+	
+	pub fn cx(&self) -> LobbyLogCx<'_> {
+		self.lobby_state.cx()
 	}
 }
 

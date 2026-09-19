@@ -30,12 +30,12 @@ pub trait WebSocketeer {
 	/// This prevents collisions by making them
 	/// multiples of 4 plus 1 and 3 respectively and doesn't wrap to 0.
 	fn correlation_id(&mut self) -> &mut u32;
-	
+
 	fn auto_inc_id(&mut self) -> u32 {
 		*self.correlation_id() = self.correlation_id().wrapping_add(4);
 		*self.correlation_id()
 	}
-	
+
 	fn run_rw_handler(
 		mut reader: WsReader,
 		mut writer: WsWriter,
@@ -87,9 +87,9 @@ pub trait WebSocketeer {
 			}
 		}
 	}}
-	
+
 	// these functions are not marked async because we don't want to move self into the futures they return
-	
+
 	/// Sends a message and waits for the response.
 	/// Returns the payload of the response and a correlation id.
 	/// The correlation id is 0 if the other side is not expecting a response.
@@ -97,7 +97,7 @@ pub trait WebSocketeer {
 	fn send_new_request(&mut self, payload: impl Into<Payload>) -> impl ResponseFut {
 		self.send_request(payload, 0)
 	}
-	
+
 	/// Sends a message and waits for the response.
 	/// This is intended to respond to a previous message which is why it takes a correlation id.
 	/// To send a new request, use [Self::send_new_request].
@@ -110,7 +110,7 @@ pub trait WebSocketeer {
 		}
 		Self::send_request_raw(self.ssp_tx(), payload, correlation_id)
 	}
-	
+
 	/// Correlation id must not be 0!
 	fn send_request_raw(ssp_tx: &SspTx, payload: impl Into<Payload>, correlation_id: u32) -> impl ResponseFut {
 		let (tx, rx) = channel();

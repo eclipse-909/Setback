@@ -1,4 +1,3 @@
-use std::fmt::Formatter;
 use serde::{Deserialize, Serialize};
 
 /// POST /api/login
@@ -51,7 +50,7 @@ pub enum ReportReason {
 }
 
 impl std::fmt::Display for ReportReason {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{}", match self {
 			ReportReason::Stalling =>
 				"Stalling is automatically reported, and the player is kicked from the game if they don't play for 3 turns in a game.",
