@@ -47,6 +47,8 @@ pub enum ReportReason {
 	Hacking,
 	/// A player is using external communication with teammates or opponents to influence the outcome of the game.
 	Cheating,
+	/// This player sucks/is mean and I just don't like them.
+	DontLikePlayer,
 }
 
 impl std::fmt::Display for ReportReason {
@@ -58,6 +60,8 @@ impl std::fmt::Display for ReportReason {
 				"A player is exploiting a bug or vulnerability in the game to give themselves or another player an unfair advantage.",
 			ReportReason::Cheating =>
 				"A player is using external communication with teammates or opponents to influence the outcome of the game.",
+			ReportReason::DontLikePlayer =>
+				"This player sucks/is mean and I just don't like them.",
 		})
 	}
 }

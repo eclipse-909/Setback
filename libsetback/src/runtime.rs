@@ -3,7 +3,7 @@ use {
 	crate::*,
 	rand::seq::{IndexedRandom, SliceRandom},
 	serde::{Deserialize, Serialize},
-	tracing::debug,
+	tracing::{debug, trace},
 	tokio::sync::mpsc::UnboundedSender,
 };
 
@@ -67,6 +67,18 @@ pub trait PromptResponder {
 	fn send(&self, event: GameEvent) -> Result<(), Error>;
 }
 
+impl EventEmitter for () {
+	fn send(&self, _event: GameEvent) -> Result<(), Error> {
+		Ok(())
+	}
+}
+
+impl EventResponseReceiver for () {
+	async fn recv(&mut self) -> Result<GameEvent, Error> {
+		Ok(GameEvent::GameOver)
+	}
+}
+
 #[cfg(not(feature = "server"))]
 impl GameState {
 	/// ## Safety
@@ -85,21 +97,22 @@ impl GameState {
 		// there is no human player in tests
 		u8::MAX
 	}
+	
+	#[cfg(feature = "test-libsetback")]
+	pub async fn run_ai_only(self) {
+		self.run_singleplayer((),()).await
+	}
 
-	pub async fn run_singleplayer<
-		#[cfg(not(feature = "test-libsetback"))] Ee: EventEmitter,
-		#[cfg(not(feature = "test-libsetback"))] Err: EventResponseReceiver
-	>(
+	pub async fn run_singleplayer(
 		mut self,
-		#[cfg(not(feature = "test-libsetback"))] event_emitter: Ee,
-		#[cfg(not(feature = "test-libsetback"))] mut event_response_rx: Err,
+		event_emitter: impl EventEmitter,
+		mut event_response_rx: impl EventResponseReceiver,
 	) {
 		let human_idx = self.human_idx();
 		loop {
-			// Tip: `continue` can be used to not increment the turn index.
+			trace!("{self:#?}");
 			match self.loop_state {
 				GameLoopState::Init => {
-					#[cfg(not(feature = "test-libsetback"))]
 					event_emitter
 						.send(GameEvent::Init { idx: human_idx })
 						.unwrap();
@@ -142,7 +155,6 @@ impl GameState {
 					};
 					// It feels redundant to let the player know what they just bid,
 					// but this tells the player that their bid was valid.
-					#[cfg(not(feature = "test-libsetback"))]
 					event_emitter
 						.send(GameEvent::PlayerBid {
 							idx: self.turn_idx,
@@ -174,7 +186,6 @@ impl GameState {
 					};
 					// It feels redundant to let the player know which card they played,
 					// but this tells the player that their card was valid.
-					#[cfg(not(feature = "test-libsetback"))]
 					event_emitter
 						.send(GameEvent::PlayerPlayedCard {
 							idx: self.turn_idx,
@@ -184,7 +195,6 @@ impl GameState {
 					match self.player_played_card(card) {
 						PlayedCardResult::None => {}
 						PlayedCardResult::RoundOver(round_scores) => {
-							#[cfg(not(feature = "test-libsetback"))]
 							event_emitter
 								.send(GameEvent::RoundScores(round_scores))
 								.unwrap();
@@ -195,7 +205,6 @@ impl GameState {
 							}
 						}
 						PlayedCardResult::GameOver(round_scores) => {
-							#[cfg(not(feature = "test-libsetback"))]
 							event_emitter
 								.send(GameEvent::RoundScores(round_scores))
 								.unwrap();
@@ -204,7 +213,6 @@ impl GameState {
 					}
 				}
 				GameLoopState::GameOver => {
-					#[cfg(not(feature = "test-libsetback"))]
 					event_emitter.send(GameEvent::GameOver).unwrap();
 					debug!(cx = %self.cx(), "Game over");
 					return;
@@ -402,9 +410,10 @@ impl GameState {
 		let player = &self.lobby_state.players[self.turn_idx as usize];
 		let has_card = player.hand.contains(&card);
 		let can_follow = player.can_follow(self.lead);
-		let is_owner = self.owner_idx == self.turn_idx;
+		let is_owner = self.owner_idx == self.turn_idx; // BUG it looks like owner index is not being set properly sometimes
 		let is_lead = card.suit == self.lead;
 		let is_trump = card.suit == self.trump;
+		trace!(?player, has_card, can_follow, is_owner, is_lead, is_trump);
 		has_card && (is_lead || is_trump || is_owner || !can_follow)
 	}
 
@@ -413,11 +422,12 @@ impl GameState {
 	/// Returns true if bidding should end, and the turn index should not be incremented following this function.
 	/// Returns false if the next player needs to bid.
 	pub fn player_bid(&mut self, bid: Bid) {
-		debug_assert!(self.bid_is_valid(bid));
 		debug!(cx = %self.cx(), "player {} bid {}", self.turn_idx, bid.to_points());
+		debug_assert!(self.bid_is_valid(bid));
 		if bid != Bid::Pass {
 			self.highest_bid = bid;
 			self.highest_bidder_idx = self.turn_idx;
+			self.owner_idx = self.turn_idx;
 			if (bid == Bid::Four && !self.lobby_state.rules.dealer_override)
 				|| (bid == Bid::Override && self.lobby_state.rules.dealer_override)
 			{
@@ -432,7 +442,6 @@ impl GameState {
 			} else {
 				self.loop_state = GameLoopState::Playing;
 				self.turn_idx = self.highest_bidder_idx;
-				self.owner_idx = self.highest_bidder_idx;
 			}
 		} else {
 			self.increment_turn();
@@ -444,8 +453,8 @@ impl GameState {
 	/// Returns Some if card playing for the round should end, and the turn index should not be incremented following this function.
 	/// Returns None if the next player needs to play a card.
 	pub fn player_played_card(&mut self, card: Card) -> PlayedCardResult {
-		debug_assert!(self.card_is_valid(card));
 		debug!(cx = %self.cx(), "player {} played the {card:?}", self.turn_idx);
+		debug_assert!(self.card_is_valid(card));
 		let hand = &mut self.lobby_state.players[self.turn_idx as usize].hand;
 		let remove_idx = hand.iter().position(|c| *c == card).unwrap(); // validate_card already looks for the card in the hand
 		hand.swap_remove(remove_idx);

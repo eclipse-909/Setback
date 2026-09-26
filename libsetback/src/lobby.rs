@@ -1,9 +1,13 @@
 use {
 	arrayvec::ArrayVec,
 	crate::*,
-	futures::TryFutureExt,
 	serde::{Deserialize, Serialize},
 	tracing::{error, debug},
+};
+
+#[cfg(feature = "server")]
+use {
+	futures::TryFutureExt,
 	tokio::sync::mpsc::UnboundedSender,
 };
 
@@ -180,32 +184,41 @@ impl Lobby {
 	}
 
 	/// Updates a player's team.
-	pub fn update_team(&mut self, index: usize, team_id: u8) {
-		self.lobby_state.players[index].team_id = team_id;
+	pub fn update_team(&mut self, idx: u8, team_id: u8) {
+		self.lobby_state.players[idx as usize].team_id = team_id;
 	}
-
-	/// Initializes a game loop that hasn't started yet.
-	/// ## Error
-	/// The lobby is in an invalid state
-	/// like multiple humans in singleplayer or empty human slots in multiplayer
-	pub fn finish(mut self) -> Result<GameState, Self> {
-		debug!(cx = %self.cx(), "Attempting to initialize game");
+	
+	pub fn remove_player(&mut self, idx: u8) {
+		self.lobby_state.players.remove(idx as usize);
+	}
+	
+	pub fn swap_players(&mut self, idx_a: u8, idx_b: u8) {
+		self.lobby_state.players.swap(idx_a as usize, idx_b as usize);
+	}
+	
+	pub fn reinsert_players(&mut self, idx: u8, new_idx: u8) {
+		let player = self.lobby_state.players.remove(idx as usize);
+		self.lobby_state.players.insert(new_idx as usize, player);
+	}
+	
+	pub fn can_start(&self) -> bool {
 		// verify that the players are in the correct state
 		// Singleplayer
-		// * cfg feature = client
+		// * cfg not feature = server
 		// * 1 SingleplayerSelf
 		// * Remainder are Ai
 		// Multiplayer
-		// * cfg not feature = client
+		// * cfg feature = server
 		// * at least 2 HumanConnection
 		// * remainder are Ai or HumanConnection
+		
 		if self.lobby_state.players.len() < MIN_PLAYERS as usize {
 			error!(
 				cx = %self.cx(),
 				"Not enough players - got {}, need {MIN_PLAYERS}",
 				self.lobby_state.players.len()
 			);
-			return Err(self);
+			return false;
 		}
 		#[cfg(not(feature = "server"))]
 		let mut num_singleplayer = 0;
@@ -216,7 +229,7 @@ impl Lobby {
 		let mut num_ai = 0;
 		self.lobby_state
 			.players
-			.iter_mut()
+			.iter()
 			.for_each(|p| match p.player_type {
 				#[cfg(not(feature = "server"))]
 				PlayerType::SingleplayerSelf { .. } => num_singleplayer += 1,
@@ -232,12 +245,12 @@ impl Lobby {
 		#[cfg(all(not(feature = "server"), not(feature = "test-libsetback")))]
 		if num_singleplayer != 1 || self.lobby_state.players.len() - 1 != num_ai {
 			error!(cx = %self.cx(), "Incorrect player configuration - humans: {num_singleplayer}, AIs: {num_ai}");
-			return Err(self);
+			return false;
 		}
 		#[cfg(all(not(feature = "server"), feature = "test-libsetback"))]
 		if num_ai != self.lobby_state.players.len() {
 			error!(cx = %self.cx(), "Incorrect player configuration - all players should be AI for tests");
-			return Err(self);
+			return false;
 		}
 		#[cfg(feature = "server")]
 		if num_human_connection < 2
@@ -249,9 +262,18 @@ impl Lobby {
 				"Incorrect player configuration - empty humans: {}, connected humans: {}, AIs: {}",
 				num_human_empty, num_human_connection, num_ai
 			);
-			return Err(self);
+			return false;
 		}
+		true
+	}
 
+	/// Initializes a game loop that hasn't started yet.
+	/// ## Error
+	/// The lobby is in an invalid state
+	/// like multiple humans in singleplayer or empty human slots in multiplayer
+	pub fn finish(mut self) -> GameState {
+		debug!(cx = %self.cx(), "Initializing game");
+		debug_assert!(self.can_start());
 		// normalize team numbers so there are no gaps
 		let mut team_ids: ArrayVec<u8, MAX_PLAYERS> = self
 			.lobby_state
@@ -260,9 +282,9 @@ impl Lobby {
 			.map(|p| p.team_id)
 			.collect();
 		team_ids.sort();
-		team_ids.partition_dedup();
+		let (dedup, _) = team_ids.partition_dedup();
 		let mut team_id_map = [0; MAX_PLAYERS];
-		for (index, id) in team_ids.iter().enumerate() {
+		for (index, id) in dedup.iter().enumerate() {
 			team_id_map[*id as usize] = index as u8;
 		}
 		for player in self.lobby_state.players.iter_mut() {
@@ -271,7 +293,7 @@ impl Lobby {
 
 		// create team objects in the game data
 		let mut teams = ArrayVec::new();
-		for _ in team_ids {
+		for _ in dedup {
 			teams.push(Team::new());
 		}
 
@@ -281,7 +303,7 @@ impl Lobby {
 			self.lobby_state.rules.turn_time = MAX_TURN_TIME_SERVER;
 		}
 
-		Ok(GameState {
+		GameState {
 			teams,
 			deck: Card::new_deck(),
 			pile: ArrayVec::new(),
@@ -297,7 +319,7 @@ impl Lobby {
 			round_num: 0,
 			lobby_state: self.lobby_state,
 			loop_state: GameLoopState::Init,
-		})
+		}
 	}
 	
 	pub fn cx(&self) -> LobbyLogCx<'_> {
@@ -306,8 +328,8 @@ impl Lobby {
 }
 
 pub struct LobbyLogCx<'lobby> {
-	code: &'lobby str,
-	public: bool,
+	pub code: &'lobby str,
+	pub public: bool,
 }
 
 impl std::fmt::Display for LobbyLogCx<'_> {

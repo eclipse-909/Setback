@@ -4,10 +4,12 @@ use {
 	arrayvec::ArrayVec,
 	setback::*,
 	std::{
+		backtrace::Backtrace,
 		io::Write,
 		fs::{self, File},
 		path::Path
 	},
+	tracing_subscriber::EnvFilter,
 	tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
 };
 
@@ -23,6 +25,7 @@ async fn main() {
 		.with_writer(log_file)
 		.with_ansi(false)
 		.with_level(true)
+		.with_env_filter(EnvFilter::from_default_env())
 		.compact()
 		.init();
 	
@@ -34,6 +37,7 @@ async fn main() {
 		fs::create_dir_all(log_path.parent().unwrap()).unwrap();
 		let mut log_file = File::create(log_path).unwrap();
 		_ = write!(log_file, "{info}");
+		_ = writeln!(log_file, "{}", Backtrace::capture());
 		prev(info);
 	});
 
@@ -43,7 +47,6 @@ async fn main() {
 	let event_response_rx = Receiver(event_response_rx);
 	tokio::spawn(Lobby::create_singleplayer(String::from("example"))
 		.finish()
-		.expect("Game cannot start in invalid state")
 		.run_singleplayer(event_emitter, event_response_rx));
 	let mut my_hand = ArrayVec::new();
 	let mut my_idx = u8::MAX;

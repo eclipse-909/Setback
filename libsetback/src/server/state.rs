@@ -2,7 +2,8 @@ use {
 	crate::*,
 	std::sync::Arc,
 	scc::{HashMap, HashSet},
-	tracing::error
+	tracing::error,
+	tokio::sync::mpsc::{Sender, Receiver, UnboundedReceiver},
 };
 
 #[derive(Hash, Eq, PartialEq)]
@@ -11,9 +12,10 @@ struct GameKey {
 	password: String,
 }
 
+pub type ClientSender = Sender<Box<ClientConnection>>;
+pub type ClientReceiver = Receiver<Box<ClientConnection>>;
 type ClientStore = HashSet<u32>;
-type LobbyStore = HashMap<GameKey, LobbyRtHandle>;
-type RuntimeStore = HashMap<GameKey, GameRtHandle>;
+type GameStore = HashMap<GameKey, ClientSender>;
 
 /// State for the setback server.
 ///
@@ -24,9 +26,9 @@ type RuntimeStore = HashMap<GameKey, GameRtHandle>;
 /// so it's passed around with an Arc.
 pub struct State {
 	client_store: ClientStore,
-	pub_lobby_store: LobbyStore,
-	private_lobby_store: LobbyStore,
-	runtime_store: RuntimeStore,
+	pub_lobby_store: GameStore,
+	private_lobby_store: GameStore,
+	runtime_store: GameStore,
 }
 
 impl State {
@@ -66,54 +68,55 @@ impl State {
 	
 	pub async fn create_lobby(
 		self: Arc<Self>,
-		host_client: ClientConnection,
+		host: ClientConnection,
 		password: String,
 	) -> Result<String, Error> {
 		let num_games = self.pub_lobby_store.len() + self.private_lobby_store.len() + self.runtime_store.len();
 		if num_games >= MAX_GAMES {
 			return Err(Error::GamesAtCapacity);
 		}
-		let (handle, code) = Lobby::create_multiplayer(Box::new(host_client), password.clone(), self.clone());
+		let (handle, code) = Lobby::create_multiplayer(Box::new(host), password.clone(), self.clone());
 		self.insert_lobby(handle, code, password).await
 	}
 	
 	async fn insert_lobby(
 		&self,
-		handle: LobbyRtHandle,
+		client_tx: ClientSender,
 		code: String,
 		password: String,
 	) -> Result<String, Error> {
 		let key = GameKey {code: code.clone(), password: password.clone()};
-		if self.lobby_store(&password).insert_async(key, handle).await.is_err() {
-			error!("Game code already exists");
-			return Err(Error::GamesAtCapacity);
-		}
-		Ok(code)
+		self.lobby_store(&password)
+			.insert_async(key, client_tx)
+			.await
+			.map(|_| code)
+			.map_err(|_| {
+				error!("Game code already exists");
+				Error::GamesAtCapacity
+			})
 	}
 	
-	pub async fn start_game(self: Arc<Self>, code: String, password: String) -> Result<(), Error> {
-		let key = GameKey {code: code.clone(), password: password.clone()};
-		let Some((_, lobby)) = self.lobby_store(&password).remove_async(&key).await else {
-			return Err(Error::GameNotFound);
+	pub async fn start_game(
+		self: Arc<Self>,
+		lobby: Lobby,
+		err_q: UnboundedReceiver<(u8, NetError)>,
+		client_rx: ClientReceiver,
+	) -> Result<(), (Error, Lobby)> {
+		let key = GameKey {
+			code: lobby.lobby_state.rules.code.clone(),
+			password: lobby.lobby_state.rules.password.clone(),
 		};
-		let Ok((lobby, err_q)) = lobby.handle.await else {
-			return Err(NetError::ServerError.into());
-		};
-		match lobby.finish() {
-			Ok(game_state) => {
-				let handle = game_state.start_game(self.clone(), err_q);
-				if self.runtime_store.insert_async(key, handle).await.is_err() {
-					error!("Game code already exists");
-					return Err(Error::GamesAtCapacity);
-				}
-			}
-			Err(lobby) => {
-				let handle = lobby.spawn_lobby_rt(self.clone(), err_q);
-				self.insert_lobby(handle, code, password).await?;
-			}
-		}
-		Ok(())
+		let (_, client_tx) = self
+			.lobby_store(&lobby.lobby_state.rules.password)
+			.remove_async(&key)
+			.await
+			.unwrap();
 		// TODO we should occasionally shrink the hashmap capacity to free up memory
+		if self.runtime_store.insert_async(key, client_tx).await.is_err() {
+			return Err((Error::GamesAtCapacity, lobby));
+		}
+		lobby.finish().start_game(self, err_q, client_rx);
+		Ok(())
 	}
 	
 	pub async fn rm_lobby(&self, code: String, password: String) {
@@ -130,7 +133,7 @@ impl State {
 		let Some(mut entry) = self.lobby_store(&password).get_async(&GameKey {code, password}).await else {
 			return JoinResult::BadCodeOrPassword(client);
 		};
-		match entry.get_mut().join_tx.try_send(Box::new(client)) {
+		match entry.get_mut().try_send(Box::new(client)) {
 			Ok(()) => JoinResult::Ok,
 			Err(e) => JoinResult::GameIsFullOrEnded(*e.into_inner()),
 		}
@@ -140,13 +143,13 @@ impl State {
 		let Some(mut entry) = self.runtime_store.get_async(&GameKey {code, password}).await else {
 			return JoinResult::BadCodeOrPassword(client);
 		};
-		match entry.get_mut().rejoin_tx.try_send(Box::new(client)) {
+		match entry.get_mut().try_send(Box::new(client)) {
 			Ok(()) => JoinResult::Ok,
 			Err(e) => JoinResult::GameIsFullOrEnded(*e.into_inner()),
 		}
 	}
 	
-	fn lobby_store(&self, password: &str) -> &LobbyStore {
+	fn lobby_store(&self, password: &str) -> &GameStore {
 		if password.is_empty() {
 			&self.pub_lobby_store
 		} else {

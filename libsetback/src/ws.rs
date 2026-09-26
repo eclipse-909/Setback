@@ -237,14 +237,14 @@ mod ws_server_and_client {
 	}
 	
 	pub async fn ws_connect() -> Result<(WsReader, WsWriter), NetError> {
-		let mut stream = TcpStream::connect((SETBACK_PROXY, 443))
+		let stream = TcpStream::connect((SETBACK_PROXY, 443))
 			.await
 			.map_err(|_| NetError::Disconnected)?;
 		stream.set_nodelay(true)
 			.map_err(|_| NetError::Disconnected)?;
 		
 		#[cfg(not(feature = "server"))]
-		let mut stream = {
+		let stream = {
 			let mut roots = rustls::RootCertStore::empty();
 			roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 			let tls_config = rustls::ClientConfig::builder()
@@ -258,6 +258,7 @@ mod ws_server_and_client {
 				.map_err(|_| NetError::Disconnected)?
 		};
 		
+		let mut stream = stream;
 		handshake::client_handshake(&mut stream, SETBACK_PROXY, "/", None)
 			.await
 			.map_err(|_| NetError::Disconnected)?;

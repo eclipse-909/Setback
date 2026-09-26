@@ -2,10 +2,12 @@ use {
 	arrayvec::ArrayVec,
 	crate::*,
 	serde::{Deserialize, Serialize},
-	std::{
-		future::poll_fn,
-		task::Poll,
-	},
+};
+
+#[cfg(feature = "server")]
+use std::{
+	future::poll_fn,
+	task::Poll,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -45,11 +47,9 @@ pub enum PlayerType {
 		#[serde(serialize_with = "serialize_conn_as_player")]
 		conn: Box<ClientConnection>
 	} = 2,
-	/// This variant has 2 uses:
-	/// 1. The server serializes a HumanConnection into this variant when sending data to clients.
-	///    The clients only need to know the username and ready state.
-	/// 2. A HumanConnection in a multiplayer game that has had its ClientConnection moved out and into a future,
-	///    where it can be used for communication. The future will return the connection when done and turned back into HumanConnection.
+	/// The server serializes a HumanConnection into this variant when sending data to clients.
+	/// The clients only need to know the username and ready state.
+	/// This variant is never actually used in the runtime.
 	HumanPlayer { username: String, ready: bool } = 3,
 	/// An NPC
 	Ai {

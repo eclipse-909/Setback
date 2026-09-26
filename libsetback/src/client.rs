@@ -216,8 +216,8 @@ impl SetbackClient {
 	}
 
 	/// Host-only
-	pub async fn send_add_player(&mut self) -> Result<(), NetError> {
-		self.send_expect_ack(LobbyPayload::AddPlayer).await
+	pub async fn send_add_player(&mut self, is_human: bool) -> Result<(), NetError> {
+		self.send_expect_ack(LobbyPayload::AddPlayer {is_human}).await
 	}
 
 	/// Host-only

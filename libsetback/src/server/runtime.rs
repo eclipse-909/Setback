@@ -10,7 +10,6 @@ use {
 	},
 	tokio::{
 		sync::mpsc::*,
-		task::JoinHandle,
 		time::sleep,
 	},
 	tracing::debug,
@@ -46,20 +45,15 @@ pub enum ClientIOResult {
 	GameOver,
 }
 
-pub struct GameRtHandle {
-	pub rejoin_tx: Sender<Box<ClientConnection>>,
-	pub handle: JoinHandle<()>,
-}
-
 impl GameState {
 	pub fn start_game(
 		mut self,
 		state: Arc<State>,
 		mut err_q: UnboundedReceiver<(u8, NetError)>,
-	) -> GameRtHandle {
+		mut rejoin_rx: ClientReceiver,
+	) {
 		debug!(cx = %self.cx(), "Starting game");
-		let (rejoin_tx, mut rejoin_rx) = channel(MAX_PLAYERS);
-		let handle = tokio::spawn(async move {
+		tokio::spawn(async move {
 			let mut client_io_fut = self.advance_game(ClientIOResult::None);
 			loop {
 				tokio::select! {
@@ -93,7 +87,6 @@ impl GameState {
 				}
 			}
 		});
-		GameRtHandle {rejoin_tx, handle}
 	}
 	
 	fn advance_game(&mut self, io_res: ClientIOResult) -> ClientIOFut {
@@ -346,17 +339,21 @@ impl GameState {
 		let ssp_tx = conn.ssp_tx().clone();
 		tokio::spawn(async move {
 			let response = async move {
-				// TODO this will be a private api call
-				// SAFETY:
-				// Must link with server
-				unsafe {setback_api()}.post(URL_API_REPORT_PLAYER)
-					.bearer_auth(auth_token)
-					.json(&report)
-					.send()
-					.await
-					.map_err(|_| Error::ApiErr)?
-					.error_for_status()
-					.map_err(Error::from)?;
+				// DontLikePlayer isn't a real report reason,
+				// it's just to make players feel better that they think they can report people they don't like.
+				if !matches!(report.reason, ReportReason::DontLikePlayer) {
+					// TODO this will be a private api call
+					// SAFETY:
+					// Must link with server
+					unsafe {setback_api()}.post(URL_API_REPORT_PLAYER)
+						.bearer_auth(auth_token)
+						.json(&report)
+						.send()
+						.await
+						.map_err(|_| Error::ApiErr)?
+						.error_for_status()
+						.map_err(Error::from)?;
+				}
 				Ok(())
 			}.await;
 			if correlation_id.id != 0 && !correlation_id.end {

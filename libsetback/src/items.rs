@@ -2,7 +2,7 @@ use {
 	arrayvec::ArrayVec,
 	crate::*,
 	serde::{Deserialize, Serialize},
-	std::fmt::{Display, Formatter},
+	std::fmt::{Display, Formatter, Debug},
 };
 
 /// Versions should try to follow SemVer and are considered compatible if the majors are the same
@@ -14,7 +14,7 @@ pub struct Version {
 }
 
 impl Display for Version {
-	fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
 	}
 }
@@ -208,29 +208,32 @@ index: 0-based index of card in hand
 	}
 }
 
-impl std::fmt::Debug for Card {
+impl Display for Card {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(
-			f,
-			"{} of {:?}",
+		write!(f, "{} of {:?}",
 			match self.number {
-				JACK => {
-					"Jack".to_string()
-				}
-				QUEEN => {
-					"Queen".to_string()
-				}
-				KING => {
-					"King".to_string()
-				}
-				ACE => {
-					"Ace".to_string()
-				}
-				n => {
-					n.to_string()
-				}
+				JACK => "J".to_string(),
+				QUEEN => "Q".to_string(),
+				KING => "K".to_string(),
+				ACE => "A".to_string(),
+				n => n.to_string(),
 			},
 			self.suit
+		)
+	}
+}
+
+impl Debug for Card {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}{}",
+			self.suit.as_icon(),
+			match self.number {
+				JACK => "J".to_string(),
+				QUEEN => "Q".to_string(),
+				KING => "K".to_string(),
+				ACE => "A".to_string(),
+				n => n.to_string(),
+			}
 		)
 	}
 }

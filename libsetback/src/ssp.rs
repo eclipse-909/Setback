@@ -234,7 +234,7 @@ pub enum LobbyPayload {
 	///
 	/// Host can update the settings in the lobby which gets sent to the server.
 	/// The server updates its state and propagates the message to all other clients.
-	LobbyRules {rules: LobbyRules, player_idx: u8},
+	LobbyRules {rules: LobbyRules},
 	/// Host-Client ---AddPlayer--> Server
 	///
 	/// Host-Client <--Ack--- Server
@@ -244,7 +244,7 @@ pub enum LobbyPayload {
 	/// Host-request and spontaneous
 	///
 	/// The host can add a player to the game.
-	AddPlayer,
+	AddPlayer { is_human: bool },
 	/// Host-Client ---RemovePlayer--> Server
 	///
 	/// Host-Client <--Ack--- Server
@@ -329,8 +329,14 @@ pub enum LobbyPayload {
 	///
 	/// Spontaneous
 	///
+	/// Server tells clients when countdown starts or is reset.
+	ToggleCountdown {started: bool},
+	/// Client <--Start--- Server
+	///
+	/// Spontaneous
+	///
 	/// Server tells clients when countdown ends.
-	Start,
+	StartGame,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
