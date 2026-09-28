@@ -26,42 +26,39 @@ pub const AI_NAME: &str = "CPU";
 
 // client
 
-/// usually setback.eclipse-909.com or localhost
-//noinspection RsReplaceMatchExpr
-pub const SETBACK_PROXY: &str = match option_env!("SETBACK_PROXY") {
-	Some(d) => d,
-	None => "localhost",
+/// Set SETBACK_ENV as dev/prod for an environment, or don't set it for localhost.
+pub const SETBACK_PROXY: &str = const {
+	const MAYBE_ENV: Option<&str> = option_env!("SETBACK_ENV");
+	if MAYBE_ENV.is_some() {
+		formatcp!("{}.setback.eclipse-909.com", MAYBE_ENV.unwrap_or_default())
+	} else {
+		"localhost"
+	}
 };
-const SETBACK_PROD: bool = matches!(
-	option_env!("SETBACK_PROD"),
-	Some(var) if var.len() == 1 && var.as_bytes()[0] == b'1'
-);
-const SETBACK_ENV: &str = if SETBACK_PROD { "prod" } else { "dev" };
 macro_rules! api {
 	($path:literal) => {
 		formatcp!("https://{SETBACK_PROXY}/api/{}", $path)
 	};
 }
-pub const URL_API_LOGIN: &str = api!("login");
-pub const URL_API_LOGOUT: &str = api!("logout");
-pub const URL_API_RENEW: &str = api!("account/renew");
-pub const URL_API_USERNAME: &str = api!("account/username");
-pub const URL_API_REPORT_PLAYER: &str = api!("account/report");
-pub const TEST_AUTH_TOKEN: &str = "test";
+pub const URL_API_HEALTHCHECK: &str = api!("healthcheck");
+pub const URL_API_LOGIN: &str       = api!("login");
+pub const URL_API_LOGOUT: &str      = api!("logout");
+pub const TEST_AUTH_TOKEN: &str = "test-auth-token";
 pub const APPLICATION_OCTET_STREAM: &str = "application/octet-stream";
+pub const URL_SERVER_WS: &str = formatcp!("wss://{SETBACK_PROXY}");
 
 // server
 
-pub const SETBACK_SERVER_PORT: u16 = 42069;
-pub const URL_SERVER_WS: &str = formatcp!("wss://{SETBACK_PROXY}");
-pub const SSP_VERSION: Version = Version {
-	major: 0,
-	minor: 1,
-	patch: 0,
-};
+pub const URL_API_ROTATE_API_KEY: &str = api!("server/rotate-api-key");
+pub const URL_API_USERNAME: &str       = api!("account/server/username");
+pub const URL_API_REPORT_PLAYER: &str  = api!("account/server/report-player");
+pub const API_HEADER_API_KEY: &str  = "x-api-key";
+pub const ENV_API_KEY: &str = "SETBACK_API_KEY";
+/// This is the port that the ws server is bound to.
+pub const SETBACK_SERVER_WS_PORT: u16 = 42069;
+pub const SSP_VERSION: Version = Version { major: 0, minor: 1, patch: 0 };
 /// Maximum number of games to be sent in a request over the network
 pub const MAX_GAME_LIST: u8 = 127;
-/// This is the port that setbackd is bound to on the server. This is the port that clients must connect to initially.
 pub const NETWORK_TIMEOUT: u64 = 4;
 pub const DEFAULT_TURN_TIME: u8 = 30;
 pub const MAX_TURN_TIME_SERVER: u8 = 120;

@@ -4,15 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-argon2.workspace = true
 axum.workspace = true
+chrono.workspace = true
 http.workspace = true
+jsonwebtoken.workspace = true
 libsetback = { workspace = true, features = ["server"] }
 serde.workspace = true
-serde_json.workspace = true
 sqlx.workspace = true
+sha2.workspace = true
+subtle.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tower-cookies.workspace = true
+tower.workspace = true
 tower-http.workspace = true
 
 [lints]

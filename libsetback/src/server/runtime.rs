@@ -208,6 +208,7 @@ impl GameState {
 								if conn.timeout_strikes == TIMEOUT_STRIKES {
 									let username = conn.username.clone();
 									let report = ReportPlayerRequest {
+										game_code: self.lobby_state.rules.code.clone(),
 										username,
 										target_idx: self.turn_idx,
 										reason: ReportReason::Stalling,

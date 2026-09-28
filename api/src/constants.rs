@@ -1,1 +1,2 @@
-pub const ENV_DB_URL: &str = "DATABASE_URL";
+pub const ENV_DB_URL: &str = "SETBACK_DATABASE_URL";
+pub const ENV_JWT_SECRET: &str = "SETBACK_JWT_SECRET";

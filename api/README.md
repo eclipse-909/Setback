@@ -1,19 +1,29 @@
 # Setback API
 ## Public Endpoints
-Anyone can hit these endpoints
+Anyone can hit these endpoints.
 
+- GET  api/healthcheck
 - POST api/signup
 - POST api/login
-- GET  api/healthcheck
 
 ## Per-Account Endpoints
-These endpoints require an auth token
+These endpoints require an auth token.
 
-- GET  api/account/logout
-- POST api/account/feedback
+- POST   api/account/feedback
+- GET    api/account/logout
+- PATCH  api/account/reset-password
+- DELETE api/account/delete-account
+
+## Private Endpoints
+These endpoints require an API key and auth token.
+Typically, the server will use these for collecting
+metrics and diagnostics.
+
+ - TODO api/server/todo
 
 ## Private & Per-Account Endpoints
-These endpoints require an API key and auth token
+These endpoints require an API key and auth token.
+Typically, the server makes these requests on behalf of a user.
 
-- POST api/account/report
-- GET  api/account/username
+- POST api/account/server/report-player
+- GET  api/account/server/username

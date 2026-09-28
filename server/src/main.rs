@@ -1,19 +1,16 @@
 use {
+	reqwest::{Client, header::{HeaderMap, HeaderValue}},
+	setback::*,
 	std::{
 		io::Write,
-		net::{Ipv4Addr, SocketAddrV4},
 		mem::MaybeUninit,
+		net::{Ipv4Addr, SocketAddrV4},
 		process::exit,
 		time::Instant,
 	},
-	reqwest::Client,
 	tokio::net::TcpListener,
-	tracing::{error, info, warn},
-};
+	tracing::{error, info, warn}};
 
-pub use setback::*;
-
-const BIN_VERSION: Version = pkg_version!();
 static mut SETBACK_API: MaybeUninit<Client> = MaybeUninit::uninit();
 
 pub extern "Rust" fn setback_api() -> Client {
@@ -53,13 +50,32 @@ fn main() {
 		.build()
 		.unwrap();
 	
+	let api_key = std::env::var(ENV_API_KEY).unwrap();
+	let mut headers = HeaderMap::new();
+	let mut header_api_key = HeaderValue::from_str(&api_key).unwrap();
+	header_api_key.set_sensitive(true);
+	headers.insert(API_HEADER_API_KEY, header_api_key);
+	
 	rt.block_on(async move {
 		// SAFETY:
 		// There are no other references to SETBACK_API.
 		unsafe {
 			#[allow(static_mut_refs)]
-			SETBACK_API.write(Client::builder().cookie_store(true).build().unwrap());
+			SETBACK_API.write(
+				Client::builder()
+					.default_headers(headers)
+					.build()
+					.unwrap()
+			);
 		}
+		
+		assert!(setback_api()
+			.get(URL_API_HEALTHCHECK)
+			.send()
+			.await
+			.unwrap()
+			.status()
+			.is_success());
 		
 		tokio::select! {
 			res = tokio::signal::ctrl_c() => if let Err(e) = res {
@@ -78,7 +94,7 @@ fn main() {
 }
 
 async fn tcp_listen() -> ! {
-	let tcp_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+	let tcp_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, SETBACK_SERVER_WS_PORT))
 		.await
 		.unwrap_or_else(crash!("Could not bind tcp listener. Error: {}", e));
 	let state = State::new();

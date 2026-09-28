@@ -2,13 +2,13 @@
 
 set -xe
 
-setback_env="${ENV:-dev}"
+setback_env="${SETBACK_ENV:-dev}"
 if [ "$setback_env" == "dev" ]; then
 	cargo_profile="debug"
 elif [ "$setback_env" == "prod" ]; then
 	cargo_profile="release"
 else
-	echo "Environment variable 'ENV' must be either 'dev' or 'prod'"
+	echo "Environment variable 'SETBACK_ENV' must be either 'dev' or 'prod'"
 	exit 1
 fi
 

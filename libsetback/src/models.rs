@@ -1,4 +1,7 @@
-use serde::{Deserialize, Serialize};
+use {
+	serde::{Deserialize, Serialize},
+	chrono::{DateTime, Utc},
+};
 
 /// POST /api/login
 #[derive(Serialize, Deserialize)]
@@ -33,6 +36,7 @@ pub struct UsernameResponse {
 /// POST /api/report
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ReportPlayerRequest {
+	pub game_code: String,
 	pub username: String,
 	pub target_idx: u8,
 	pub reason: ReportReason,
@@ -70,4 +74,10 @@ impl std::fmt::Display for ReportReason {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FeedbackRequest {
 	description: String,
+}
+
+#[derive(Serialize)]
+pub struct RotateKeyResponse {
+	pub new_api_key: String,
+	pub expires_at: Option<DateTime<Utc>>,
 }

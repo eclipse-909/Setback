@@ -4,6 +4,8 @@
 	unsafe_cell_access,
 	slice_partition_dedup,
 	trait_alias,
+	const_option_ops,
+	const_trait_impl,
 )]
 
 mod arena;
