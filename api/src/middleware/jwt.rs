@@ -1,22 +1,12 @@
 use {
 	crate::models::*,
 	jsonwebtoken::{DecodingKey, Validation, decode},
-};
-
-fn decode_jwt(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
-	let validation = Validation::default(); // validates exp automatically
-	decode::<Claims>(
-		token,
-		&DecodingKey::from_secret(secret.as_bytes()),
-		&validation,
-	).map(|data| data.claims)
-}
-
-use axum::{
-	extract::{Request, State},
-	http::StatusCode,
-	middleware::Next,
-	response::Response,
+	axum::{
+		extract::{Request, State},
+		http::StatusCode,
+		middleware::Next,
+		response::Response,
+	},
 };
 
 pub async fn require_jwt(
@@ -34,8 +24,15 @@ pub async fn require_jwt(
 		.strip_prefix("Bearer ")
 		.ok_or(StatusCode::UNAUTHORIZED)?;
 	
-	let claims = decode_jwt(token, &state.jwt_secret)
+	let claims = decode::<Claims>(
+		token,
+		&DecodingKey::from_secret(state.jwt_secret.as_bytes()),
+		&Validation::default(),
+	).map(|data| data.claims)
 		.map_err(|_| StatusCode::UNAUTHORIZED)?;
+	
+	todo!("check to see if account is deleted or owner is suspended");
+	todo!("update the last active column on the account and set it to now");
 	
 	req.extensions_mut().insert(claims);
 	

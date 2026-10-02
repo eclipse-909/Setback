@@ -22,8 +22,8 @@ pub struct Claims {
 	pub exp: usize,
 	/// Issued at (as UTC timestamp)
 	pub iat: usize,
-	/// Subject (whom token refers to)
+	/// Subject (whom token refers to - email:username)
 	pub sub: String,
 	pub account_id: u32,
-	pub email: String,
+	pub owner_id: u32,
 }

@@ -10,7 +10,6 @@ use {
 	setback::{API_HEADER_API_KEY, SETBACK_PROXY, ENV_API_KEY},
 	sqlx::mysql::MySqlPoolOptions,
 	std::net::{IpAddr, Ipv4Addr, SocketAddr},
-	tower::ServiceBuilder,
 	tower_http::cors::CorsLayer};
 
 #[tokio::main]
@@ -26,27 +25,14 @@ async fn main() {
 	};
 	sqlx::migrate!().run(&state.db).await.unwrap();
 	
-	let public_routes = api_public_routes();
-	
-	let account_routes = Router::new()
-		.nest("/account", api_account_routes())
-		.route_layer(axum::middleware::from_fn_with_state(state.clone(), jwt::require_jwt));
-	
-	let account_server_routes = Router::new()
-		.nest("/account/server", api_account_server_routes())
-		.route_layer(
-			ServiceBuilder::new()
-				.layer(axum::middleware::from_fn_with_state(state.clone(), jwt::require_jwt))
-				.layer(axum::middleware::from_fn_with_state(state.clone(), api_key::require_api_key))
-		);
-	
 	let api_routes = Router::new()
-		.merge(public_routes)
-		.merge(account_routes)
-		.merge(account_server_routes);
+		.merge(api_public_routes())
+		.nest("/account", api_account_routes(state.clone()))
+		.nest("/account/server", api_account_server_routes(state.clone()));
 	
 	let app = Router::<AppState>::new()
     	.nest("/api", api_routes)
+    	.nest("/dev", dev_routes(state.clone()))
 		.route_layer(
 			CorsLayer::new()
 				.allow_origin([

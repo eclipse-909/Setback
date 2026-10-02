@@ -100,9 +100,9 @@ async fn tcp_listen() -> ! {
 	let state = State::new();
 	loop {
 		match tcp_listener.accept().await {
-			Ok((stream, addr)) => {
+			Ok((stream, _)) => {
 				// ClientConnection::new will upgrade to ws and authenticate the client
-				if let Some(client) = ClientConnection::new(stream, addr).await {
+				if let Some(client) = ClientConnection::new(stream).await {
 					state.clone().add_client(client).await;
 				}
 			}

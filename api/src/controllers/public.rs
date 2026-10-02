@@ -10,12 +10,18 @@ use {
 
 type Result<T> = core::result::Result<T, StatusCode>;
 
-fn create_jwt(account_id: u32, username: &str, email: &str, secret: &str) -> std::result::Result<String, jsonwebtoken::errors::Error> {
+fn create_jwt(
+	account_id: u32,
+	owner_id: u32,
+	username: &str,
+	email: &str,
+	secret: &str
+) -> std::result::Result<String, jsonwebtoken::errors::Error> {
 	let now = Utc::now();
 	let claims = Claims {
-		sub: username.to_string(),
-		email: email.to_string(),
+		sub: format!("{email}:{username}"),
 		account_id,
+		owner_id,
 		iat: now.timestamp() as usize,
 		exp: (now + Duration::hours(24)).timestamp() as usize,
 	};
@@ -27,10 +33,10 @@ fn create_jwt(account_id: u32, username: &str, email: &str, secret: &str) -> std
 	)
 }
 
-async fn api_signup(
+async fn api_begin_signup(
 	State(db): State<MySqlPool>,
 	Json(req): Json<SignupRequest>,
-) -> Result<Json<LoginResponse>> {
+) -> Result<()> {
 	todo!()
 }
 
@@ -44,6 +50,6 @@ async fn api_login(
 pub fn api_public_routes() -> Router<AppState> {
 	Router::new()
 		.route("/healthcheck", get(StatusCode::OK))
-		.route("/signup", post(api_signup))
+		.route("/begin-signup", post(api_begin_signup))
 		.route("/login", post(api_login))
 }

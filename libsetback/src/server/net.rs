@@ -3,7 +3,6 @@ use {
 	futures::{FutureExt, TryFutureExt},
 	reqwest::Client,
 	std::{
-		net::SocketAddr,
 		pin::Pin,
 		sync::Arc,
 		time::Duration,
@@ -58,12 +57,9 @@ impl ClientConnection {
 	/// This is used when someone first tries to connect to the server.
 	/// Their token will be validated. They are sent Ack if successful or Err
 	/// if unauthenticated.
-	pub async fn new(tcp_stream: TcpStream, client_addr: SocketAddr) -> Option<Self> {
+	pub async fn new(tcp_stream: TcpStream) -> Option<Self> {
 		debug!("Client is connecting to server");
 		let (mut reader, mut writer) = ws::ws_accept(tcp_stream).await.ok()?;
-		
-		//TODO:
-		// Use client_addr for security features like IP bans
 
 		let res = async {
 			// we can allow more time for authentication since this isn't delaying anything important
