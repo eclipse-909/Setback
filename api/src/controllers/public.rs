@@ -1,55 +1,57 @@
 use {
 	crate::models::*,
-	axum::{Json, Router, extract::State, routing::{get, post}},
-	chrono::{Duration, Utc},
+	axum::{
+		Json, Router,
+		extract::{Query, State},
+		routing::{get, post},
+	},
 	http::StatusCode,
-	jsonwebtoken::{EncodingKey, Header, encode},
 	setback::{LoginRequest, LoginResponse, SignupRequest},
 	sqlx::MySqlPool,
+	std::collections::HashMap,
 };
 
 type Result<T> = core::result::Result<T, StatusCode>;
 
-fn create_jwt(
-	account_id: u32,
-	owner_id: u32,
-	username: &str,
-	email: &str,
-	secret: &str
-) -> std::result::Result<String, jsonwebtoken::errors::Error> {
-	let now = Utc::now();
-	let claims = Claims {
-		sub: format!("{email}:{username}"),
-		account_id,
-		owner_id,
-		iat: now.timestamp() as usize,
-		exp: (now + Duration::hours(24)).timestamp() as usize,
-	};
-	
-	encode(
-		&Header::default(), // HS256 by default
-		&claims,
-		&EncodingKey::from_secret(secret.as_bytes()),
-	)
-}
-
 async fn api_begin_signup(
 	State(db): State<MySqlPool>,
-	Json(req): Json<SignupRequest>,
+	Json(creds): Json<SignupRequest>,
 ) -> Result<()> {
 	todo!()
+	// validate request,
+	// make sure email is not suspended,
+	// make sure username is appropriate and doesn't exist in account,
+	// make sure owner has fewer than 3 accounts,
+	// create temporary secure code,
+	// insert into stage account table on duplicate key update,
+	// send email with code
+}
+
+async fn api_finish_signup(
+	State(db): State<MySqlPool>,
+	Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<LoginResponse>> {
+	todo!()
+	// remove from staging account table,
+	// insert into account table and owner table if new email,
+	// create new jwt and refresh token,
+	// return response
 }
 
 async fn api_login(
 	State(db): State<MySqlPool>,
-	Json(req): Json<LoginRequest>,
+	Json(creds): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>> {
 	todo!()
+	// validate credentials
+	// create new jwt and refresh token,
+	// return response
 }
 
 pub fn api_public_routes() -> Router<AppState> {
 	Router::new()
 		.route("/healthcheck", get(StatusCode::OK))
 		.route("/begin-signup", post(api_begin_signup))
+		.route("/finish-signup", get(api_finish_signup))
 		.route("/login", post(api_login))
 }

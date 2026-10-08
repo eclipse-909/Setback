@@ -211,6 +211,7 @@ impl GameState {
 										game_code: self.lobby_state.rules.code.clone(),
 										username,
 										target_idx: self.turn_idx,
+										target_account_id: conn.account_id,
 										reason: ReportReason::Stalling,
 										description: "Automatically reported for violating 3-strikes policy".to_string(),
 									};
@@ -336,24 +337,13 @@ impl GameState {
 			}
 			return;
 		}
-		let auth_token = conn.auth_token.clone();
 		let ssp_tx = conn.ssp_tx().clone();
 		tokio::spawn(async move {
 			let response = async move {
 				// DontLikePlayer isn't a real report reason,
 				// it's just to make players feel better that they think they can report people they don't like.
 				if !matches!(report.reason, ReportReason::DontLikePlayer) {
-					// TODO this will be a private api call
-					// SAFETY:
-					// Must link with server
-					unsafe {setback_api()}.post(URL_API_REPORT_PLAYER)
-						.bearer_auth(auth_token)
-						.json(&report)
-						.send()
-						.await
-						.map_err(|_| Error::ApiErr)?
-						.error_for_status()
-						.map_err(Error::from)?;
+					api_report_player(report).await?;
 				}
 				Ok(())
 			}.await;

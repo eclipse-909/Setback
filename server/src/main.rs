@@ -69,13 +69,17 @@ fn main() {
 			);
 		}
 		
-		assert!(setback_api()
-			.get(URL_API_HEALTHCHECK)
-			.send()
-			.await
-			.unwrap()
-			.status()
-			.is_success());
+		// docker compose should already guarantee this, so this is a redundancy check
+		assert!(
+			setback_api()
+				.get(URL_API_HEALTHCHECK)
+				.send()
+				.await
+				.unwrap()
+				.status()
+				.is_success(),
+			"Setback API healthcheck did not return 200"
+		);
 		
 		tokio::select! {
 			res = tokio::signal::ctrl_c() => if let Err(e) = res {
@@ -100,12 +104,7 @@ async fn tcp_listen() -> ! {
 	let state = State::new();
 	loop {
 		match tcp_listener.accept().await {
-			Ok((stream, _)) => {
-				// ClientConnection::new will upgrade to ws and authenticate the client
-				if let Some(client) = ClientConnection::new(stream).await {
-					state.clone().add_client(client).await;
-				}
-			}
+			Ok((stream, _)) => ClientConnection::try_accept(stream, state.clone()).await,
 			Err(e) => warn!("Could not accept client. Error: {e}"),
 		}
 	}

@@ -37,10 +37,11 @@ pub trait NotifyFut = Future<Output=Result<(), NetError>> + Send + 'static;
 
 /// Connection to the client, owned by the server.
 pub struct ClientConnection {
+	state: Arc<State>,
 	ssp_tx: SspTx,
 	pub fallback_rx: FallbackRx,
 	correlation_id: u32,
-	pub auth_token: String,
+	pub owner_id: u32,
 	pub account_id: u32,
 	pub username: String,
 	pub ready: bool,
@@ -49,6 +50,7 @@ pub struct ClientConnection {
 }
 
 impl WebSocketeer for ClientConnection {
+	const INIT_CORRELATION_ID: u32 = 3; // DO NOT TOUCH
 	fn ssp_tx(&self) -> &SspTx {&self.ssp_tx}
 	fn correlation_id(&mut self) -> &mut u32 {&mut self.correlation_id}
 }
@@ -57,9 +59,15 @@ impl ClientConnection {
 	/// This is used when someone first tries to connect to the server.
 	/// Their token will be validated. They are sent Ack if successful or Err
 	/// if unauthenticated.
-	pub async fn new(tcp_stream: TcpStream) -> Option<Self> {
+	pub async fn try_accept(tcp_stream: TcpStream, state: Arc<State>) {
 		debug!("Client is connecting to server");
-		let (mut reader, mut writer) = ws::ws_accept(tcp_stream).await.ok()?;
+		let (mut reader, mut writer) = match ws::ws_accept(tcp_stream).await {
+			Ok(s) => s,
+			Err(err) => {
+				debug!("Failed to accept tcp connection as websocket connection - Error: {err}");
+				return;
+			}
+		};
 
 		let res = async {
 			// we can allow more time for authentication since this isn't delaying anything important
@@ -74,23 +82,20 @@ impl ClientConnection {
 			// validate version
 			version.check_compatible(SSP_VERSION)?;
 			// validate token and get username
-			let UsernameResponse {
-				username,
-				account_id,
-			} = Self::get_username(auth_token.as_str()).await?;
+			let response = api_get_username(auth_token.as_str()).await?;
 			ws::ws_send(&mut writer, &Ssp::new(Payload::Ack, CorrelationId::event())).await?;
-			Ok((username, account_id, auth_token))
+			Ok(response)
 		}.await;
 		
-		let (username, account_id, auth_token) = match res {
+		let UsernameResponse {username, owner_id, account_id} = match res {
 			Ok(r) => r,
 			Err(err) => {
 				debug!("Authentication failed for client - Error: {err}");
-				ws::ws_send(
+				_ = ws::ws_send(
 					&mut writer,
 					&Ssp::new(Payload::Err(err), CorrelationId::event()),
-				).await.ok()?;
-				return None;
+				).await;
+				return;
 			}
 		};
 		
@@ -98,17 +103,33 @@ impl ClientConnection {
 		let (fallback_tx, fallback_rx) = unbounded_channel();
 		tokio::spawn(Self::run_rw_handler(reader, writer, ssp_rx, fallback_tx));
 		
-		Some(Self {
+		// This verifies the player isn't already connected to the server on any of their accounts
+		if state.connected_account_owners.insert_sync(owner_id).is_err() {
+			_ = Self::send_event_raw(&ssp_tx, Payload::Err(Error::AlreadyConnected));
+			//TODO: if a client is trying to connect more than once,
+			// it could either mean they are trying to cheat by being 2 players at once in a game,
+			// or someone has hacked their account.
+			// Either way we should do something with this.
+			// Maybe send the client a message/notification/email that someone is trying to login to their account.
+			// Suggest they should change their password.
+			// Maybe have a "this was me" and "this wasn't me" response
+			// which would confirm the cause.
+			return;
+		}
+		
+		let client = Self {
 			ssp_tx,
 			fallback_rx,
-			correlation_id: 3, // DO NOT TOUCH THIS 3, see WebSocketeer::correlation_id
-			auth_token,
+			correlation_id: Self::INIT_CORRELATION_ID,
+			owner_id,
 			account_id,
 			username,
 			ready: false,
 			host: false,
 			timeout_strikes: 0,
-		})
+			state: state.clone(),
+		};
+		state.add_client(client).await;
 	}
 
 	/// Used when the client is connected to the server but not in a lobby or a game
@@ -216,21 +237,50 @@ impl ClientConnection {
 			}
 		).map(|res| res.map_err(|_| NetError::TimedOut).flatten())
 	}
+}
 
-	async fn get_username(auth_token: &str) -> Result<UsernameResponse, Error> {
-		// SAFETY:
-		// Must link with server
-		unsafe {setback_api()}.get(URL_API_USERNAME)
-			.bearer_auth(auth_token)
-			.send()
-			.await
-			.map_err(|_| Error::ApiErr)?
-			.error_for_status()
-			.map_err(Error::from)?
-			.json::<UsernameResponse>()
-			.await
-			.map_err(|_| NetError::ServerError.into())
-	}
+async fn api_get_username(auth_token: &str) -> Result<UsernameResponse, Error> {
+	// SAFETY:
+	// Must link with server
+	unsafe {setback_api()}
+		.get(URL_API_USERNAME)
+		.bearer_auth(auth_token)
+		.send()
+		.await
+		.map_err(|_| Error::ApiErr)?
+		.error_for_status()
+		.map_err(Error::from)?
+		.json::<UsernameResponse>()
+		.await
+		.map_err(|_| NetError::ServerError.into())
+}
+
+pub async fn api_report_player(report: ReportPlayerRequest) -> Result<(), Error> {
+	// SAFETY:
+	// Must link with server
+	unsafe {setback_api()}
+		.post(url_api_report_player(report.target_account_id))
+		.json(&report)
+		.send()
+		.await
+		.map_err(|_| Error::ApiErr)?
+		.error_for_status()
+		.map_err(Error::from)?;
+	Ok(())
+}
+
+pub async fn api_stats(stats: StatsRequest, account_id: u32) -> Result<(), Error> {
+	// SAFETY:
+	// Must link with server
+	unsafe {setback_api()}
+		.post(url_api_stats(account_id))
+		.json(&stats)
+		.send()
+		.await
+		.map_err(|_| Error::ApiErr)?
+		.error_for_status()
+		.map_err(Error::from)?;
+	Ok(())
 }
 
 impl std::fmt::Debug for ClientConnection {
@@ -240,6 +290,13 @@ impl std::fmt::Debug for ClientConnection {
 			.field("ready", &self.ready)
 			.field("host", &self.host)
 			.finish()
+	}
+}
+
+impl Drop for ClientConnection {
+	fn drop(&mut self) {
+		// allows the owner to connect with one of their accounts after they disconnect from this one
+		self.state.connected_account_owners.remove_sync(&self.owner_id);
 	}
 }
 

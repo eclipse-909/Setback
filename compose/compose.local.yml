@@ -6,8 +6,8 @@
 #
 # Access points:
 #   localhost:80    → redirects to localhost:443
-#   localhost:443   → setback_api (HTTPS)
-#   localhost:42069 → setback_server (TCP TLS)
+#   localhost:443   → api (HTTPS)
+#   localhost:42069 → server (WSS)
 #   localhost:8080  → Traefik dashboard (insecure, no auth)
 #   localhost:8081  → phpMyAdmin (direct port, plain HTTP)
 #   localhost:3306  → MySQL (direct port)
@@ -29,8 +29,8 @@ services:
       - proxy
     ports:
       - "127.0.0.1:80:80"       # HTTP (redirects to HTTPS)
-      - "127.0.0.1:443:443"     # HTTPS — setback_api
-      - "127.0.0.1:42069:42069" # TCP TLS — setback_server game port
+      - "127.0.0.1:443:443"     # HTTPS — api
+      - "127.0.0.1:42069:42069" # WSS — server game port
       - "127.0.0.1:8080:8080"   # Traefik dashboard
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -47,9 +47,6 @@ services:
       - "--entrypoints.websecure.http.tls=true"
       - "--entrypoints.game.address=:42069"
 
-      # Attach the static configuration tls.yaml file that contains the tls configuration settings
-      - "--providers.file.filename=/dynamic/tls.yaml"
-
       # Providers
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
@@ -65,18 +62,18 @@ services:
       - "--metrics.prometheus=true"
 
   # ---------------------------------------------------------------------------
-  # setback_api — HTTP server on :8080, serves frontend + public API
+  # api — HTTP server on :8080, serves frontend + public API
   # ---------------------------------------------------------------------------
-  setback_api:
+  api:
     build:
       context: .
       args:
         PROFILE: debug
-        PACKAGE: setback_api
+        PACKAGE: api
         PORT: 8080
     restart: unless-stopped
-    environment:
-      DATABASE_URL: mysql://root:password@mysql:3306/setbackdb-local
+    env_file:
+      - .env.local
     expose:
       - "8080"
     networks:
@@ -96,7 +93,7 @@ services:
 
       # --- HTTPS router (main) ---
       # PathPrefix(`/`) matches all requests on this entrypoint regardless of hostname.
-      # This works locally because port 443 is exclusively for setback_api.
+      # This works locally because port 443 is exclusively for api.
       - "traefik.http.routers.website-local-secure.entrypoints=websecure"
       - "traefik.http.routers.website-local-secure.rule=PathPrefix(`/`)"
       - "traefik.http.routers.website-local-secure.tls=true"
@@ -118,7 +115,7 @@ services:
       - "traefik.http.services.website-local-svc.loadbalancer.healthcheck.timeout=3s"
 
   # ---------------------------------------------------------------------------
-  # setback_server — TCP game server on :42069
+  # server — WSS game server on :42069
   #
   # Graceful shutdown: when Dokploy deploys an update, a new container starts
   # and joins the Traefik load balancer. Traefik detects the old container is
@@ -127,37 +124,26 @@ services:
   # container receives SIGTERM and shuts down once its sessions are complete or
   # the grace period expires.
   # ---------------------------------------------------------------------------
-  setback_server:
+  server:
     build:
       context: .
       args:
         PROFILE: debug
-        PACKAGE: setback_server
+        PACKAGE: server
         PORT: 42069
     restart: unless-stopped
     networks:
       - proxy
+    env_file:
+      - .env.local
     stop_signal: SIGTERM
-    stop_grace_period: 6h
+    stop_grace_period: 4h5m
     depends_on:
-      setback_api:
+      api:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=proxy"
-
-      # --- TCP TLS router ---
-      # HostSNI(`*`) matches any (or no) SNI, which is necessary when connecting
-      # via localhost since there is no meaningful hostname to match on.
-      # In production, compose.yml uses a specific HostSNI for SNI-based routing
-      # between prod and dev — that distinction isn't needed locally.
-      - "traefik.tcp.routers.server-local.entrypoints=game"
-      - "traefik.tcp.routers.server-local.rule=HostSNI(`*`)"
-      - "traefik.tcp.routers.server-local.tls=true"
-      - "traefik.tcp.routers.server-local.service=server-local-svc"
-
-      # --- TCP service ---
-      - "traefik.tcp.services.server-local-svc.loadbalancer.server.port=42069"
 
   # ---------------------------------------------------------------------------
   # MySQL database
@@ -168,9 +154,8 @@ services:
     restart: unless-stopped
     networks:
       - proxy
-    environment:
-      MYSQL_ROOT_PASSWORD: password
-      MYSQL_DATABASE: setbackdb-local
+    env_file:
+      - .env.local
     expose:
       - "3306"
     ports:
@@ -197,9 +182,8 @@ services:
       - "80"
     ports:
       - "127.0.0.1:8081:80"
-    environment:
-      PMA_HOST: mysql
-      PMA_PORT: 3306
+    env_file:
+      - .env.local
     depends_on:
       mysql:
         condition: service_healthy

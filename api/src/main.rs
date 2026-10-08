@@ -2,6 +2,7 @@ mod constants;
 mod middleware;
 mod controllers;
 mod models;
+mod util;
 
 use {
 	crate::{constants::*, controllers::*, middleware::*, models::*},
@@ -28,11 +29,11 @@ async fn main() {
 	let api_routes = Router::new()
 		.merge(api_public_routes())
 		.nest("/account", api_account_routes(state.clone()))
-		.nest("/account/server", api_account_server_routes(state.clone()));
+    	.nest("/admin", api_admin_routes(state.clone()))
+		.nest("/server", api_server_routes(state.clone()));
 	
 	let app = Router::<AppState>::new()
     	.nest("/api", api_routes)
-    	.nest("/dev", dev_routes(state.clone()))
 		.route_layer(
 			CorsLayer::new()
 				.allow_origin([

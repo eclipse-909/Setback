@@ -1,11 +1,11 @@
 mod account;
 mod public;
-mod account_server;
-mod dev;
+mod admin;
+mod server;
 
 pub use {
 	account::*,
-	account_server::*,
 	public::*,
-	dev::*,
+	admin::*,
+	server::*,
 };

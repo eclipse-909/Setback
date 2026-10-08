@@ -23,6 +23,9 @@ web = ["dioxus/web", "uuid/js"]
 desktop = ["dioxus/desktop"]
 
 [[example]]
+name = "multiplayer"
+
+[[example]]
 name = "singleplayer"
 
 [[test]]

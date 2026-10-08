@@ -1,46 +1,57 @@
-use {
-	serde::{Deserialize, Serialize},
-	chrono::{DateTime, Utc},
-};
+use serde::{Deserialize, Serialize};
 
-/// POST /api/login
 #[derive(Serialize, Deserialize)]
 pub struct LoginRequest {
-	pub username_or_email: String,
+	pub username: String,
 	pub password: String,
 }
 
-/// POST /api/signup
 #[derive(Serialize, Deserialize)]
 pub struct SignupRequest {
-	pub username: String,
 	pub email: String,
+	pub username: String,
 	pub password: String,
 }
 
-/// POST /api/login and POST /api/signup
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LoginResponse {
 	pub auth_token: String,
-	pub renew_token: String,
+	pub refresh_token: String,
 	pub username: String,
 }
 
-/// GET /api/username
+#[derive(Serialize, Deserialize)]
+pub struct RefreshTokenResponse {
+	pub auth_token: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct UsernameResponse {
 	pub username: String,
+	pub owner_id: u32,
 	pub account_id: u32,
 }
 
-/// POST /api/report
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ReportPlayerRequest {
 	pub game_code: String,
 	pub username: String,
 	pub target_idx: u8,
+	pub target_account_id: u32,
 	pub reason: ReportReason,
 	pub description: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ChangePasswordRequest {
+	tmp_code: String,
+	old_password: String,
+	new_password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FeedbackRequest {
+	description: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -70,14 +81,19 @@ impl std::fmt::Display for ReportReason {
 	}
 }
 
-/// POST /api/feedback
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FeedbackRequest {
-	description: String,
-}
-
-#[derive(Serialize)]
-pub struct RotateKeyResponse {
-	pub new_api_key: String,
-	pub expires_at: Option<DateTime<Utc>>,
+pub struct StatsRequest {
+	is_singleplayer: bool,
+	won_game: Option<bool>,
+	total_bid: Option<u32>,
+	bids_won: Option<u32>,
+	pts_won: Option<u32>,
+	pts_lost: Option<u32>,
+	game_pts_won: Option<u32>,
+	game_pts_lost: Option<u32>,
+	num_hearts: Option<u32>,
+	num_diamonds: Option<u32>,
+	num_clubs: Option<u32>,
+	num_spades: Option<u32>,
+	total_card_num: Option<u32>,
 }

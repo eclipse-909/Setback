@@ -5,28 +5,17 @@ use {
 	tracing::{info, error},
 };
 
-#[cfg(target_family = "wasm")]
-fn setback_api() -> Client {
-	Client::builder().build().unwrap()
-}
-
-#[cfg(not(target_family = "wasm"))]
-fn setback_api() -> Client {
-	Client::builder().cookie_store(true).build().unwrap()
-}
-
 /// Connection to the server, owned by the client.
 pub struct SetbackClient {
 	ssp_tx: SspTx,
 	fallback_rx: FallbackRx,
 	correlation_id: u32,
 	api: Client,
-	auth_token: String,
-	renew_token: String,
 	ready: bool,
 }
 
 impl WebSocketeer for SetbackClient {
+	const INIT_CORRELATION_ID: u32 = 1; // DO NOT TOUCH
 	fn ssp_tx(&self) -> &SspTx {&self.ssp_tx}
 	fn correlation_id(&mut self) -> &mut u32 {&mut self.correlation_id}
 }
@@ -39,7 +28,7 @@ impl SetbackClient {
 	/// If you send a message to the server that expects a response, you can just call the async function that sends the message,
 	/// and awaiting that function will return the response from the server if all goes well.
 	pub async fn new(credentials: LoginRequest) -> Result<Self, Error> {
-		let api = setback_api();
+		let api = Client::builder().build().map_err(|_| Error::ApiErr)?;
 		let session = api
 			.post(URL_API_LOGIN)
 			.json(&credentials)
@@ -58,10 +47,7 @@ impl SetbackClient {
 		
 		// No need to use correlation yet because this handshake is required before arbitrary communication
 		ws::ws_send(&mut writer, &Ssp::new(
-			Payload::Authenticate {
-				version: SSP_VERSION,
-				auth_token: session.auth_token.clone(),
-			},
+			Payload::Authenticate { version: SSP_VERSION, auth_token: session.auth_token },
 			CorrelationId::request(0)
 		)).await.inspect_err(|e| {
 			error!("Failed to authenticate: {e}");
@@ -93,29 +79,10 @@ impl SetbackClient {
 		Ok(Self {
 			ssp_tx,
 			fallback_rx,
-			correlation_id: 1, // DO NOT TOUCH THIS 1, see WebSocketeer::correlation_id
+			correlation_id: Self::INIT_CORRELATION_ID,
 			api,
-			auth_token: session.auth_token,
-			renew_token: session.renew_token,
 			ready: false,
 		})
-	}
-
-	pub async fn logout(
-		&self,
-		auth_token: &str,
-	) -> Result<(), Error> {
-		#[cfg(not(feature = "test-libsetback"))]
-		self.api
-			.get(URL_API_LOGOUT)
-			.bearer_auth(auth_token)
-			.send()
-			.await
-			.map_err(|_| NetError::Disconnected)?
-			.error_for_status()
-			.map_err(Error::from)?;
-		info!("Logged out");
-		Ok(())
 	}
 	
 	// Generic payloads

@@ -1,2 +1,5 @@
-pub const ENV_DB_URL: &str = "SETBACK_DATABASE_URL";
-pub const ENV_JWT_SECRET: &str = "SETBACK_JWT_SECRET";
+pub const ENV_DB_URL              : &str = "SETBACK_DATABASE_URL";
+pub const ENV_JWT_SECRET          : &str = "SETBACK_JWT_SECRET";
+pub const ENV_NO_REPLY_EMAIL_HOST : &str = "SETBACK_NO_REPLY_EMAIL_HOST";
+pub const ENV_NO_REPLY_EMAIL_USER : &str = "SETBACK_NO_REPLY_EMAIL_USER";
+pub const ENV_NO_REPLY_EMAIL_PASS : &str = "SETBACK_NO_REPLY_EMAIL_PASS";

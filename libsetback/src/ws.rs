@@ -23,6 +23,8 @@ pub type FallbackRx = UnboundedReceiver<Result<Ssp, NetError>>;
 pub trait ResponseFut = Future<Output=Result<(Payload, u32), NetError>> + 'static;
 
 pub trait WebSocketeer {
+	const INIT_CORRELATION_ID: u32;
+	
 	/// this is how you send all messages
 	fn ssp_tx(&self) -> &SspTx;
 	/// # Important!
@@ -128,7 +130,7 @@ pub trait WebSocketeer {
 	/// Sends a message in response to some request from the other side.
 	/// This ends a correlation, so if you need to keep sending messages,
 	/// use [Self::ws_request].
-	fn send_response(&mut self, payload: impl Into<Payload>, correlation_id: u32) -> Result<(), NetError> {
+	fn send_response(&self, payload: impl Into<Payload>, correlation_id: u32) -> Result<(), NetError> {
 		debug_assert_ne!(correlation_id, 0);
 		Self::send_response_raw(self.ssp_tx(), payload, correlation_id)
 	}
@@ -140,8 +142,12 @@ pub trait WebSocketeer {
 	}
 	
 	/// A one-off message to send with no expected response.
-	fn send_event(&mut self, payload: impl Into<Payload>) -> Result<(), NetError> {
-		self.ssp_tx()
+	fn send_event(&self, payload: impl Into<Payload>) -> Result<(), NetError> {
+		Self::send_event_raw(self.ssp_tx(), payload)
+	}
+	
+	fn send_event_raw(ssp_tx: &SspTx, payload: impl Into<Payload>) -> Result<(), NetError> {
+		ssp_tx
 			.send((None, Ssp::event(payload)))
 			.map_err(|_| NetError::Disconnected)
 	}

@@ -10,10 +10,10 @@ name = "setback"
 [dependencies]
 arrayvec.workspace = true
 bytes.workspace = true
-chrono.workspace = true
 const_format.workspace = true
 dioxus.workspace = true
 futures.workspace = true
+http.workspace = true
 postcard.workspace = true
 rand.workspace = true
 reqwest.workspace = true

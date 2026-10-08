@@ -25,6 +25,7 @@ type GameStore = HashMap<GameKey, ClientSender>;
 /// Literally everything is owned by this state object,
 /// so it's passed around with an Arc.
 pub struct State {
+	pub connected_account_owners: HashSet<u32>,
 	client_store: ClientStore,
 	pub_lobby_store: GameStore,
 	private_lobby_store: GameStore,
@@ -36,6 +37,7 @@ impl State {
 	/// It's just too much effort to use singleton pattern.
 	pub fn new() -> Arc<Self> {
 		Arc::new(Self {
+			connected_account_owners: HashSet::new(),
 			client_store: HashSet::new(),
 			pub_lobby_store: HashMap::new(),
 			private_lobby_store: HashMap::new(),
@@ -44,21 +46,11 @@ impl State {
 	}
 	
 	/// Returns true if the client could not be added.
-	pub async fn add_client(self: Arc<Self>, mut client: ClientConnection) -> bool {
-		if self.client_store.insert_async(client.account_id).await.is_err() {
-			_ = client.send_err(Error::AlreadyConnected);
-			//TODO: if a client is trying to connect more than once,
-			// it could either mean they are trying to cheat by being 2 players at once in a game,
-			// or someone has hacked their account.
-			// Either way we should do something with this.
-			// Maybe send the client a message/notification/email that someone is trying to login to their account.
-			// Suggest they should change their password.
-			// Maybe have a "this was me" and "this wasn't me" response
-			// which would confirm the cause.
-			return true;
-		}
+	pub async fn add_client(self: Arc<Self>, client: ClientConnection) {
+		self.client_store.insert_async(client.account_id)
+			.await
+			.expect("The server should have already verified that this account owner is not connected");
 		client.spawn_server_handler(self);
-		false
 	}
 	
 	pub async fn rm_client(&self, account_id: u32) {
