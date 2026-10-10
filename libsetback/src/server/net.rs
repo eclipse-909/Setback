@@ -1,7 +1,6 @@
 use {
 	crate::*,
 	futures::{FutureExt, TryFutureExt},
-	reqwest::Client,
 	std::{
 		pin::Pin,
 		sync::Arc,
@@ -15,12 +14,6 @@ use {
 	},
 	tracing::debug,
 };
-
-// SAFETY:
-// Must link with server
-unsafe extern "Rust" {
-	pub fn setback_api() -> &'static Client;
-}
 
 pub struct PromptState {
 	pub correlation_id: u32,
@@ -82,7 +75,7 @@ impl ClientConnection {
 			// validate version
 			version.check_compatible(SSP_VERSION)?;
 			// validate token and get username
-			let response = api_get_username(auth_token.as_str()).await?;
+			let response = state.api.get_username(auth_token.as_str()).await?;
 			ws::ws_send(&mut writer, &Ssp::new(Payload::Ack, CorrelationId::event())).await?;
 			Ok(response)
 		}.await;
@@ -104,7 +97,7 @@ impl ClientConnection {
 		tokio::spawn(Self::run_rw_handler(reader, writer, ssp_rx, fallback_tx));
 		
 		// This verifies the player isn't already connected to the server on any of their accounts
-		if state.connected_account_owners.insert_sync(owner_id).is_err() {
+		if state.owner_store.insert_sync(owner_id).is_err() {
 			_ = Self::send_event_raw(&ssp_tx, Payload::Err(Error::AlreadyConnected));
 			//TODO: if a client is trying to connect more than once,
 			// it could either mean they are trying to cheat by being 2 players at once in a game,
@@ -129,18 +122,17 @@ impl ClientConnection {
 			timeout_strikes: 0,
 			state: state.clone(),
 		};
-		state.add_client(client).await;
+		client.spawn_server_handler(state);
 	}
 
 	/// Used when the client is connected to the server but not in a lobby or a game
 	pub fn spawn_server_handler(mut self, state: Arc<State>) {
 		tokio::spawn(async move {
-			// DO NOT RETURN FROM THIS LOOP, USE BREAK INSTEAD
 			loop {
-				let Some(res) = self.fallback_rx.recv().await else { break };
+				let Some(res) = self.fallback_rx.recv().await else { return };
 				let ssp = match res {
 					Ok(ssp) => ssp,
-					Err(NetError::Disconnected | NetError::TimedOut) => break,
+					Err(NetError::Disconnected | NetError::TimedOut) => return,
 					Err(NetError::BadRequest | NetError::ServerError) => continue,
 				};
 				let payload = match ssp.payload.try_server() {
@@ -166,8 +158,6 @@ impl ClientConnection {
 				}
 				todo!("handle the message using the state");
 			}
-			
-			state.rm_client(self.account_id).await
 		});
 	}
 	
@@ -239,50 +229,6 @@ impl ClientConnection {
 	}
 }
 
-async fn api_get_username(auth_token: &str) -> Result<UsernameResponse, Error> {
-	// SAFETY:
-	// Must link with server
-	unsafe {setback_api()}
-		.get(URL_API_USERNAME)
-		.bearer_auth(auth_token)
-		.send()
-		.await
-		.map_err(|_| Error::ApiErr)?
-		.error_for_status()
-		.map_err(Error::from)?
-		.json::<UsernameResponse>()
-		.await
-		.map_err(|_| NetError::ServerError.into())
-}
-
-pub async fn api_report_player(report: ReportPlayerRequest) -> Result<(), Error> {
-	// SAFETY:
-	// Must link with server
-	unsafe {setback_api()}
-		.post(url_api_report_player(report.target_account_id))
-		.json(&report)
-		.send()
-		.await
-		.map_err(|_| Error::ApiErr)?
-		.error_for_status()
-		.map_err(Error::from)?;
-	Ok(())
-}
-
-pub async fn api_stats(stats: StatsRequest, account_id: u32) -> Result<(), Error> {
-	// SAFETY:
-	// Must link with server
-	unsafe {setback_api()}
-		.post(url_api_stats(account_id))
-		.json(&stats)
-		.send()
-		.await
-		.map_err(|_| Error::ApiErr)?
-		.error_for_status()
-		.map_err(Error::from)?;
-	Ok(())
-}
-
 impl std::fmt::Debug for ClientConnection {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("ClientConnection")
@@ -296,7 +242,7 @@ impl std::fmt::Debug for ClientConnection {
 impl Drop for ClientConnection {
 	fn drop(&mut self) {
 		// allows the owner to connect with one of their accounts after they disconnect from this one
-		self.state.connected_account_owners.remove_sync(&self.owner_id);
+		self.state.owner_store.remove_sync(&self.owner_id);
 	}
 }
 

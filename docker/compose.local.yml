@@ -1,0 +1,148 @@
+# compose.local.yml — local development, hybrid mode
+#
+# Docker runs the infrastructure (Traefik, MySQL, phpMyAdmin).
+# The Rust apps run natively on the host with `cargo run`, so there are no
+# image builds and compiles are incremental.
+#
+# Requires Docker Compose 2.23.1+ (inline `configs` content).
+#
+# Prerequisites:
+#   - Self-signed certs in ./docker/certs/cert.pem and ./docker/certs/key.pem
+#     (the cert needs a subjectAltName of DNS:localhost)
+#   - .env.local with the db credentials (MYSQL_ROOT_PASSWORD, ...)
+#
+# Host ports the native apps must listen on (bind to 0.0.0.0, not 127.0.0.1,
+# so the Traefik container can reach them):
+#   api    → 8000
+#   server → 42070
+#
+# Access points:
+#   http://localhost         → redirects to https://localhost
+#   https://localhost        → Traefik → api    (host :8000)   path /api/*
+#   wss://localhost:42069    → Traefik → server (host :42070)
+#   http://localhost:8080    → Traefik dashboard (insecure, no auth)
+#   http://localhost:8081    → phpMyAdmin
+#   127.0.0.1:3306           → MySQL
+
+name: setbackd
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Traefik — TLS termination, forwards to the native apps on the host
+  # ---------------------------------------------------------------------------
+  traefik:
+    image: traefik:v3.4
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      # Lets the container reach processes on the host. Needed on Linux;
+      # Docker Desktop already provides this name, so it's harmless there.
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:80:80"       # HTTP (redirects to HTTPS)
+      - "127.0.0.1:443:443"     # HTTPS — api
+      - "127.0.0.1:8080:8080"   # Traefik dashboard
+      - "127.0.0.1:42069:42069" # WSS — server
+    volumes:
+      - ./docker/certs:/etc/traefik/certs:ro
+      - ./docker/logs:/var/log/traefik
+    configs:
+      - source: traefik_dynamic
+        target: /etc/traefik/dynamic.yml
+    command:
+      # EntryPoints
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--entrypoints.web.http.redirections.entrypoint.permanent=true"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.server.address=:42069"
+
+      # Routes and certs come from the inline config below (file provider).
+      # There is no Docker provider, so the Docker socket is not mounted.
+      - "--providers.file.filename=/etc/traefik/dynamic.yml"
+
+      # API & Dashboard
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+
+      # Logs (written to ./logs/traefik/)
+      - "--log.level=INFO" # change to DEBUG for more verbose logs
+      - "--log.format=json"
+      - "--log.filepath=/var/log/traefik/traefik.log"
+      - "--accesslog=true"
+      - "--accesslog.format=json"
+      - "--accesslog.filepath=/var/log/traefik/access.log"
+      - "--accesslog.fields.headers.defaultmode=drop"
+
+  # ---------------------------------------------------------------------------
+  # MySQL database
+  # ---------------------------------------------------------------------------
+  db:
+    image: mysql:8.4
+    container_name: db
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # phpMyAdmin — database UI (direct port, not behind Traefik)
+  # ---------------------------------------------------------------------------
+  phpmyadmin:
+    image: phpmyadmin:alpine
+    container_name: phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+configs:
+  traefik_dynamic:
+    content: |
+      tls:
+        stores:
+          default:
+            defaultCertificate:
+              certFile: /etc/traefik/certs/cert.pem
+              keyFile: /etc/traefik/certs/key.pem
+
+      http:
+        routers:
+          api:
+            rule: "Host(`localhost`) && PathPrefix(`/api`)"
+            entryPoints: [websecure]
+            service: api
+            tls: {}
+          server:
+            rule: "Host(`localhost`)"
+            entryPoints: [server]
+            service: server
+            tls: {}
+
+        services:
+          api:
+            loadBalancer:
+              servers:
+                - url: "http://host.docker.internal:8000"
+          server:
+            loadBalancer:
+              servers:
+                - url: "http://host.docker.internal:42070"
+
+volumes:
+  db_data:

@@ -169,14 +169,17 @@ mod ws_client {
 		crate::*,
 		futures::{SinkExt, StreamExt, stream::{SplitStream, SplitSink}},
 		gloo::net::websocket::{Message, futures::WebSocket},
+		std::env,
 	};
 
 	pub type WsReader = SplitStream<WebSocket>;
 	pub type WsWriter = SplitSink<WebSocket, Message>;
 
 	pub async fn ws_connect() -> Result<(WsReader, WsWriter), NetError> {
-		let (w, r) = WebSocket::open(URL_SERVER_WS)
-			.map_err(|_| NetError::Disconnected)?.split();
+		let addr = env::var(ENV_PUBLIC_SERVER_URL).unwrap();
+		let (w, r) = WebSocket::open(addr)
+			.map_err(|_| NetError::Disconnected)?
+			.split();
 		Ok((r, w))
 	}
 
@@ -206,6 +209,7 @@ mod ws_server_and_client {
 	use {
 		bytes::BytesMut,
 		crate::*,
+		std::env,
 		sockudo_ws::{SplitReader, SplitWriter, WebSocketStream, Config, handshake,},
 		tokio::net::TcpStream,
 	};
@@ -243,11 +247,13 @@ mod ws_server_and_client {
 	}
 	
 	pub async fn ws_connect() -> Result<(WsReader, WsWriter), NetError> {
-		let stream = TcpStream::connect((SETBACK_PROXY, 443))
+		let addr = env::var(ENV_PUBLIC_SERVER_URL).unwrap();
+		let stream = TcpStream::connect(addr)
 			.await
 			.map_err(|_| NetError::Disconnected)?;
 		stream.set_nodelay(true)
 			.map_err(|_| NetError::Disconnected)?;
+		let host = env::var(ENV_SETBACK_HOST).unwrap();
 		
 		#[cfg(not(feature = "server"))]
 		let stream = {
@@ -257,7 +263,7 @@ mod ws_server_and_client {
 				.with_root_certificates(roots)
 				.with_no_client_auth();
 			let connector = TlsConnector::from(Arc::new(tls_config));
-			let server_name = rustls::pki_types::ServerName::try_from(SETBACK_PROXY)
+			let server_name = rustls::pki_types::ServerName::try_from(&host)
 				.map_err(|_| NetError::Disconnected)?;
 			connector.connect(server_name, stream)
 				.await
@@ -265,7 +271,7 @@ mod ws_server_and_client {
 		};
 		
 		let mut stream = stream;
-		handshake::client_handshake(&mut stream, SETBACK_PROXY, "/", None)
+		handshake::client_handshake(&mut stream, &host, "/", None)
 			.await
 			.map_err(|_| NetError::Disconnected)?;
 		

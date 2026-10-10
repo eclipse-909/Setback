@@ -34,10 +34,13 @@ setback_docker_build_and_push() {
 		--build-arg PROFILE="$cargo_profile" \
 		--build-arg PACKAGE=setback_"$1" \
 		--build-arg PORT="$2" \
+		--build-arg RUNTIME_DIR="$3" \
 		.
 
 	docker push eclipse909/private:setback_"$1"-"$setback_env"-v"$VERSION"
 }
+
+echo "$DOCKER_CLI_PAT" | docker login -u eclipse909 --password-stdin
 
 #                             <package> <port>
 setback_docker_build_and_push "server"  "42069" &

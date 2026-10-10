@@ -9,13 +9,12 @@ chrono.workspace = true
 http.workspace = true
 jsonwebtoken.workspace = true
 lettre.workspace = true
-libsetback = { workspace = true, features = ["server"] }
+libsetback = { workspace = true, features = ["server", "http"] }
 serde.workspace = true
 sqlx.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tower-http.workspace = true
 
 [lints]
 workspace = true

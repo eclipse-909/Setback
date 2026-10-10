@@ -54,7 +54,7 @@ impl GameState {
 	) {
 		debug!(cx = %self.cx(), "Starting game");
 		tokio::spawn(async move {
-			let mut client_io_fut = self.advance_game(ClientIOResult::None);
+			let mut client_io_fut = self.advance_game(ClientIOResult::None, &state);
 			loop {
 				tokio::select! {
 					client_io_res = &mut client_io_fut => {
@@ -74,9 +74,9 @@ impl GameState {
 								.for_each(|conn| conn.spawn_server_handler(state.clone()));
 							return;
 						}
-						client_io_fut = self.advance_game(client_io_res);
+						client_io_fut = self.advance_game(client_io_res, &state);
 					}
-					message = Player::try_recv_fallback(&mut self.lobby_state.players) => self.handle_fallback(message),
+					message = Player::try_recv_fallback(&mut self.lobby_state.players) => self.handle_fallback(message, &state),
 					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn, state.clone()),
 					Some((idx, err)) = err_q.recv() => {
 						match err {
@@ -89,7 +89,7 @@ impl GameState {
 		});
 	}
 	
-	fn advance_game(&mut self, io_res: ClientIOResult) -> ClientIOFut {
+	fn advance_game(&mut self, io_res: ClientIOResult, state: &Arc<State>) -> ClientIOFut {
 		match &io_res {
 			ClientIOResult::NotifyCardPlayed(play_result) => {
 				match play_result {
@@ -136,8 +136,8 @@ impl GameState {
 				}));
 				ClientIOFut::None
 			}
-			GameLoopState::Bidding => self.prompt::<Bid>(io_res),
-			GameLoopState::Playing => self.prompt::<Card>(io_res),
+			GameLoopState::Bidding => self.prompt::<Bid>(io_res, state),
+			GameLoopState::Playing => self.prompt::<Card>(io_res, state),
 			GameLoopState::GameOver => {
 				self.loop_state = GameLoopState::Terminated;
 				self.lobby_state.notify_all(GamePayload::GameEvent(GameEvent::GameOver));
@@ -181,7 +181,7 @@ impl GameState {
 	
 	// these functions are not marked async because we don't want to move self into the futures they return
 	
-	fn prompt<T: PromptResult>(&mut self, io_res: ClientIOResult) -> ClientIOFut {
+	fn prompt<T: PromptResult>(&mut self, io_res: ClientIOResult, state: &Arc<State>) -> ClientIOFut {
 		match T::match_io_res_prompt(io_res) {
 			Some((prompt_result, prompt_state)) => match prompt_result {
 				Ok(value) => {
@@ -216,7 +216,7 @@ impl GameState {
 										description: "Automatically reported for violating 3-strikes policy".to_string(),
 									};
 									// the player reports themselves which I think is very funny
-									self.report_player(self.turn_idx, report, CorrelationId {id: 0, end: true});
+									self.report_player(self.turn_idx, report, CorrelationId {id: 0, end: true}, state);
 									// yeet bozo
 									self.disconnect_player(self.turn_idx, false);
 								}
@@ -302,7 +302,7 @@ impl GameState {
 		self.lobby_state.notify_all(GamePayload::PlayerDisconnected {player_idx: idx});
 	}
 	
-	fn handle_fallback(&mut self, message: Option<(u8, Result<Ssp, NetError>)>) {
+	fn handle_fallback(&mut self, message: Option<(u8, Result<Ssp, NetError>)>, state: &Arc<State>) {
 		let Some((player_idx, message)) = message else {
 			self.loop_state = GameLoopState::Terminated;
 			return;
@@ -312,13 +312,19 @@ impl GameState {
 			Err(e) => return self.lobby_state.err_q.send((player_idx, e)).unwrap(),
 		};
 		match ssp.payload.try_game() {
-			Ok(GamePayload::ReportPlayer(report)) => self.report_player(player_idx, report, ssp.correlation_id),
+			Ok(GamePayload::ReportPlayer(report)) => self.report_player(player_idx, report, ssp.correlation_id, state),
 			Ok(GamePayload::LeaveGame) => self.disconnect_player(player_idx, false),
 			_ => {}
 		}
 	}
 	
-	fn report_player(&mut self, reporter_idx: u8, report: ReportPlayerRequest, correlation_id: CorrelationId) {
+	fn report_player(
+		&mut self,
+		reporter_idx: u8,
+		report: ReportPlayerRequest,
+		correlation_id: CorrelationId,
+		state: &Arc<State>,
+	) {
 		let target_is_human = matches!(
 			self.lobby_state
 				.players[report.target_idx as usize]
@@ -338,12 +344,13 @@ impl GameState {
 			return;
 		}
 		let ssp_tx = conn.ssp_tx().clone();
+		let state = state.clone();
 		tokio::spawn(async move {
 			let response = async move {
 				// DontLikePlayer isn't a real report reason,
 				// it's just to make players feel better that they think they can report people they don't like.
 				if !matches!(report.reason, ReportReason::DontLikePlayer) {
-					api_report_player(report).await?;
+					state.api.report_player(report).await?;
 				}
 				Ok(())
 			}.await;
@@ -359,4 +366,11 @@ impl GameState {
 			}
 		});
 	}
+	
+	/// Don't use this, this is just to prevent errors in the ide
+	pub async fn run_singleplayer(
+		self,
+		_event_emitter: impl EventEmitter,
+		_event_response_rx: impl EventResponseReceiver,
+	) {}
 }

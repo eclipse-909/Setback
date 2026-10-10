@@ -13,13 +13,14 @@ bytes.workspace = true
 const_format.workspace = true
 dioxus.workspace = true
 futures.workspace = true
-http.workspace = true
 postcard.workspace = true
 rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+tower-http = { workspace = true, optional = true }
 tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom.workspace = true
@@ -41,6 +42,7 @@ trybuild.workspace = true
 
 [features]
 server = ["dep:nanoid", "dep:scc"]
+http = ["dep:tower-http"]
 test-libsetback = []
 
 [lints]

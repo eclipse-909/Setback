@@ -36,7 +36,8 @@ async fn test_ai_only() {
 		prev(info);
 	});
 
-	Lobby::create_ai_only().finish()
+	Lobby::create_ai_only()
+		.finish()
 		.run_ai_only()
 		.await;
 }

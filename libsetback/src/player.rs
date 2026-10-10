@@ -69,6 +69,16 @@ impl Player {
 			team_id,
 		}
 	}
+	
+	/// Don't use this, this is just to prevent errors in the ide
+	#[cfg(feature = "server")]
+	pub fn new_singleplayer_self(team_id: u8, _username: String) -> Self {
+		Self {
+			player_type: PlayerType::Ai {account_id: 0},
+			hand: ArrayVec::new(),
+			team_id,
+		}
+	}
 
 	///Empty slot for a human player in multiplayer.
 	#[cfg(feature = "server")]

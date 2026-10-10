@@ -50,7 +50,6 @@ async fn api_login(
 
 pub fn api_public_routes() -> Router<AppState> {
 	Router::new()
-		.route("/healthcheck", get(StatusCode::OK))
 		.route("/begin-signup", post(api_begin_signup))
 		.route("/finish-signup", get(api_finish_signup))
 		.route("/login", post(api_login))

@@ -97,11 +97,6 @@ impl GameState {
 		// there is no human player in tests
 		u8::MAX
 	}
-	
-	#[cfg(feature = "test-libsetback")]
-	pub async fn run_ai_only(self) {
-		self.run_singleplayer((),()).await
-	}
 
 	pub async fn run_singleplayer(
 		mut self,
@@ -606,6 +601,10 @@ impl GameState {
 	
 	pub fn cx(&self) -> LobbyLogCx<'_> {
 		self.lobby_state.cx()
+	}
+	
+	pub async fn run_ai_only(self) {
+		self.run_singleplayer((),()).await
 	}
 }
 

@@ -28,9 +28,12 @@ impl SetbackClient {
 	/// If you send a message to the server that expects a response, you can just call the async function that sends the message,
 	/// and awaiting that function will return the response from the server if all goes well.
 	pub async fn new(credentials: LoginRequest) -> Result<Self, Error> {
-		let api = Client::builder().build().map_err(|_| Error::ApiErr)?;
+		let api = Client::builder()
+			.https_only(true)
+			.build()
+			.map_err(|_| Error::ApiErr)?;
 		let session = api
-			.post(URL_API_LOGIN)
+			.post(public_api(URL_API_LOGIN))
 			.json(&credentials)
 			.send()
 			.await

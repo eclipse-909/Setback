@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
-# Dockerfile for setback_server and setback_api
+# This is for DEV and PROD
+# Dockerfile for server and api
 # Usage: See ./scripts/docker-build.sh
 
 # =============================================================================
@@ -9,15 +10,22 @@
 ARG PROFILE=debug
 ARG PACKAGE
 ARG PORT
+ARG RUNTIME_DIR
 
 # =============================================================================
 # Stage 1: chef — base builder with cargo-chef installed
 # =============================================================================
 FROM rust:bookworm AS chef
+WORKDIR /build
+
+# Install the toolchain from rust-toolchain.toml in its own cached layer.
+# This layer only rebuilds when that file changes.
+COPY rust-toolchain.toml .
+RUN rustup toolchain install
+
 RUN curl -L --proto '=https' --tlsv1.2 \
 	-sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall --no-confirm cargo-chef
-WORKDIR /build
 
 # =============================================================================
 # Stage 2: planner — captures dependency graph into a recipe
@@ -52,7 +60,24 @@ RUN cargo build \
     -p "$PACKAGE"
 
 # =============================================================================
-# Stage 4: runtime — small final image
+# Stage 4: assets — stages the optional runtime directory
+#
+# RUNTIME_DIR is a path relative to the repo root (e.g. "migrations" or
+# "frontend"). A leading slash is tolerated. If it is empty (e.g. for the game
+# server) nothing is copied and /assets is simply empty, so the COPY in the
+# runtime stage never fails.
+# =============================================================================
+FROM builder AS assets
+
+ARG RUNTIME_DIR
+
+RUN mkdir -p /assets \
+    && if [ -n "$RUNTIME_DIR" ]; then \
+        cp -r "./${RUNTIME_DIR#/}" /assets/; \
+    fi
+
+# =============================================================================
+# Stage 5: runtime — small final image
 # =============================================================================
 FROM debian:bookworm-slim AS runtime
 
@@ -63,7 +88,7 @@ ARG PORT
 # Install only the minimal runtime libraries needed by a typical Rust binary.
 # Remove the apt cache afterwards to keep the layer small.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user
@@ -77,10 +102,14 @@ WORKDIR /setback
 # and target/debug for --profile debug (the default).
 COPY --from=builder --chown=setback:setback \
     /build/target/${PROFILE}/${PACKAGE} \
-    /setback/server
+    /setback/app
+
+# Copy the runtime directory (if any) next to the binary, e.g.
+# /setback/migrations or /setback/frontend. Empty for services without one.
+COPY --from=assets --chown=setback:setback /assets/ /setback/
 
 USER setback
 
 EXPOSE ${PORT}
 
-ENTRYPOINT ["/setback/server"]
+ENTRYPOINT ["/setback/app"]

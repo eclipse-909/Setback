@@ -155,21 +155,23 @@ impl Lobby {
 		}
 	}
 	
-	#[cfg(not(feature = "server"))]
 	pub fn create_ai_only() -> Self {
 		debug!("Creating AI only game");
-		let mut lobby = Self::new(String::new(), String::new());
+		#[cfg(feature = "server")]
+		let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+		let mut lobby = Self::new(String::new(), String::new(), #[cfg(feature = "server")] tx);
 		for _ in 0..MAX_PLAYERS {
 			lobby.add_ai();
 		}
 		lobby
 	}
 
-	#[cfg(not(feature = "server"))]
 	pub fn create_singleplayer(username: String) -> Self {
 		debug!("Creating singleplayer game");
 		let sp_self = Player::new_singleplayer_self(0, username);
-		let mut lobby = Self::new(String::new(), String::new());
+		#[cfg(feature = "server")]
+		let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+		let mut lobby = Self::new(String::new(), String::new(), #[cfg(feature = "server")] tx);
 		lobby.lobby_state.players.push(sp_self);
 		for _ in 0..MAX_PLAYERS - 1 {
 			lobby.add_ai();

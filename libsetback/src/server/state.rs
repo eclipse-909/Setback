@@ -25,8 +25,8 @@ type GameStore = HashMap<GameKey, ClientSender>;
 /// Literally everything is owned by this state object,
 /// so it's passed around with an Arc.
 pub struct State {
-	pub connected_account_owners: HashSet<u32>,
-	client_store: ClientStore,
+	pub api: Api,
+	pub owner_store: ClientStore,
 	pub_lobby_store: GameStore,
 	private_lobby_store: GameStore,
 	runtime_store: GameStore,
@@ -37,25 +37,12 @@ impl State {
 	/// It's just too much effort to use singleton pattern.
 	pub fn new() -> Arc<Self> {
 		Arc::new(Self {
-			connected_account_owners: HashSet::new(),
-			client_store: HashSet::new(),
+			api: Api::new(),
+			owner_store: HashSet::new(),
 			pub_lobby_store: HashMap::new(),
 			private_lobby_store: HashMap::new(),
 			runtime_store: HashMap::new(),
 		})
-	}
-	
-	/// Returns true if the client could not be added.
-	pub async fn add_client(self: Arc<Self>, client: ClientConnection) {
-		self.client_store.insert_async(client.account_id)
-			.await
-			.expect("The server should have already verified that this account owner is not connected");
-		client.spawn_server_handler(self);
-	}
-	
-	pub async fn rm_client(&self, account_id: u32) {
-		_ = self.client_store.remove_async(&account_id).await;
-		// TODO we should occasionally shrink the hashset capacity to free up memory
 	}
 	
 	pub async fn create_lobby(

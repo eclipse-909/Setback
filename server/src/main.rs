@@ -2,26 +2,17 @@ use {
 	reqwest::{Client, header::{HeaderMap, HeaderValue}},
 	setback::*,
 	std::{
+		env,
 		io::Write,
 		mem::MaybeUninit,
 		net::{Ipv4Addr, SocketAddrV4},
 		process::exit,
+		sync::Arc,
 		time::Instant,
 	},
 	tokio::net::TcpListener,
-	tracing::{error, info, warn}};
-
-static mut SETBACK_API: MaybeUninit<Client> = MaybeUninit::uninit();
-
-pub extern "Rust" fn setback_api() -> Client {
-	// SAFETY:
-	// Must link with libsetback.
-	// SETBACK_API must never be mutated while this function is being called.
-	unsafe {
-		#[allow(static_mut_refs)]
-		SETBACK_API.assume_init_ref().clone()
-	}
-}
+	tracing::{error, info, warn}
+};
 
 macro_rules! crash {
 	($fmt:expr) => {{
@@ -39,47 +30,20 @@ macro_rules! crash {
 }
 
 fn main() {
-	tracing_subscriber::fmt()
-		.with_writer(std::io::stdout)
-		.with_level(true)
-		.compact()
-		.init();
+	init_tracing!();
 
 	let rt = tokio::runtime::Builder::new_multi_thread()
 		.enable_all()
 		.build()
 		.unwrap();
 	
-	let api_key = std::env::var(ENV_API_KEY).unwrap();
-	let mut headers = HeaderMap::new();
-	let mut header_api_key = HeaderValue::from_str(&api_key).unwrap();
-	header_api_key.set_sensitive(true);
-	headers.insert(API_HEADER_API_KEY, header_api_key);
-	
 	rt.block_on(async move {
-		// SAFETY:
-		// There are no other references to SETBACK_API.
-		unsafe {
-			#[allow(static_mut_refs)]
-			SETBACK_API.write(
-				Client::builder()
-					.default_headers(headers)
-					.build()
-					.unwrap()
-			);
-		}
+		let state = State::new();
 		
 		// docker compose should already guarantee this, so this is a redundancy check
-		assert!(
-			setback_api()
-				.get(URL_API_HEALTHCHECK)
-				.send()
-				.await
-				.unwrap()
-				.status()
-				.is_success(),
-			"Setback API healthcheck did not return 200"
-		);
+		state.api.healthcheck()
+			.await
+			.expect("Setback API healthcheck did not return 200");
 		
 		tokio::select! {
 			res = tokio::signal::ctrl_c() => if let Err(e) = res {
@@ -87,7 +51,7 @@ fn main() {
 			} else {
 				info!("Terminating via SIGINT")
 			},
-			_ = tcp_listen() => unreachable!(),
+			_ = tcp_listen(state) => unreachable!(),
 		}
 	});
 	info!("Initiating shutdown");
@@ -97,11 +61,11 @@ fn main() {
 	_ = std::io::stdout().flush();
 }
 
-async fn tcp_listen() -> ! {
-	let tcp_listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, SETBACK_SERVER_WS_PORT))
+async fn tcp_listen(state: Arc<State>) -> ! {
+	let addr = env::var(ENV_SERVER_BIND_ADDR).unwrap();
+	let tcp_listener = TcpListener::bind(addr)
 		.await
 		.unwrap_or_else(crash!("Could not bind tcp listener. Error: {}", e));
-	let state = State::new();
 	loop {
 		match tcp_listener.accept().await {
 			Ok((stream, _)) => ClientConnection::try_accept(stream, state.clone()).await,

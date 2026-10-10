@@ -18,6 +18,7 @@ mod models;
 mod player;
 mod runtime;
 mod ssp;
+mod telemetry;
 mod ws;
 
 #[cfg(feature = "server")]
@@ -35,6 +36,7 @@ pub use {
 	runtime::*,
 	ssp::*,
 	ws::{WebSocketeer, SspTx, FallbackRx},
+	telemetry::*,
 };
 
 #[cfg(feature = "server")]
