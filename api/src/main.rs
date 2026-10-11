@@ -7,6 +7,7 @@ mod util;
 use {
 	crate::{constants::*, controllers::*, middleware::*, models::*},
 	axum::{Router, routing::get},
+	base64::{engine::general_purpose::STANDARD, Engine},
 	http::StatusCode,
 	setback::*,
 	sqlx::mysql::MySqlPoolOptions,
@@ -23,7 +24,7 @@ async fn main() {
 			.connect(env::var(ENV_DB_URL).unwrap().as_str())
 			.await
 			.unwrap(),
-		jwt_secret: env::var(ENV_JWT_SECRET).unwrap(),
+		jwt_secret: STANDARD.decode(env::var(ENV_JWT_SECRET).unwrap()).unwrap(),
 		api_key_hash: api_key::sha256(&env::var(ENV_API_KEY).unwrap()),
 	};
 	sqlx::migrate!().run(&state.db).await.unwrap();

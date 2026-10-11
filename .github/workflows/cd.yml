@@ -1,31 +1,95 @@
 name: Setback CD Pipeline
 
 on:
-  pull_request:
-    branches:
-      - prod
+  push:
+    branches: [dev, prod]
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
 
 jobs:
-  main_to_prod:
-    name: Check Source Branch
-    runs-on: ubuntu-latest
+  ci:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  build:
+    name: Build and Push Docker Images
+    needs: ci
+    runs-on: ubuntu-26.04-arm
+    strategy:
+      matrix:
+        include:
+          - package: api
+            port: 8080
+          - package: server
+            port: 42069
     steps:
-      - name: Only allow main -> prod PRs
+      - uses: actions/checkout@v7
+      - name: Docker Hub Login
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_CLI_USER }}
+          password: ${{ secrets.DOCKER_CLI_PAT }}
+      - name: Resolve build profile
+        id: profile
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          echo "PR from: ${{ github.head_ref }}"
-          if [ "${{ github.head_ref }}" != "main" ]; then
-            echo "PRs into prod must come from main"
-            exit 1
-          fi
+          case "$REF_NAME" in
+            dev)  PROFILE=debug ;;
+            prod) PROFILE=release ;;
+            *)
+              echo "::error::Unsupported branch '$REF_NAME' (expected dev or prod)"
+              exit 1
+              ;;
+          esac
+          echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
+      - name: Get ${{ matrix.package }} version
+        id: version
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          CARGO_METADATA=$(cargo metadata --no-deps --format-version 1)
+          VERSION=$(echo "$CARGO_METADATA" | jq -r --arg name "$PACKAGE" \
+            '.packages[] | select(.name == $name) | .version')
+          [ -n "$VERSION" ] || { echo "No package named $PACKAGE found"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Build & push ${{ matrix.package }} Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          build-args: |
+            PROFILE=${{ steps.profile.outputs.profile }}
+            PACKAGE=${{ matrix.package }}
+            PORT=${{ matrix.port }}
+          tags: |
+            ${{ secrets.DOCKER_CLI_USER }}/private:setback-${{ matrix.package }}-${{ github.ref_name }}-v${{ steps.version.outputs.version }}
+            ${{ secrets.DOCKER_CLI_USER }}/private:setback-${{ matrix.package }}-${{ github.ref_name }}-latest
+          platforms: linux/arm64
+
   deploy:
-    name: Deploy
-    runs-on: ubuntu-latest
-    needs: [main_to_prod]
+    name: Dokploy Deploy
+    needs: build
+    runs-on: ubuntu-26.04-arm
+    environment:
+      name: ${{ github.ref_name }}
+      deployment: true
     env:
-      $DOCKER_CLI_PAT: ${{ secrets.DOCKER_CLI_PAT }}
+      $DOKPLOY_URL: "https://panel.dokploy.com"
+      $DOKPLOY_API_KEY: ${{ secrets.DOKPLOY_API_KEY }}
     steps:
-      - run: ./cd_deploy.sh
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 'latest'
+      - run: npm install -g @dokploy/cli
+      - run: ./.github/scripts/cd-deploy.sh

@@ -1,10 +1,7 @@
 #![feature(
 	const_format_args,
-	allocator_api,
-	unsafe_cell_access,
 	slice_partition_dedup,
 	trait_alias,
-	const_option_ops,
 	const_trait_impl,
 )]
 
@@ -23,6 +20,8 @@ mod ws;
 
 #[cfg(feature = "server")]
 mod server;
+#[cfg(feature = "server")]
+mod health;
 
 pub use {
 	arena::*,
@@ -40,4 +39,7 @@ pub use {
 };
 
 #[cfg(feature = "server")]
-pub use server::*;
+pub use {
+	server::*,
+	health::*,
+};

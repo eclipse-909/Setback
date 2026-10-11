@@ -1,1 +1,0 @@
-These scripts are only used during CI/CD. Please do not run them locally.

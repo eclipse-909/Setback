@@ -1,4 +1,4 @@
-# compose.local.yml — local development, hybrid mode
+# docker-compose.yml — local development, hybrid mode
 #
 # Docker runs the infrastructure (Traefik, MySQL, phpMyAdmin).
 # The Rust apps run natively on the host with `cargo run`, so there are no

@@ -17,7 +17,8 @@ The backend services use docker compose to run the server and website. Collectiv
 The following should be installed
 * [Rust](https://rust-lang.org/tools/install/)
   * Nightly compiler
-  * [Tarpaulin](https://github.com/xd009642/tarpaulin#installation)
+  * llvm-tools-preview
+  * cargo-llvm-cov
 * [Just](https://just.systems/man/en/installation.html)
 * [Dioxus CLI and system dependencies]([https://dioxuslabs.com/learn/0.7/tutorial/tooling](https://dioxuslabs.com/learn/0.7/getting_started/))
 * [Docker](https://docs.docker.com/engine/install/)

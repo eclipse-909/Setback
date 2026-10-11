@@ -1,9 +1,0 @@
-[run]
-run-types = ["AllTargets"]
-force-clean = false
-skip-clean = true
-
-[report]
-output-dir = "docs"
-out = ["Stdout", "Html"]
-fail-under = 80

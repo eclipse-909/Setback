@@ -209,7 +209,7 @@ mod ws_server_and_client {
 	use {
 		bytes::BytesMut,
 		crate::*,
-		std::env,
+		std::{env, net::Ipv4Addr},
 		sockudo_ws::{SplitReader, SplitWriter, WebSocketStream, Config, handshake,},
 		tokio::net::TcpStream,
 	};
@@ -263,7 +263,7 @@ mod ws_server_and_client {
 				.with_root_certificates(roots)
 				.with_no_client_auth();
 			let connector = TlsConnector::from(Arc::new(tls_config));
-			let server_name = rustls::pki_types::ServerName::try_from(&host)
+			let server_name = rustls::pki_types::ServerName::try_from(host.clone())
 				.map_err(|_| NetError::Disconnected)?;
 			connector.connect(server_name, stream)
 				.await
@@ -276,6 +276,18 @@ mod ws_server_and_client {
 			.map_err(|_| NetError::Disconnected)?;
 		
 		Ok(WebSocketStream::client(stream, ws_config()).split())
+	}
+	
+	pub async fn ws_local_connect() -> Result<WebSocketStream<TcpStream>, NetError> {
+		let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, 42069))
+			.await
+			.map_err(|_| NetError::Disconnected)?;
+		stream.set_nodelay(true)
+			.map_err(|_| NetError::Disconnected)?;
+		handshake::client_handshake(&mut stream, "localhost", "/", None)
+			.await
+			.map_err(|_| NetError::Disconnected)?;
+		Ok(WebSocketStream::client(stream, ws_config()))
 	}
 	
 	#[cfg(feature = "server")]

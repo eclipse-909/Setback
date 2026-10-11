@@ -1,17 +1,14 @@
 use {
-	reqwest::{Client, header::{HeaderMap, HeaderValue}},
 	setback::*,
 	std::{
 		env,
 		io::Write,
-		mem::MaybeUninit,
-		net::{Ipv4Addr, SocketAddrV4},
 		process::exit,
 		sync::Arc,
 		time::Instant,
 	},
 	tokio::net::TcpListener,
-	tracing::{error, info, warn}
+	tracing::{error, info, warn},
 };
 
 macro_rules! crash {
@@ -38,6 +35,10 @@ fn main() {
 		.unwrap();
 	
 	rt.block_on(async move {
+		if env::args().any(|a| a == "--health") {
+			exit(health_check().await);
+		}
+		
 		let state = State::new();
 		
 		// docker compose should already guarantee this, so this is a redundancy check
@@ -54,6 +55,7 @@ fn main() {
 			_ = tcp_listen(state) => unreachable!(),
 		}
 	});
+
 	info!("Initiating shutdown");
 	let timer = Instant::now();
 	rt.shutdown_timeout(SHUTDOWN_TIMEOUT);

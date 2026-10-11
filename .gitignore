@@ -1,8 +1,8 @@
 # security
 *.env*
+!.env.template
 *.pem
 *certs
-!.env.template
 
 # editors - these can be removed if multiple contributors use the same editor
 .idea
@@ -10,6 +10,8 @@
 .vscode
 
 # generated
+local/*
+!local/docker-compose.yml
 setback/settings.json
 setback/usr.crd
 target

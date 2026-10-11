@@ -6,7 +6,7 @@ use {
 #[derive(Clone)]
 pub struct AppState {
 	pub db: MySqlPool,
-	pub jwt_secret: String,
+	pub jwt_secret: Vec<u8>,
 	pub api_key_hash: [u8; 32]
 }
 

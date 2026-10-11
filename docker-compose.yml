@@ -1,0 +1,54 @@
+# docker-compose.yml — Run setbackd in Dokploy (DEV & PROD environments)
+#
+# This file is used for BOTH production and development deployments in Dokploy.
+# The differences between environments are controlled by environment variables
+# defined in Dokploy's environment configuration (or a .env file).
+#
+# Required environment variables — set these in Dokploy's environment UI:
+#
+#   DOCKER_CLI_USER       e.g. "eclipse909"
+#   SETBACK_ENV           e.g. "dev" or "prod"
+
+name: setbackd
+
+services:
+
+  api:
+    image: ${DOCKER_CLI_USER}/private:setback-api-${SETBACK_ENV}-latest
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      update_config:
+        order: start-first
+        failure_action: rollback
+        parallelism: 1
+
+  server:
+    image: ${DOCKER_CLI_USER}/private:setback-server-${SETBACK_ENV}-latest
+    pull_policy: always
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "42069"
+    healthcheck:
+      test: [ "CMD", "/setback/app", "--health" ]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    stop_signal: SIGINT
+    stop_grace_period: 4h5m
+    depends_on:
+      api:
+        condition: service_healthy

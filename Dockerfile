@@ -2,7 +2,7 @@
 
 # This is for DEV and PROD
 # Dockerfile for server and api
-# Usage: See ./scripts/docker-build.sh
+# Usage: See ./.github/scripts/cd-deploy.sh
 
 # =============================================================================
 # ARGs available to all stages

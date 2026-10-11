@@ -1,0 +1,33 @@
+name: Branch Flow
+
+on:
+  pull_request_target:
+    branches: [ dev, prod ]
+
+permissions: {}
+
+jobs:
+  enforce-flow:
+    name: Enforce branch flow
+    runs-on: ubuntu-26.04-arm
+    steps:
+      - name: Validate source branch
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::PRs from forks are not allowed into $BASE"
+            exit 1
+          fi
+          
+          case "$BASE" in
+            dev)  allowed="main" ;;
+            prod) allowed="dev" ;;
+          esac
+          
+          if [ "$HEAD" != "$allowed" ]; then
+            echo "::error::$BASE only accepts PRs from $allowed (got $HEAD)"
+            exit 1
+          fi

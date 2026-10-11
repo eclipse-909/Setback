@@ -16,7 +16,7 @@ pub fn create_jwt(
 	owner_id: u32,
 	username: &str,
 	email: &str,
-	secret: &str
+	state: &AppState,
 ) -> Result<String, jsonwebtoken::errors::Error> {
 	let now = Utc::now();
 	let claims = Claims {
@@ -30,7 +30,7 @@ pub fn create_jwt(
 	encode(
 		&Header::default(), // HS256 by default
 		&claims,
-		&EncodingKey::from_secret(secret.as_bytes()),
+		&EncodingKey::from_secret(&state.jwt_secret),
 	)
 }
 
@@ -68,7 +68,7 @@ async fn auth_middleware(
 	
 	let claims = decode::<Claims>(
 		token,
-		&DecodingKey::from_secret(state.jwt_secret.as_bytes()),
+		&DecodingKey::from_secret(&state.jwt_secret),
 		&Validation::default(),
 	).map(|data| data.claims)
 		.map_err(|_| StatusCode::UNAUTHORIZED)?;

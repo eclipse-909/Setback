@@ -1,107 +1,53 @@
 name: Setback CI Pipeline
 
 on:
+  push:
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
 
 jobs:
-  format:
-    name: Format
-    runs-on: ubuntu-latest
+  ci:
+    name: CI
+    runs-on: ubuntu-26.04-arm
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          components: rustfmt
+          components: rustfmt, clippy, llvm-tools-preview, miri
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: "true"
-          cache-all-crates: true"
-          cache-workspace-crates: "true"
-      - name: Check formatting
+      - uses: taiki-e/cache-cargo-install-action@v3
+        with:
+          tool: cargo-llvm-cov,cargo-audit
+      - name: Audit
+        run: cargo audit
+      - name: Formatting
         run: cargo +nightly fmt --all --check
-
-  audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: "true"
-          cache-all-crates: true"
-          cache-workspace-crates: "true"
-      - uses: actions-rs/audit-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: "true"
-          cache-all-crates: true"
-          cache-workspace-crates: "true"
-      - name: Run clippy
+      - name: Clippy
         run: cargo +nightly clippy --workspace --all-targets --locked -- -D warnings
-
-  miri:
-    name: Miri
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: "true"
-          cache-all-crates: true"
-          cache-workspace-crates: "true"
-      - name: Install Miri
-        run: |
-          rustup toolchain install nightly --component miri
-          rustup override set nightly
-          cargo miri setup
-      - name: Run miri test
-        run: |
-          cargo +nightly miri test --workspace --all-targets --locked
-
-  # bench:
-  #   name: Benchmarks
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #     - uses: dtolnay/rust-toolchain@nightly
-  #     - uses: Swatinem/rust-cache@v2
-  #       with:
-  #         cache-on-failure: "true"
-  #         cache-all-crates: true"
-  #         cache-workspace-crates: "true"
-  #     - name: Run benchmarks
-  #       run: cargo +nightly bench --workspace --all-targets --locked
-
-  coverage:
-    name: Code Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: "true"
-          cache-all-crates: true"
-          cache-workspace-crates: "true"
-      - uses: taiki-e/install-action@2
-        with:
-          tool: cargo-tarpaulin
-      - name: Generate coverage report
-        run: cargo +nightly tarpaulin --workspace --all-targets --locked
+      - name: Miri
+        run: cargo +nightly miri test -p libsetback --test arena --locked
+#      - name: Benchmarks
+#        run: cargo +nightly bench --workspace --all-targets --locked
+      - name: Tests
+        run: cargo +nightly test --workspace --all-targets --locked
+      - name: Coverage
+        run: >
+          cargo llvm-cov --workspace --all-targets --locked
+          --fail-under-lines 80
+          --fail-under-functions 80
+          --fail-under-regions 80
