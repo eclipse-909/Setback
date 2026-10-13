@@ -4,12 +4,13 @@ use {
 		models::*,
 	},
 	axum::{
-		Json, Router,
+		Json,
 		routing::{patch, post},
 		extract::Path,
 	},
 	http::StatusCode,
 	setback::*,
+	utoipa_axum::router::OpenApiRouter as Router,
 };
 
 type Result<T> = core::result::Result<T, StatusCode>;
@@ -26,6 +27,14 @@ async fn api_stats(
 	Json(stats): Json<StatsRequest>,
 ) -> Result<()> {
 	todo!()
+}
+
+async fn api_suspend(
+	Path(account_id): Path<u32>,
+	Json(suspend): Json<SuspendRequest>,
+) -> Result<()> {
+	todo!()
+	// delete refresh tokens
 }
 
 pub fn api_server_routes(state: AppState) -> Router<AppState> {

@@ -12,6 +12,7 @@
 # generated
 local/*
 !local/docker-compose.yml
+api/openapi
 setback/settings.json
 setback/usr.crd
 target

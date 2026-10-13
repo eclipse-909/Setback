@@ -1,8 +1,9 @@
 use {
 	crate::{middleware::jwt, models::*},
-	axum::{Extension, Json, Router, extract::State, routing::{delete, get, patch, post}},
+	axum::{Extension, Json, extract::State, routing::{delete, get, patch, post}},
 	setback::*,
 	sqlx::MySqlPool,
+	utoipa_axum::router::OpenApiRouter as Router,
 };
 
 type Result<T> = core::result::Result<T, http::StatusCode>;

@@ -1,4 +1,7 @@
-use serde::{Deserialize, Serialize};
+use {
+	serde::{Deserialize, Serialize},
+	std::time::Duration,
+};
 
 #[derive(Serialize, Deserialize)]
 pub struct LoginRequest {
@@ -96,4 +99,11 @@ pub struct StatsRequest {
 	num_clubs: Option<u32>,
 	num_spades: Option<u32>,
 	total_card_num: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SuspendRequest {
+	/// None means they get reinstated
+	duration: Option<Duration>,
+	reason: String,
 }

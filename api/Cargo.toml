@@ -16,6 +16,9 @@ sqlx.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 tokio = { workspace = true, features = ["full"] }
+utoipa.workspace = true
+utoipa-axum.workspace = true
+utoipa-swagger-ui.workspace = true
 
 [lints]
 workspace = true

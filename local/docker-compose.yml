@@ -7,7 +7,7 @@
 # Requires Docker Compose 2.23.1+ (inline `configs` content).
 #
 # Prerequisites:
-#   - Self-signed certs in ./docker/certs/cert.pem and ./docker/certs/key.pem
+#   - Self-signed certs in ./local/certs/cert.pem and ./local/certs/key.pem
 #     (the cert needs a subjectAltName of DNS:localhost)
 #   - .env.local with the db credentials (MYSQL_ROOT_PASSWORD, ...)
 #
@@ -47,8 +47,8 @@ services:
       - "127.0.0.1:8080:8080"   # Traefik dashboard
       - "127.0.0.1:42069:42069" # WSS — server
     volumes:
-      - ./docker/certs:/etc/traefik/certs:ro
-      - ./docker/logs:/var/log/traefik
+      - ./local/certs:/etc/traefik/certs:ro
+      - ./local/logs:/var/log/traefik
     configs:
       - source: traefik_dynamic
         target: /etc/traefik/dynamic.yml

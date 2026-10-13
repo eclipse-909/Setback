@@ -20,5 +20,5 @@ The following should be installed
   * llvm-tools-preview
   * cargo-llvm-cov
 * [Just](https://just.systems/man/en/installation.html)
-* [Dioxus CLI and system dependencies]([https://dioxuslabs.com/learn/0.7/tutorial/tooling](https://dioxuslabs.com/learn/0.7/getting_started/))
+* [Dioxus CLI](https://dioxuslabs.com/learn/0.7/getting_started/) and [system dependencies](https://dioxuslabs.com/learn/0.7/getting_started/)
 * [Docker](https://docs.docker.com/engine/install/)

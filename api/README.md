@@ -25,8 +25,9 @@ The server may also call endpoints for a specific player.
 
 - POST  /api/server/{account_id}/report-player
 - PATCH /api/server/{account_id}/stats
+- PATCH /api/server/{account_id}/suspend
 
-## Developer Endpoints
+## Admin Endpoints
 These require a bearer auth token and the user must be an admin.
 
 - TODO /api/admin/todo

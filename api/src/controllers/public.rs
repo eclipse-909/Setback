@@ -1,7 +1,7 @@
 use {
 	crate::models::*,
 	axum::{
-		Json, Router,
+		Json,
 		extract::{Query, State},
 		routing::{get, post},
 	},
@@ -9,6 +9,7 @@ use {
 	setback::{LoginRequest, LoginResponse, SignupRequest},
 	sqlx::MySqlPool,
 	std::collections::HashMap,
+	utoipa_axum::router::OpenApiRouter as Router,
 };
 
 type Result<T> = core::result::Result<T, StatusCode>;

@@ -31,7 +31,6 @@ dioxus = "0.7.10"
 futures = "0.3.34"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
 gloo = { version = "0.12.0", default-features = false, features = ["net", "timers", "futures"] }
-hex = "0.4.3"
 http = "1.5.0"
 jsonwebtoken = { version = "11.1.0", features = ["rust_crypto"] }
 konst = "0.4.3"
@@ -50,8 +49,8 @@ reqwest = { version = "0.13.5", features = ["json", "rustls"] }
 rustls = "0.23.45"
 scc = "3.8.8"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.152"
-sha2 = "0.11.0"
+serde_json = "1.0.154"
+sha2 = "0.11.1"
 # TODO: sockudo-ws author recommends mimalloc feature for production, investigate
 sockudo-ws = { version = "3.0.0", features = ["rustls-webpki-roots", "ring"] }
 sqlx = { version = "0.9.0", default-features = false, features = [
@@ -68,11 +67,13 @@ thiserror = "2.0.21"
 tokio = "1.53.2"
 tokio-rustls = "0.26.6"
 tokio-util = "0.7.20"
-tower = "0.5.3"
 tower-http = { version = "0.7.1", features = ["fs", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 trybuild = "1.0.122"
+utoipa = { version= "6.0.0", features = ["axum_extras", "chrono", "time", "openapi_extensions"] }
+utoipa-axum = "0.3.0"
+utoipa-swagger-ui = { version = "10.0.1", features = ["axum", "cache"] }
 uuid = { version = "1.28.0", features = ["v4"] }
 webpki-roots = "1.0.9"
 
