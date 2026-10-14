@@ -5,15 +5,10 @@ use {
 };
 
 #[derive(Serialize, Deserialize, ToSchema)]
-pub struct BeginSignupRequest {
+pub struct SignupRequest {
 	pub email: String,
 	pub username: String,
 	pub password: String,
-}
-
-#[derive(Serialize, Deserialize, ToSchema)]
-pub struct FinishSignupRequest {
-	pub token: String
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -48,7 +43,7 @@ pub struct UsernameResponse {
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ChangePasswordRequest {
-	tmp_code: String,
+	token: String,
 	old_password: String,
 	new_password: String,
 }
@@ -119,7 +114,10 @@ pub struct StatsRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct SuspendRequest {
-	/// None means they get reinstated
-	duration: Option<Duration>,
+	action: SuspendAction,
+	duration: Duration,
 	reason: String,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub enum SuspendAction { Suspend, Reinstate, Warn }

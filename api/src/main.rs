@@ -10,8 +10,8 @@ use {
 	base64::{Engine, engine::general_purpose::STANDARD},
 	http::StatusCode,
 	setback::*,
-	sqlx::mysql::MySqlPoolOptions,
-	std::{env, fs, path::PathBuf},
+	sqlx::{mysql::MySqlPoolOptions, Executor},
+	std::{env, fs, path::PathBuf, net::SocketAddr},
 	utoipa::OpenApi,
 	utoipa_axum::router::OpenApiRouter as Router,
 	utoipa_swagger_ui::SwaggerUi,
@@ -24,6 +24,10 @@ async fn main() {
 	let state = AppState {
 		db: MySqlPoolOptions::new()
 			.max_connections(8)
+			.after_connect(|conn, _meta| Box::pin(async move {
+				conn.execute("set time_zone = '+00:00';").await?;
+				Ok(())
+			}))
 			.connect(env::var(ENV_DB_URL).unwrap().as_str())
 			.await
 			.unwrap(),
@@ -36,6 +40,7 @@ async fn main() {
 	let router = Router::new()
 		.merge(api_public_routes())
 		.nest("/account", api_account_routes(state.clone()))
+		.route_layer(axum::middleware::from_fn_with_state(state.clone(), rate_limit::require_rate_limiter))
     	.nest("/admin", api_admin_routes(state.clone()))
 		.nest("/server", api_server_routes(state.clone()))
 		.route_layer(http_trace_layer())
@@ -57,7 +62,7 @@ async fn main() {
 
 	let addr = env::var(ENV_API_BIND_ADDR).unwrap();
 	let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-	axum::serve(listener, app.into_make_service())
+	axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
 		.await
 		.unwrap();
 }

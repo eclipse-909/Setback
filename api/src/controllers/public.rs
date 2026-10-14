@@ -1,24 +1,38 @@
 use {
 	crate::models::*,
-	axum::{Json, extract::State},
-	http::StatusCode,
+	axum::{Json, extract::{Query, State, ConnectInfo}},
+	http::{StatusCode, HeaderMap},
 	setback::*,
 	sqlx::MySqlPool,
+	std::{
+		collections::HashMap,
+		net::{IpAddr, SocketAddr},
+	},
 	utoipa_axum::{router::OpenApiRouter as Router, routes},
 };
 
 type Result<T> = core::result::Result<T, StatusCode>;
 
+fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
+	headers
+		.get("x-forwarded-for")
+		.and_then(|v| v.to_str().ok())
+		// rightmost entry = the one appended by YOUR proxy (not client-controlled)
+		.and_then(|v| v.rsplit(',').next())
+		.and_then(|s| s.trim().parse::<IpAddr>().ok())
+		.unwrap_or_else(|| peer.ip()) // fallback: direct connection
+}
+
 #[utoipa::path(
 	post,
-	path = "/begin-signup",
-	request_body = BeginSignupRequest,
+	path = "/signup",
+	request_body = SignupRequest,
 	responses((status = 200)),
 	tag = "public"
 )]
 async fn api_begin_signup(
 	State(db): State<MySqlPool>,
-	Json(creds): Json<BeginSignupRequest>,
+	Json(creds): Json<SignupRequest>,
 ) -> Result<()> {
 	todo!()
 	// validate request,
@@ -31,15 +45,17 @@ async fn api_begin_signup(
 }
 
 #[utoipa::path(
-	post,
-	path = "/finish-signup",
-	request_body = FinishSignupRequest,
+	get,
+	path = "/signup",
+	params(("token" = String, Query)),
 	responses((status = 201, body = LoginResponse)),
 	tag = "public"
 )]
 async fn api_finish_signup(
 	State(db): State<MySqlPool>,
-	Json(FinishSignupRequest {token}): Json<FinishSignupRequest>,
+	Query(params): Query<HashMap<String, String>>,
+	ConnectInfo(peer): ConnectInfo<SocketAddr>,
+	headers: HeaderMap,
 ) -> Result<Json<LoginResponse>> {
 	todo!()
 	// remove from staging account table,
@@ -57,6 +73,8 @@ async fn api_finish_signup(
 )]
 async fn api_login(
 	State(db): State<MySqlPool>,
+	ConnectInfo(peer): ConnectInfo<SocketAddr>,
+	headers: HeaderMap,
 	Json(creds): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>> {
 	todo!()
@@ -83,8 +101,7 @@ async fn api_refresh_token(
 
 pub fn api_public_routes() -> Router<AppState> {
 	Router::new()
-		.routes(routes!(api_begin_signup))
-		.routes(routes!(api_finish_signup))
+		.routes(routes!(api_begin_signup, api_finish_signup))
 		.routes(routes!(api_login))
 		.routes(routes!(api_refresh_token))
 }

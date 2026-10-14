@@ -49,7 +49,7 @@ async fn api_logout(
 
 #[utoipa::path(
 	get,
-	path = "/begin-reset-password",
+	path = "/reset-password",
 	responses((status = 200)),
 	tag = "account"
 )]
@@ -64,7 +64,7 @@ async fn api_begin_reset_password(
 
 #[utoipa::path(
 	post,
-	path = "/finish-reset-password",
+	path = "/reset-password",
 	request_body = ChangePasswordRequest,
 	responses((status = 200)),
 	tag = "account"
@@ -76,6 +76,38 @@ async fn api_finish_reset_password(
 	todo!()
 	// validate code and old password,
 	// change password,
+	// delete refresh tokens for account
+}
+
+#[utoipa::path(
+	get,
+	path = "/change-email",
+	responses((status = 200)),
+	tag = "account"
+)]
+async fn api_begin_change_email(
+	Extension(claims): Extension<Claims>,
+) -> Result<()> {
+	todo!()
+	// create temporary secure code,
+	// insert into stage email change table on duplicate key update,
+	// send email with code to new email
+}
+
+#[utoipa::path(
+	post,
+	path = "/change-email",
+	request_body = ChangeEmailRequest,
+	responses((status = 200)),
+	tag = "account"
+)]
+async fn api_finish_change_email(
+	Extension(claims): Extension<Claims>,
+	Json(creds): Json<ChangeEmailRequest>,
+) -> Result<()> {
+	todo!()
+	// validate code,
+	// change email,
 	// delete refresh tokens for account
 }
 
@@ -99,8 +131,8 @@ pub fn api_account_routes(state: AppState) -> Router<AppState> {
 		.routes(routes!(api_username))
 		.routes(routes!(api_feedback))
 		.routes(routes!(api_logout))
-		.routes(routes!(api_begin_reset_password))
-		.routes(routes!(api_finish_reset_password))
+		.routes(routes!(api_begin_reset_password, api_finish_reset_password))
+		.routes(routes!(api_begin_change_email, api_finish_change_email))
 		.routes(routes!(api_delete_account))
 		.route_layer(axum::middleware::from_fn_with_state(state.clone(), jwt::require_auth))
 }
