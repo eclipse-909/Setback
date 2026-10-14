@@ -1,22 +1,24 @@
 use {
 	crate::models::*,
-	axum::{
-		Json,
-		extract::{Query, State},
-		routing::{get, post},
-	},
+	axum::{Json, extract::State},
 	http::StatusCode,
-	setback::{LoginRequest, LoginResponse, SignupRequest},
+	setback::*,
 	sqlx::MySqlPool,
-	std::collections::HashMap,
-	utoipa_axum::router::OpenApiRouter as Router,
+	utoipa_axum::{router::OpenApiRouter as Router, routes},
 };
 
 type Result<T> = core::result::Result<T, StatusCode>;
 
+#[utoipa::path(
+	post,
+	path = "/begin-signup",
+	request_body = BeginSignupRequest,
+	responses((status = 200)),
+	tag = "public"
+)]
 async fn api_begin_signup(
 	State(db): State<MySqlPool>,
-	Json(creds): Json<SignupRequest>,
+	Json(creds): Json<BeginSignupRequest>,
 ) -> Result<()> {
 	todo!()
 	// validate request,
@@ -28,9 +30,16 @@ async fn api_begin_signup(
 	// send email with code
 }
 
+#[utoipa::path(
+	post,
+	path = "/finish-signup",
+	request_body = FinishSignupRequest,
+	responses((status = 201, body = LoginResponse)),
+	tag = "public"
+)]
 async fn api_finish_signup(
 	State(db): State<MySqlPool>,
-	Query(params): Query<HashMap<String, String>>,
+	Json(FinishSignupRequest {token}): Json<FinishSignupRequest>,
 ) -> Result<Json<LoginResponse>> {
 	todo!()
 	// remove from staging account table,
@@ -39,6 +48,13 @@ async fn api_finish_signup(
 	// return response
 }
 
+#[utoipa::path(
+	post,
+	path = "/login",
+	request_body = LoginRequest,
+	responses((status = 200, body = LoginResponse)),
+	tag = "public"
+)]
 async fn api_login(
 	State(db): State<MySqlPool>,
 	Json(creds): Json<LoginRequest>,
@@ -49,9 +65,26 @@ async fn api_login(
 	// return response
 }
 
+#[utoipa::path(
+	post,
+	path = "/refresh-token",
+	request_body = RefreshTokenRequest,
+	responses((status = 200, body = RefreshTokenResponse)),
+	tag = "public"
+)]
+async fn api_refresh_token(
+	State(db): State<MySqlPool>,
+	Json(creds): Json<RefreshTokenRequest>,
+) -> Result<Json<RefreshTokenResponse>> {
+	todo!()
+	// validate refresh token in db,
+	// return new auth token
+}
+
 pub fn api_public_routes() -> Router<AppState> {
 	Router::new()
-		.route("/begin-signup", post(api_begin_signup))
-		.route("/finish-signup", get(api_finish_signup))
-		.route("/login", post(api_login))
+		.routes(routes!(api_begin_signup))
+		.routes(routes!(api_finish_signup))
+		.routes(routes!(api_login))
+		.routes(routes!(api_refresh_token))
 }

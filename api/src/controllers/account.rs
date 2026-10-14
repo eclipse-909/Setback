@@ -1,28 +1,33 @@
 use {
 	crate::{middleware::jwt, models::*},
-	axum::{Extension, Json, extract::State, routing::{delete, get, patch, post}},
+	axum::{Extension, Json},
 	setback::*,
-	sqlx::MySqlPool,
-	utoipa_axum::router::OpenApiRouter as Router,
+	utoipa_axum::{router::OpenApiRouter as Router, routes},
 };
 
 type Result<T> = core::result::Result<T, http::StatusCode>;
 
-async fn api_refresh_token(
-	Extension(claims): Extension<Claims>,
-	State(db): State<MySqlPool>,
-) -> Result<Json<RefreshTokenResponse>> {
-	todo!()
-	// validate refresh token in db,
-	// return new auth token
-}
-
+#[utoipa::path(
+	get,
+	path = "/username",
+	responses(
+        (status = 200, body = UsernameResponse),
+	),
+	tag = "account"
+)]
 async fn api_username(
 	Extension(claims): Extension<Claims>,
 ) -> Result<Json<UsernameResponse>> {
 	todo!()
 }
 
+#[utoipa::path(
+	post,
+	path = "/feedback",
+	request_body = FeedbackRequest,
+	responses((status = 200)),
+	tag = "account"
+)]
 async fn api_feedback(
 	Extension(claims): Extension<Claims>,
 	Json(req): Json<FeedbackRequest>,
@@ -30,12 +35,24 @@ async fn api_feedback(
 	todo!()
 }
 
+#[utoipa::path(
+	get,
+	path = "/logout",
+	responses((status = 200)),
+	tag = "account"
+)]
 async fn api_logout(
 	Extension(claims): Extension<Claims>,
 ) -> Result<()> {
 	todo!()
 }
 
+#[utoipa::path(
+	get,
+	path = "/begin-reset-password",
+	responses((status = 200)),
+	tag = "account"
+)]
 async fn api_begin_reset_password(
 	Extension(claims): Extension<Claims>,
 ) -> Result<()> {
@@ -45,6 +62,13 @@ async fn api_begin_reset_password(
 	// send email with code
 }
 
+#[utoipa::path(
+	post,
+	path = "/finish-reset-password",
+	request_body = ChangePasswordRequest,
+	responses((status = 200)),
+	tag = "account"
+)]
 async fn api_finish_reset_password(
 	Extension(claims): Extension<Claims>,
 	Json(creds): Json<ChangePasswordRequest>,
@@ -55,6 +79,12 @@ async fn api_finish_reset_password(
 	// delete refresh tokens for account
 }
 
+#[utoipa::path(
+	delete,
+	path = "/delete-account",
+	responses((status = 200)),
+	tag = "account"
+)]
 async fn api_delete_account(
 	Extension(claims): Extension<Claims>,
 ) -> Result<()> {
@@ -66,12 +96,11 @@ async fn api_delete_account(
 
 pub fn api_account_routes(state: AppState) -> Router<AppState> {
 	Router::new()
-		.route("/refresh-token", get(api_refresh_token))
-		.route("/username", get(api_username))
-		.route("/feedback", post(api_feedback))
-		.route("/logout", get(api_logout))
-		.route("/begin-reset-password", get(api_begin_reset_password))
-		.route("/finish-reset-password", patch(api_finish_reset_password))
-		.route("/delete-account", delete(api_delete_account))
+		.routes(routes!(api_username))
+		.routes(routes!(api_feedback))
+		.routes(routes!(api_logout))
+		.routes(routes!(api_begin_reset_password))
+		.routes(routes!(api_finish_reset_password))
+		.routes(routes!(api_delete_account))
 		.route_layer(axum::middleware::from_fn_with_state(state.clone(), jwt::require_auth))
 }

@@ -1,41 +1,69 @@
 use {
 	serde::{Deserialize, Serialize},
 	std::time::Duration,
+	utoipa::ToSchema,
 };
 
-#[derive(Serialize, Deserialize)]
-pub struct LoginRequest {
-	pub username: String,
-	pub password: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct SignupRequest {
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct BeginSignupRequest {
 	pub email: String,
 	pub username: String,
 	pub password: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct FinishSignupRequest {
+	pub token: String
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct LoginRequest {
+	pub username: String,
+	pub password: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct LoginResponse {
 	pub auth_token: String,
 	pub refresh_token: String,
 	pub username: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct RefreshTokenRequest {
+	pub refresh_token: String,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct RefreshTokenResponse {
 	pub auth_token: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct UsernameResponse {
 	pub username: String,
 	pub owner_id: u32,
 	pub account_id: u32,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct ChangePasswordRequest {
+	tmp_code: String,
+	old_password: String,
+	new_password: String,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct ChangeEmailRequest {
+	new_email: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
+pub struct FeedbackRequest {
+	description: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct ReportPlayerRequest {
 	pub game_code: String,
 	pub username: String,
@@ -45,19 +73,7 @@ pub struct ReportPlayerRequest {
 	pub description: String,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct ChangePasswordRequest {
-	tmp_code: String,
-	old_password: String,
-	new_password: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FeedbackRequest {
-	description: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub enum ReportReason {
 	/// Stalling is automatically reported, and the player is kicked from the game if they don't play for 3 turns in a game.
 	Stalling,
@@ -84,7 +100,7 @@ impl std::fmt::Display for ReportReason {
 	}
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct StatsRequest {
 	is_singleplayer: bool,
 	won_game: Option<bool>,
@@ -101,7 +117,7 @@ pub struct StatsRequest {
 	total_card_num: Option<u32>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct SuspendRequest {
 	/// None means they get reinstated
 	duration: Option<Duration>,

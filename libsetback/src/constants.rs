@@ -46,9 +46,10 @@ pub fn public_api(path: &'static str) -> String {
 
 // server
 
-pub const ENV_SERVER_BIND_ADDR: &str  = "SERVER_BIND_ADDR";
+pub const ENV_SERVER_BIND_ADDR   : &str  = "SERVER_BIND_ADDR";
 pub const ENV_API_KEY            : &str  = "API_KEY";
 pub const ENV_API_BASE_URL       : &str  = "API_BASE_URL";
+pub const ENV_SETBACK_ENV        : &str  = "SETBACK_ENV";
 pub const API_HEADER_API_KEY     : &str  = "x-api-key";
 /// Maximum number of games to be sent in a request over the network
 pub const MAX_GAME_LIST          : u8    = 127;
