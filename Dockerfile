@@ -10,7 +10,6 @@
 ARG PROFILE=debug
 ARG PACKAGE
 ARG PORT
-ARG RUNTIME_DIR
 
 # =============================================================================
 # Stage 1: chef — base builder with cargo-chef installed
@@ -60,24 +59,7 @@ RUN cargo build \
     -p "$PACKAGE"
 
 # =============================================================================
-# Stage 4: assets — stages the optional runtime directory
-#
-# RUNTIME_DIR is a path relative to the repo root (e.g. "migrations" or
-# "frontend"). A leading slash is tolerated. If it is empty (e.g. for the game
-# server) nothing is copied and /assets is simply empty, so the COPY in the
-# runtime stage never fails.
-# =============================================================================
-FROM builder AS assets
-
-ARG RUNTIME_DIR
-
-RUN mkdir -p /assets \
-    && if [ -n "$RUNTIME_DIR" ]; then \
-        cp -r "./${RUNTIME_DIR#/}" /assets/; \
-    fi
-
-# =============================================================================
-# Stage 5: runtime — small final image
+# Stage 4: runtime — small final image
 # =============================================================================
 FROM debian:bookworm-slim AS runtime
 
@@ -103,10 +85,6 @@ WORKDIR /setback
 COPY --from=builder --chown=setback:setback \
     /build/target/${PROFILE}/${PACKAGE} \
     /setback/app
-
-# Copy the runtime directory (if any) next to the binary, e.g.
-# /setback/migrations or /setback/frontend. Empty for services without one.
-COPY --from=assets --chown=setback:setback /assets/ /setback/
 
 USER setback
 

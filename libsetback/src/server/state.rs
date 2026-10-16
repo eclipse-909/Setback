@@ -45,6 +45,7 @@ impl State {
 		})
 	}
 	
+	/// Returns game code
 	pub async fn create_lobby(
 		self: Arc<Self>,
 		host: ClientConnection,
@@ -58,6 +59,7 @@ impl State {
 		self.insert_lobby(handle, code, password).await
 	}
 	
+	/// Returns game code
 	async fn insert_lobby(
 		&self,
 		client_tx: ClientSender,

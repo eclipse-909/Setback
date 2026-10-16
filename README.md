@@ -7,7 +7,7 @@ This mono-repo contains the source code for all Setback programs, server and cli
 - [libsetback](libsetback/README.md) – Library for shared code for all packages.
 - [server](server/README.md) – Dedicated game server to host multiplayer games.
 - [setback](setback/README.md) – Setback game client.
-- [website](website/README.md) – Frontend website for Setback and account management.
+- [website](website/README.md) – Frontend website for Setback, account management and web game client.
 
 The Setback game client aims to be cross-platform. Primarily targeting desktop and web, and maybe expanding to mobile.
 
@@ -19,6 +19,7 @@ The following should be installed
   * Nightly compiler
   * llvm-tools-preview
   * cargo-llvm-cov
+* [Sqlx-cli](https://github.com/transact-rs/sqlx/blob/main/sqlx-cli/README.md)
 * [Just](https://just.systems/man/en/installation.html)
 * [Dioxus CLI](https://dioxuslabs.com/learn/0.7/getting_started/) and [system dependencies](https://dioxuslabs.com/learn/0.7/getting_started/)
 * [Docker](https://docs.docker.com/engine/install/)

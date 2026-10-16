@@ -61,13 +61,13 @@ pub const MAX_CLIENTS            : usize = 10_000;
 pub const MAX_GAMES              : usize = 10_000;
 /// Time between receiving a SIGINT and process exiting.
 pub const TIMEOUT_STRIKES        : u8    = 3;
-pub const GAME_CODE_LEN          : usize = 6;
+pub const GAME_CODE_LEN          : usize = 7;
 pub const SSP_VERSION            : Version = Version { major: 0, minor: 1, patch: 0 };
 pub const SHUTDOWN_TIMEOUT       : Duration = Duration::from_hours(4);
-pub const GAME_CODE_ALPHABET     : [char; 62] = [
+pub const GAME_CODE_ALPHABET     : [char; 36] = [
 	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-	'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
-	'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
+	// 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm',
+	// 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 	'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M',
 	'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
 ];

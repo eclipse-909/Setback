@@ -33,6 +33,7 @@ nanoid = { workspace = true, optional = true }
 rustls.workspace = true
 scc = { workspace = true, optional = true }
 sockudo-ws.workspace = true
+sqlx = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-rustls.workspace = true
 tokio-util.workspace = true
@@ -42,7 +43,7 @@ webpki-roots.workspace = true
 trybuild.workspace = true
 
 [features]
-server = ["dep:nanoid", "dep:scc"]
+server = ["dep:nanoid", "dep:scc", "dep:sqlx"]
 http = ["dep:tower-http"]
 test-libsetback = []
 

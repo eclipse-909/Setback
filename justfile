@@ -14,6 +14,9 @@ cloc:
 		--not-match-d=".*\.bak" \
 		.
 
+prepare:
+	cargo sqlx prepare --workspace
+
 # start compose
 dbup:
 	{{compose}} up -d --wait
