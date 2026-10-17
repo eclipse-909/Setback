@@ -3,7 +3,7 @@ use {
 	axum::{Json, extract::{Query, State, ConnectInfo}},
 	http::{StatusCode, HeaderMap},
 	setback::*,
-	sqlx::MySqlPool,
+	sqlx::PgPool,
 	std::{
 		collections::HashMap,
 		net::{IpAddr, SocketAddr},
@@ -31,7 +31,7 @@ fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
 	tag = "public"
 )]
 async fn api_begin_signup(
-	State(db): State<MySqlPool>,
+	State(db): State<PgPool>,
 	Json(creds): Json<SignupRequest>,
 ) -> Result<()> {
 	todo!()
@@ -52,7 +52,7 @@ async fn api_begin_signup(
 	tag = "public"
 )]
 async fn api_finish_signup(
-	State(db): State<MySqlPool>,
+	State(db): State<PgPool>,
 	Query(params): Query<HashMap<String, String>>,
 	ConnectInfo(peer): ConnectInfo<SocketAddr>,
 	headers: HeaderMap,
@@ -72,7 +72,7 @@ async fn api_finish_signup(
 	tag = "public"
 )]
 async fn api_login(
-	State(db): State<MySqlPool>,
+	State(db): State<PgPool>,
 	ConnectInfo(peer): ConnectInfo<SocketAddr>,
 	headers: HeaderMap,
 	Json(creds): Json<LoginRequest>,
@@ -91,7 +91,7 @@ async fn api_login(
 	tag = "public"
 )]
 async fn api_refresh_token(
-	State(db): State<MySqlPool>,
+	State(db): State<PgPool>,
 	Json(creds): Json<RefreshTokenRequest>,
 ) -> Result<Json<RefreshTokenResponse>> {
 	todo!()

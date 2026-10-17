@@ -10,8 +10,8 @@ use {
 	base64::{Engine, engine::general_purpose::STANDARD},
 	http::StatusCode,
 	setback::*,
-	sqlx::{mysql::MySqlPoolOptions, Executor},
-	std::{env, fs, path::PathBuf, net::SocketAddr},
+	sqlx::{postgres::PgPoolOptions, Executor},
+	std::{env, fs, path::PathBuf, net::SocketAddr, process::exit},
 	utoipa::OpenApi,
 	utoipa_axum::router::OpenApiRouter as Router,
 	utoipa_swagger_ui::SwaggerUi,
@@ -19,13 +19,33 @@ use {
 
 #[tokio::main]
 async fn main() {
+	if env::args().any(|a| a == "--health") {
+		let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+			if reqwest::get("http://localhost/api/healthcheck")
+				.await
+				.ok()?
+				.status() == StatusCode::OK
+			{
+				Some(())
+			} else {
+				None
+			}
+		}).await;
+		
+		let code = if matches!(result, Ok(Some(()))) { 0 } else { 1 };
+		exit(code);
+	}
+	
 	init_tracing!();
 	
 	let state = AppState {
-		db: MySqlPoolOptions::new()
+		db: PgPoolOptions::new()
 			.max_connections(8)
 			.after_connect(|conn, _meta| Box::pin(async move {
-				conn.execute("set time_zone = '+00:00';").await?;
+				conn.execute(r#"
+					set time_zone = '+00:00';
+					update game set ended_at = current_timestamp where ended_at is null;
+				"#).await?;
 				Ok(())
 			}))
 			.connect(env::var(ENV_DB_URL).unwrap().as_str())

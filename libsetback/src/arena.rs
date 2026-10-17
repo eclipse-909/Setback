@@ -6,7 +6,7 @@ use {
 		marker::PhantomData,
 		mem::MaybeUninit,
 		ops::Deref,
-		ptr::{self, NonNull},
+		ptr::NonNull,
 		collections::LinkedList,
 	},
 	tracing::debug,
@@ -47,14 +47,68 @@ impl<'arena> Arena<'arena> {
 	/// Returns a reference to object whose lifetime is the same as the arena.
 	/// # Panic
 	/// Panics if the underlying heap allocation fails (if your system runs out of memory or something similar).
+	pub fn alloc<T>(&self, object: T) -> &'arena T {
+		// SAFETY:
+		// memory is initialized with object
+		unsafe {
+			let p = self.allocator.allocate(Layout::new::<T>()).unwrap().cast();
+			p.write(object);
+			p.as_ref()
+		}
+	}
+	
+	/// Allocates at least bytes.
+	/// Returns a reference to uninitialized memory whose lifetime is the same as the arena.
+	/// # Panic
+	/// Panics if the underlying heap allocation fails (if your system runs out of memory or something similar).
+	/// # Safety
+	/// You must initialize the memory before reading it
+	pub unsafe fn alloc_uninit<T>(&self, bytes: usize) -> *mut T {
+		self.allocator
+			.allocate(Layout::from_size_align(bytes, 1).unwrap())
+			.unwrap()
+			.cast()
+			.as_mut()
+	}
+	
+	/// Allocates at least enough space for object and moves object into that space.
+	/// Returns a reference to object whose lifetime is the same as the arena.
+	/// # Panic
+	/// Panics if the underlying heap allocation fails (if your system runs out of memory or something similar).
 	#[allow(clippy::mut_from_ref)]
-	pub fn alloc<T: Sized>(&self, object: T) -> &mut T {
+	pub fn alloc_mut<T>(&self, object: T) -> &'arena mut T {
 		// SAFETY:
 		// memory is initialized with object
 		unsafe {
 			let mut p = self.allocator.allocate(Layout::new::<T>()).unwrap().cast();
 			p.write(object);
 			p.as_mut()
+		}
+	}
+	
+	/// Allocates at least enough space for object and moves object into that space.
+	/// Returns a Box to object whose lifetime is the same as the arena.
+	pub fn boxed<T>(&'arena self, object: T) -> Box<T, &'arena ArenaAlloc<'arena>> {
+		Box::new_in(object, self)
+	}
+	
+	/// Returns an empty Vec whose lifetime is the same as the arena that contains its elements.
+	pub fn vec<T>(&'arena self) -> Vec<T, &'arena ArenaAlloc<'arena>> {
+		Vec::new_in(self)
+	}
+	
+	/// Copies the string slice into the arena and returns the arena-allocated string slice.
+	pub fn string(&'arena self, str: &str) -> &'arena str {
+		// SAFETY:
+		// p is initialized via copy_nonoverlapping.
+		// str and p do not overlap because str already existed and p was just allocated.
+		// from_raw_parts should hopefully work.
+		// str is already utf-8 valid therefore p is.
+		unsafe {
+			let p = self.alloc_uninit(str.len());
+			std::ptr::copy_nonoverlapping(str.as_ptr(), p, str.len());
+			let s = std::slice::from_raw_parts(p, str.len());
+			str::from_utf8_unchecked(s)
 		}
 	}
 	
@@ -76,8 +130,19 @@ impl<'arena> Arena<'arena> {
 
 impl<'arena> Deref for Arena<'arena> {
 	type Target = ArenaAlloc<'arena>;
+	
 	fn deref(&self) -> &Self::Target {
 		&self.allocator
+	}
+}
+
+impl<'arena, T> AsRef<T> for Arena<'arena>
+where
+	T: ?Sized,
+	<Self as Deref>::Target: AsRef<T>,
+{
+	fn as_ref(&self) -> &T {
+		self.deref().as_ref()
 	}
 }
 
@@ -155,47 +220,6 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 
 	/// Memory cannot be deallocated individually from an arena. This function is a no-op.
 	unsafe fn deallocate(&self, _ptr: NonNull<u8>, _layout: Layout) {}
-
-	/// Same as [Allocator::grow] but no memory is deallocated here.
-	unsafe fn grow(
-		&self,
-		ptr: NonNull<u8>,
-		old_layout: Layout,
-		new_layout: Layout,
-	) -> Result<NonNull<[u8]>, AllocError> {
-		debug_assert!(
-			new_layout.size() >= old_layout.size(),
-			"`new_layout.size()` must be greater than or equal to `old_layout.size()`"
-		);
-		debug!("Arena is growing to {} bytes", new_layout.size());
-		let new_ptr = self.allocate(new_layout)?;
-		// SAFETY:
-		// see debug assertion above
-		unsafe {
-			ptr::copy_nonoverlapping(ptr.as_ptr(), new_ptr.cast().as_ptr(), old_layout.size());
-		}
-		Ok(new_ptr)
-	}
-
-	/// Same as [Allocator::grow_zeroed] but no memory is deallocated here.
-	unsafe fn grow_zeroed(
-		&self,
-		ptr: NonNull<u8>,
-		old_layout: Layout,
-		new_layout: Layout,
-	) -> Result<NonNull<[u8]>, AllocError> {
-		debug_assert!(
-			new_layout.size() >= old_layout.size(),
-			"`new_layout.size()` must be greater than or equal to `old_layout.size()`"
-		);
-		let new_ptr = self.allocate_zeroed(new_layout)?;
-		// SAFETY:
-		// see debug assertion above
-		unsafe {
-			ptr::copy_nonoverlapping(ptr.as_ptr(), new_ptr.cast().as_ptr(), old_layout.size());
-		}
-		Ok(new_ptr)
-	}
 
 	/// Shrinking is not supported in Arenas because individual objects are not deallocated.
 	/// Instead, this function asserts that the [new_layout]'s size is less than or equal to that of [old_layout].

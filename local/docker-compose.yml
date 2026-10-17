@@ -1,6 +1,6 @@
 # docker-compose.yml — local development, hybrid mode
 #
-# Docker runs the infrastructure (Traefik, MySQL, phpMyAdmin).
+# Docker runs the infrastructure (Traefik, PostgreSql).
 # The Rust apps run natively on the host with `cargo run`, so there are no
 # image builds and compiles are incremental.
 #
@@ -9,7 +9,7 @@
 # Prerequisites:
 #   - Self-signed certs in ./local/certs/cert.pem and ./local/certs/key.pem
 #     (the cert needs a subjectAltName of DNS:localhost)
-#   - .env.local with the db credentials (MYSQL_ROOT_PASSWORD, ...)
+#   - .env.local with the db credentials
 #
 # Host ports the native apps must listen on (bind to 0.0.0.0, not 127.0.0.1,
 # so the Traefik container can reach them):
@@ -21,8 +21,7 @@
 #   https://localhost        → Traefik → api    (host :8000)   path /api/*
 #   wss://localhost:42069    → Traefik → server (host :42070)
 #   http://localhost:8080    → Traefik dashboard (insecure, no auth)
-#   http://localhost:8081    → phpMyAdmin
-#   127.0.0.1:3306           → MySQL
+#   127.0.0.1:5432           → PostgreSql
 
 name: setbackd
 
@@ -79,37 +78,24 @@ services:
       - "--accesslog.fields.headers.defaultmode=drop"
 
   # ---------------------------------------------------------------------------
-  # MySQL database
+  # Postgres database
   # ---------------------------------------------------------------------------
   db:
-    image: mysql:8.4
+    image: postgres:18-alpine
     container_name: db
     restart: unless-stopped
     env_file:
       - .env.local
     ports:
-      - "127.0.0.1:3306:3306"
+      - "127.0.0.1:5432:5432"
     volumes:
-      - db_data:/var/lib/mysql
+      - db_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # ---------------------------------------------------------------------------
-  # phpMyAdmin — database UI (direct port, not behind Traefik)
-  # ---------------------------------------------------------------------------
-  phpmyadmin:
-    image: phpmyadmin:alpine
-    container_name: phpmyadmin
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8081:80"
-    depends_on:
-      db:
-        condition: service_healthy
+      test: [ "CMD-SHELL", "pg_isready -U setback -d setback-db" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 configs:
   traefik_dynamic:

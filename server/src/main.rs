@@ -36,7 +36,14 @@ fn main() {
 	
 	rt.block_on(async move {
 		if env::args().any(|a| a == "--health") {
-			exit(health_check().await);
+			let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+				let mut ws = ws_local_connect().await.ok()?;
+				ws.close(1000, "healthcheck").await.ok()?;
+				Some(())
+			}).await;
+			
+			let code = if matches!(result, Ok(Some(()))) { 0 } else { 1 };
+			exit(code);
 		}
 		
 		let state = State::new();

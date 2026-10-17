@@ -42,7 +42,7 @@ services:
     ports:
       - "42069"
     healthcheck:
-      test: [ "CMD", "/setback/app", "--health" ]
+      test: [ "CMD", "/setback/service", "--health" ]
       interval: 30s
       timeout: 3s
       retries: 3

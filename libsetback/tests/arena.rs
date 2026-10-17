@@ -14,7 +14,7 @@ mod tests {
 	fn test_default() {
 		let arena = Arena::new();
 		let one = arena.alloc(1);
-		let two = Box::new_in(2, &*arena);
+		let two = arena.boxed(2);
 		assert_eq!(*one + *two, 3);
 	}
 	
@@ -24,9 +24,9 @@ mod tests {
 		const ARR2_LEN: usize = 20;
 		const ARR3_LEN: usize = 1024;
 		let arena = Arena::new();
-		let arr1 = arena.alloc([0; ARR1_LEN]);
-		let arr2 = arena.alloc([0; ARR2_LEN]);
-		let arr3 = arena.alloc([0; ARR3_LEN]);
+		let arr1 = arena.alloc_mut([0; ARR1_LEN]);
+		let arr2 = arena.alloc_mut([0; ARR2_LEN]);
+		let arr3 = arena.alloc_mut([0; ARR3_LEN]);
 		for (i, v) in arr1.iter_mut().enumerate() {
 			*v = i;
 		}
@@ -51,9 +51,9 @@ mod tests {
 	#[test]
 	fn test_vec_in_arena() {
 		let arena = Arena::new();
-		let mut vec1 = Vec::new_in(&*arena);
-		let mut vec2 = Vec::new_in(&*arena);
-		let mut vec3 = Vec::new_in(&*arena);
+		let mut vec1 = arena.vec();
+		let mut vec2 = arena.vec();
+		let mut vec3 = arena.vec();
 		for i in 0..32 {
 			vec1.push(i);
 		}
@@ -84,9 +84,9 @@ mod tests {
 	#[test]
 	fn test_dropping() {
 		let arena = Arena::new();
-		let drop_ref = arena.alloc(DropStruct(0));
+		let drop_ref = arena.alloc_mut(DropStruct(0));
 		drop_ref.0 = 1;
-		let mut drop_box = Box::new_in(DropStruct(0), &*arena);
+		let mut drop_box = arena.boxed(DropStruct(0));
 		drop_box.0 = 1;
 		drop(drop_box);
 		drop(arena);

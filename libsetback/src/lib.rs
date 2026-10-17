@@ -20,8 +20,6 @@ mod ws;
 
 #[cfg(feature = "server")]
 mod server;
-#[cfg(feature = "server")]
-mod health;
 
 pub use {
 	arena::*,
@@ -34,12 +32,9 @@ pub use {
 	player::*,
 	runtime::*,
 	ssp::*,
-	ws::{WebSocketeer, SspTx, FallbackRx},
+	ws::{WebSocketeer, SspTx, FallbackRx, ws_local_connect},
 	telemetry::*,
 };
 
 #[cfg(feature = "server")]
-pub use {
-	server::*,
-	health::*,
-};
+pub use server::*;
