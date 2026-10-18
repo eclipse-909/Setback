@@ -21,12 +21,6 @@ services:
       - .env
     ports:
       - "8080"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/healthcheck"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
     deploy:
       update_config:
         order: start-first
@@ -41,14 +35,13 @@ services:
       - .env
     ports:
       - "42069"
-    healthcheck:
-      test: [ "CMD", "/setback/service", "--health" ]
-      interval: 30s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
     stop_signal: SIGINT
     stop_grace_period: 4h5m
     depends_on:
       api:
         condition: service_healthy
+    deploy:
+      update_config:
+        order: start-first
+        failure_action: rollback
+        parallelism: 1

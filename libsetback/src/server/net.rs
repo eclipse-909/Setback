@@ -52,7 +52,7 @@ impl ClientConnection {
 	/// This is used when someone first tries to connect to the server.
 	/// Their token will be validated. They are sent Ack if successful or Err
 	/// if unauthenticated.
-	pub async fn try_accept(tcp_stream: TcpStream, state: Arc<State>) {
+	pub async fn try_accept(tcp_stream: TcpStream, state: Arc<State>, api: &Api) {
 		debug!("Client is connecting to server");
 		let (mut reader, mut writer) = match ws::ws_accept(tcp_stream).await {
 			Ok(s) => s,
@@ -62,6 +62,7 @@ impl ClientConnection {
 			}
 		};
 
+		// auth handshake
 		let res = async {
 			// we can allow more time for authentication since this isn't delaying anything important
 			let ssp: Ssp = tokio::time::timeout(Duration::from_secs(8), ws::ws_next(&mut reader))
@@ -74,8 +75,11 @@ impl ClientConnection {
 			};
 			// validate version
 			version.check_compatible(SSP_VERSION)?;
+			
 			// validate token and get username
-			let response = state.api.get_username(auth_token.as_str()).await?;
+			let response = api.get_username(&auth_token).await?;
+			
+			// respond to user
 			ws::ws_send(&mut writer, &Ssp::new(Payload::Ack, CorrelationId::event())).await?;
 			Ok(response)
 		}.await;
@@ -110,7 +114,7 @@ impl ClientConnection {
 			return;
 		}
 		
-		let client = Self {
+		Self {
 			ssp_tx,
 			fallback_rx,
 			correlation_id: Self::INIT_CORRELATION_ID,
@@ -121,12 +125,11 @@ impl ClientConnection {
 			host: false,
 			timeout_strikes: 0,
 			state: state.clone(),
-		};
-		client.spawn_server_handler(state);
+		}.spawn_server_handler();
 	}
 
 	/// Used when the client is connected to the server but not in a lobby or a game
-	pub fn spawn_server_handler(mut self, state: Arc<State>) {
+	pub fn spawn_server_handler(mut self) {
 		tokio::spawn(async move {
 			loop {
 				let Some(res) = self.fallback_rx.recv().await else { return };
@@ -242,6 +245,8 @@ impl std::fmt::Debug for ClientConnection {
 impl Drop for ClientConnection {
 	fn drop(&mut self) {
 		// allows the owner to connect with one of their accounts after they disconnect from this one
+		//TODO profile this to make sure it doesn't hold up the thread.
+		// use tokio spawn_blocking if it does
 		self.state.owner_store.remove_sync(&self.owner_id);
 	}
 }

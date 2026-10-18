@@ -1,8 +1,8 @@
 #![feature(
 	const_format_args,
+	const_trait_impl,
 	slice_partition_dedup,
 	trait_alias,
-	const_trait_impl,
 )]
 
 mod arena;

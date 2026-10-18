@@ -1,6 +1,5 @@
 use {
 	crate::Version,
-	const_format::formatcp,
 	std::{
 		time::Duration,
 		env,
@@ -33,7 +32,7 @@ pub const TEST_AUTH_TOKEN          : &str = "test-auth-token";
 pub const APPLICATION_OCTET_STREAM : &str = "application/octet-stream";
 pub const URL_API_LOGIN            : &str = "/login";
 pub const ENV_SETBACK_HOST         : &str = "SETBACK_HOST";
-const ENV_PUBLIC_API_BASE_URL      : &str = "PUBLIC_API_BASE_URL";
+    const ENV_PUBLIC_API_BASE_URL  : &str = "PUBLIC_API_BASE_URL";
 pub const ENV_PUBLIC_SERVER_URL    : &str = "PUBLIC_SERVER_URL";
 
 /// Creates the absolute path to the public api. Path must start with a `/`.
@@ -46,6 +45,7 @@ pub fn public_api(path: &'static str) -> String {
 
 // server
 
+pub const ENV_DB_URL             : &str  = "DATABASE_URL";
 pub const ENV_SERVER_BIND_ADDR   : &str  = "SERVER_BIND_ADDR";
 pub const ENV_API_KEY            : &str  = "API_KEY";
 pub const ENV_API_BASE_URL       : &str  = "API_BASE_URL";
@@ -57,8 +57,9 @@ pub const NETWORK_TIMEOUT        : u64   = 4;
 pub const DEFAULT_TURN_TIME      : u8    = 30;
 pub const MAX_TURN_TIME_SERVER   : u8    = 120;
 pub const PAGE_SIZE              : usize = 0x1000;
-pub const MAX_CLIENTS            : usize = 10_000;
-pub const MAX_GAMES              : usize = 10_000;
+pub const DB_MAX_CONNECTIONS     : u32   = 16;
+pub const MAX_CLIENTS            : usize = 4096;
+pub const MAX_GAMES              : usize = 4096;
 /// Time between receiving a SIGINT and process exiting.
 pub const TIMEOUT_STRIKES        : u8    = 3;
 pub const GAME_CODE_LEN          : usize = 7;

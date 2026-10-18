@@ -7,7 +7,6 @@ use {
 pub struct AppState {
 	pub db: PgPool,
 	pub jwt_secret: Vec<u8>,
-	pub api_key_hash: [u8; 32]
 }
 
 impl axum::extract::FromRef<AppState> for PgPool {

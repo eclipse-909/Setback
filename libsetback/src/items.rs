@@ -1,8 +1,8 @@
 use {
-	arrayvec::ArrayVec,
 	crate::*,
+	arrayvec::ArrayVec,
 	serde::{Deserialize, Serialize},
-	std::fmt::{Display, Formatter, Debug},
+	std::fmt::{Debug, Display, Formatter},
 };
 
 /// Versions should try to follow SemVer and are considered compatible if the majors are the same
@@ -367,6 +367,38 @@ pub enum GameEvent {
 	/// The round is over, and the scores of the round are given for each team
 	RoundScores(RoundScores),
 	GameOver,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct LoggedGameEvent {
+	pub event: GameEvent,
+	pub timestamp_ms: i64
+}
+
+impl LoggedGameEvent {
+	pub fn append(&self, buf: &mut Vec<u8>) {
+		let header_idx = buf.len();
+		buf.push(0);
+		*buf = postcard::to_extend(self, std::mem::take(buf)).unwrap();
+		let size = buf.len() - header_idx - 1;
+		assert!(size < u8::MAX as usize);
+		buf[header_idx] = size as u8;
+	}
+	
+	pub fn decode_all(buf: &[u8]) -> Result<Vec<Self>, NetError> {
+		let mut cursor = 0;
+		let mut events = Vec::new();
+		while cursor < buf.len() {
+			let size = buf[cursor];
+			cursor += 1;
+			let end = cursor + size as usize;
+			let event = postcard::from_bytes(&buf[cursor..end])
+				.map_err(|_| NetError::ServerError)?;
+			events.push(event);
+			cursor = end;
+		}
+		Ok(events)
+	}
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

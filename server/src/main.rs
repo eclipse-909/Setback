@@ -7,24 +7,10 @@ use {
 		sync::Arc,
 		time::Instant,
 	},
+	sqlx::{Executor, postgres::PgPoolOptions},
 	tokio::net::TcpListener,
 	tracing::{error, info, warn},
 };
-
-macro_rules! crash {
-	($fmt:expr) => {{
-		error!($fmt);
-		_ = std::io::stdout().flush();
-		exit(1);
-	}};
-	($fmt:expr, $arg0:ident) => {
-		|$arg0| {
-			error!($fmt, $arg0);
-			_ = std::io::stdout().flush();
-			exit(1);
-		}
-	};
-}
 
 fn main() {
 	init_tracing!();
@@ -46,12 +32,18 @@ fn main() {
 			exit(code);
 		}
 		
-		let state = State::new();
-		
-		// docker compose should already guarantee this, so this is a redundancy check
-		state.api.healthcheck()
+		let db = PgPoolOptions::new()
+			.max_connections(DB_MAX_CONNECTIONS)
+			.after_connect(|conn, _meta| Box::pin(async move {
+				conn.execute("set time_zone = '+00:00';").await?;
+				Ok(())
+			}))
+			.connect(env::var(ENV_DB_URL).unwrap().as_str())
 			.await
-			.expect("Setback API healthcheck did not return 200");
+			.unwrap();
+		
+		let state = State::new(db);
+		let api = Api::new();
 		
 		tokio::select! {
 			res = tokio::signal::ctrl_c() => if let Err(e) = res {
@@ -59,7 +51,7 @@ fn main() {
 			} else {
 				info!("Terminating via SIGINT")
 			},
-			_ = tcp_listen(state) => unreachable!(),
+			_ = tcp_listen(state, api) => unreachable!(),
 		}
 	});
 
@@ -70,14 +62,14 @@ fn main() {
 	_ = std::io::stdout().flush();
 }
 
-async fn tcp_listen(state: Arc<State>) -> ! {
+async fn tcp_listen(state: Arc<State>, api: Api) -> ! {
 	let addr = env::var(ENV_SERVER_BIND_ADDR).unwrap();
 	let tcp_listener = TcpListener::bind(addr)
 		.await
-		.unwrap_or_else(crash!("Could not bind tcp listener. Error: {}", e));
+		.unwrap();
 	loop {
 		match tcp_listener.accept().await {
-			Ok((stream, _)) => ClientConnection::try_accept(stream, state.clone()).await,
+			Ok((stream, _)) => ClientConnection::try_accept(stream, state.clone(), &api).await,
 			Err(e) => warn!("Could not accept client. Error: {e}"),
 		}
 	}

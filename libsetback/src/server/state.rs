@@ -1,9 +1,10 @@
 use {
 	crate::*,
-	std::sync::Arc,
 	scc::{HashMap, HashSet},
+	sqlx::PgPool,
+	std::sync::Arc,
+	tokio::sync::mpsc::{Receiver, Sender, UnboundedReceiver},
 	tracing::error,
-	tokio::sync::mpsc::{Sender, Receiver, UnboundedReceiver},
 };
 
 #[derive(Hash, Eq, PartialEq)]
@@ -25,7 +26,7 @@ type GameStore = HashMap<GameKey, ClientSender>;
 /// Literally everything is owned by this state object,
 /// so it's passed around with an Arc.
 pub struct State {
-	pub api: Api,
+	pub db: PgPool,
 	pub owner_store: ClientStore,
 	pub_lobby_store: GameStore,
 	private_lobby_store: GameStore,
@@ -35,9 +36,9 @@ pub struct State {
 impl State {
 	/// You should only have one state object.
 	/// It's just too much effort to use singleton pattern.
-	pub fn new() -> Arc<Self> {
+	pub fn new(db: PgPool) -> Arc<Self> {
 		Arc::new(Self {
-			api: Api::new(),
+			db,
 			owner_store: HashSet::new(),
 			pub_lobby_store: HashMap::new(),
 			private_lobby_store: HashMap::new(),

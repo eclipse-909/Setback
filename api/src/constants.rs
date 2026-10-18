@@ -1,6 +1,5 @@
-pub const ENV_DB_URL              : &str = "DATABASE_URL";
 pub const ENV_JWT_SECRET          : &str = "API_JWT_SECRET";
-pub const ENV_API_BIND_ADDR: &str = "API_BIND_ADDR";
+pub const ENV_API_BIND_ADDR       : &str = "API_BIND_ADDR";
 pub const ENV_NO_REPLY_EMAIL_HOST : &str = "SETBACK_NO_REPLY_EMAIL_HOST";
 pub const ENV_NO_REPLY_EMAIL_USER : &str = "SETBACK_NO_REPLY_EMAIL_USER";
 pub const ENV_NO_REPLY_EMAIL_PASS : &str = "SETBACK_NO_REPLY_EMAIL_PASS";

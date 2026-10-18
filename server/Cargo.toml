@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 libsetback = { workspace = true, features = ["server"] }
+sqlx.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 

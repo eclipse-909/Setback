@@ -37,7 +37,6 @@ axum = "0.8.9"
 base64 = "0.23.1"
 bytes = "1.12.1"
 chrono = { version = "0.4.45", features = ["serde"] }
-const_format = "0.2.36"
 dioxus = "0.7.10"
 futures = "0.3.34"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
@@ -49,7 +48,7 @@ lettre = { version = "0.11.23", default-features = false, features = [
 	"builder",
 	"smtp-transport",
 	"tokio1-rustls",
-	"ring",
+	"aws-lc-rs",
 	"webpki-roots",
 ] }
 libsetback = { path = "./libsetback" }
@@ -60,10 +59,9 @@ reqwest = { version = "0.13.5", features = ["json", "rustls"] }
 rustls = "0.23.45"
 scc = "3.8.8"
 serde = { version = "1.0.229", features = ["derive"] }
-#serde_json = "1.0.154"
 sha2 = "0.11.1"
 # TODO: sockudo-ws author recommends mimalloc feature for production, investigate
-sockudo-ws = { version = "3.1.0", features = ["rustls-webpki-roots", "ring"] }
+sockudo-ws = { version = "3.1.0", features = ["rustls-webpki-roots", "aws_lc_rs"] }
 sqlx = { version = "0.9.0", default-features = false, features = [
 	"runtime-tokio",
 	"postgres",

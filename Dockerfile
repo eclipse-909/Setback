@@ -57,4 +57,8 @@ COPY --from=builder \
 
 USER setback
 EXPOSE ${PORT}
+
+HEALTHCHECK --timeout=3s --start-period=5s \
+	CMD ["/setback/service", "--health"]
+
 ENTRYPOINT ["/setback/service"]

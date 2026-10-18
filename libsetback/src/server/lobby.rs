@@ -55,7 +55,7 @@ impl Lobby {
 						Some(message) = Player::try_recv_fallback(&mut self.lobby_state.players) => {
 							self.handle_fallback(message, &mut start_countdown);
 						}
-						Some(conn) = join_rx.recv() => self.set_next_client(conn, state.clone()),
+						Some(conn) = join_rx.recv() => self.set_next_client(conn),
 						Some(err) = err_q.recv() => self.handle_err(err),
 						Some(()) = await_countdown(&mut start_countdown) => {
 							self.lobby_state.notify_all(LobbyPayload::StartGame);
@@ -91,7 +91,7 @@ impl Lobby {
 	/// If there are any HumanEmpty slots, the conn will take up the next slot.
 	/// If there are no HumanEmpty slots, the conn will replace an AI.
 	/// If there are no available slots, the conn will be sent back to the server.
-	fn set_next_client(&mut self, mut conn: Box<ClientConnection>, state: Arc<State>) {
+	fn set_next_client(&mut self, mut conn: Box<ClientConnection>) {
 		let mut next_idx = usize::MAX;
 		for (i, player) in self.lobby_state.players.iter_mut().enumerate() {
 			match player.player_type {
@@ -118,7 +118,7 @@ impl Lobby {
 		}
 		error!(cx = %self.cx(), "A player tried joining but the game was at capacity");
 		_ = conn.send_err(Error::GameAtCapacity);
-		conn.spawn_server_handler(state);
+		conn.spawn_server_handler();
 	}
 	
 	fn handle_fallback(

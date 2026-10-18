@@ -21,15 +21,11 @@ use {
 async fn main() {
 	if env::args().any(|a| a == "--health") {
 		let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
-			if reqwest::get("http://localhost/api/healthcheck")
+			(reqwest::get("http://localhost/api/healthcheck")
 				.await
 				.ok()?
 				.status() == StatusCode::OK
-			{
-				Some(())
-			} else {
-				None
-			}
+			).then_some(())
 		}).await;
 		
 		let code = if matches!(result, Ok(Some(()))) { 0 } else { 1 };
@@ -40,7 +36,7 @@ async fn main() {
 	
 	let state = AppState {
 		db: PgPoolOptions::new()
-			.max_connections(8)
+			.max_connections(DB_MAX_CONNECTIONS)
 			.after_connect(|conn, _meta| Box::pin(async move {
 				conn.execute(r#"
 					set time_zone = '+00:00';
@@ -52,7 +48,6 @@ async fn main() {
 			.await
 			.unwrap(),
 		jwt_secret: STANDARD.decode(env::var(ENV_JWT_SECRET).unwrap()).unwrap(),
-		api_key_hash: api_key::sha256(&env::var(ENV_API_KEY).unwrap()),
 	};
 	
 	sqlx::migrate!().run(&state.db).await.unwrap();
@@ -62,7 +57,6 @@ async fn main() {
 		.nest("/account", api_account_routes(state.clone()))
 		.route_layer(axum::middleware::from_fn_with_state(state.clone(), rate_limit::require_rate_limiter))
     	.nest("/admin", api_admin_routes(state.clone()))
-		.nest("/server", api_server_routes(state.clone()))
 		.route_layer(http_trace_layer())
 		.route("/healthcheck", get(StatusCode::OK));
 	

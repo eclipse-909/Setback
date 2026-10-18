@@ -1,16 +1,6 @@
 create type mod_action  as enum('Suspend','Unsuspend','Warn');
 create type game_mode   as enum('Sp','Mp');
 create type report_type as enum('Stalling','Hacking','Cheating');
-create type game_event  as enum(
-	'Init',
-	'PlayerBid',
-	'PlayerPlayedCard',
-	'PromptBid',
-	'PromptCard',
-	'DealCards',
-	'RoundScores',
-	'GameOver'
-);
 
 create table profile(
 	profile_id      bigint generated always as identity primary key,
@@ -140,51 +130,15 @@ create table feedback(
 );
 
 create table game(
-	game_id    bigint generated always as identity primary key,
+	game_id    uuid primary key,
 	game_code  varchar(7)  not null,
 	mode       game_mode   not null,
+	events     bytea       not null,
 	started_at timestamptz not null default now(),
 	ended_at   timestamptz
 );
 
 create unique index game_index on game(game_code) where ended_at is null;
-
--- TODO game_log should be partitioned by created_at
-create table game_log(
-	log_id        bigint generated always as identity,
-	game_id       bigint      not null references game(game_id) on delete cascade,
-	event_type    game_event  not null,
-	event_version smallint    not null,
-	game_event    bytea       not null,
-	created_at    timestamptz not null default current_timestamp,
-
-	primary key (log_id, created_at)
-) partition by range (created_at);
-
-create index game_log_index on game_log(game_id, log_id);
-create table game_log_default partition of game_log default;
-
-create function ensure_game_log_partitions(months_ahead int default 3)
-	returns void language plpgsql as $$
-declare
-	start_d timestamptz;
-	end_d   timestamptz;
-begin
-	for i in 0..months_ahead loop
-		start_d := (date_trunc('month', now() at time zone 'utc') + make_interval(months => i)) at time zone 'utc';
-		end_d   := (date_trunc('month', now() at time zone 'utc') + make_interval(months => i + 1)) at time zone 'utc';
-
-		execute format(
-			'create table if not exists %I partition of game_log for values from (%L) to (%L)',
-			'game_log_' || to_char(start_d at time zone 'utc', 'YYYY_MM'),
-			start_d,
-			end_d
-		);
-	end loop;
-end;
-$$;
-
-select ensure_game_log_partitions(3);
 
 create table game_player(
 	game_id    bigint    not null references game(game_id) on delete cascade,

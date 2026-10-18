@@ -2,11 +2,12 @@ use {
 	crate::*,
 	arrayvec::ArrayVec,
 	futures::FutureExt,
+	sqlx::types::chrono::Utc,
 	std::{
 		pin::Pin,
+		sync::Arc,
 		task::{Context, Poll},
 		time::Duration,
-		sync::Arc,
 	},
 	tokio::{
 		sync::mpsc::*,
@@ -54,7 +55,7 @@ impl GameState {
 	) {
 		debug!(cx = %self.cx(), "Starting game");
 		tokio::spawn(async move {
-			let mut client_io_fut = self.advance_game(ClientIOResult::None, &state);
+			let mut client_io_fut = self.advance_game(ClientIOResult::None);
 			loop {
 				tokio::select! {
 					client_io_res = &mut client_io_fut => {
@@ -71,13 +72,13 @@ impl GameState {
 									PlayerType::HumanConnection {conn} => Some(conn),
 									_ => None,
 								})
-								.for_each(|conn| conn.spawn_server_handler(state.clone()));
+								.for_each(|conn| conn.spawn_server_handler());
 							return;
 						}
-						client_io_fut = self.advance_game(client_io_res, &state);
+						client_io_fut = self.advance_game(client_io_res);
 					}
-					message = Player::try_recv_fallback(&mut self.lobby_state.players) => self.handle_fallback(message, &state),
-					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn, state.clone()),
+					message = Player::try_recv_fallback(&mut self.lobby_state.players) => self.handle_fallback(message),
+					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn),
 					Some((idx, err)) = err_q.recv() => {
 						match err {
 							NetError::Disconnected => self.disconnect_player(idx, true),
@@ -89,7 +90,7 @@ impl GameState {
 		});
 	}
 	
-	fn advance_game(&mut self, io_res: ClientIOResult, state: &Arc<State>) -> ClientIOFut {
+	fn advance_game(&mut self, io_res: ClientIOResult) -> ClientIOFut {
 		match &io_res {
 			ClientIOResult::NotifyCardPlayed(play_result) => {
 				match play_result {
@@ -136,8 +137,8 @@ impl GameState {
 				}));
 				ClientIOFut::None
 			}
-			GameLoopState::Bidding => self.prompt::<Bid>(io_res, state),
-			GameLoopState::Playing => self.prompt::<Card>(io_res, state),
+			GameLoopState::Bidding => self.prompt::<Bid>(io_res),
+			GameLoopState::Playing => self.prompt::<Card>(io_res),
 			GameLoopState::GameOver => {
 				self.loop_state = GameLoopState::Terminated;
 				self.lobby_state.notify_all(GamePayload::GameEvent(GameEvent::GameOver));
@@ -181,7 +182,7 @@ impl GameState {
 	
 	// these functions are not marked async because we don't want to move self into the futures they return
 	
-	fn prompt<T: PromptResult>(&mut self, io_res: ClientIOResult, state: &Arc<State>) -> ClientIOFut {
+	fn prompt<T: PromptResult>(&mut self, io_res: ClientIOResult) -> ClientIOFut {
 		match T::match_io_res_prompt(io_res) {
 			Some((prompt_result, prompt_state)) => match prompt_result {
 				Ok(value) => {
@@ -216,7 +217,7 @@ impl GameState {
 										description: "Automatically reported for violating 3-strikes policy".to_string(),
 									};
 									// the player reports themselves which I think is very funny
-									self.report_player(self.turn_idx, report, CorrelationId {id: 0, end: true}, state);
+									self.report_player(self.turn_idx, report, CorrelationId {id: 0, end: true});
 									// yeet bozo
 									self.disconnect_player(self.turn_idx, false);
 								}
@@ -264,7 +265,6 @@ impl GameState {
 	fn rejoin_player(
 		&mut self,
 		mut conn: Box<ClientConnection>,
-		state: Arc<State>
 	) {
 		if conn.account_id != 0 && let Some(player_idx) = self
 			.lobby_state
@@ -285,7 +285,7 @@ impl GameState {
 			return;
 		}
 		_ = conn.send_err(Error::CannotRejoin);
-		conn.spawn_server_handler(state);
+		conn.spawn_server_handler();
 	}
 	
 	fn disconnect_player(&mut self, idx: u8, allow_reconnect: bool) {
@@ -302,7 +302,7 @@ impl GameState {
 		self.lobby_state.notify_all(GamePayload::PlayerDisconnected {player_idx: idx});
 	}
 	
-	fn handle_fallback(&mut self, message: Option<(u8, Result<Ssp, NetError>)>, state: &Arc<State>) {
+	fn handle_fallback(&mut self, message: Option<(u8, Result<Ssp, NetError>)>) {
 		let Some((player_idx, message)) = message else {
 			self.loop_state = GameLoopState::Terminated;
 			return;
@@ -312,7 +312,7 @@ impl GameState {
 			Err(e) => return self.lobby_state.err_q.send((player_idx, e)).unwrap(),
 		};
 		match ssp.payload.try_game() {
-			Ok(GamePayload::ReportPlayer(report)) => self.report_player(player_idx, report, ssp.correlation_id, state),
+			Ok(GamePayload::ReportPlayer(report)) => self.report_player(player_idx, report, ssp.correlation_id),
 			Ok(GamePayload::LeaveGame) => self.disconnect_player(player_idx, false),
 			_ => {}
 		}
@@ -323,7 +323,6 @@ impl GameState {
 		reporter_idx: u8,
 		report: ReportPlayerRequest,
 		correlation_id: CorrelationId,
-		state: &Arc<State>,
 	) {
 		let target_is_human = matches!(
 			self.lobby_state
@@ -344,13 +343,12 @@ impl GameState {
 			return;
 		}
 		let ssp_tx = conn.ssp_tx().clone();
-		let state = state.clone();
 		tokio::spawn(async move {
 			let response = async move {
 				// DontLikePlayer isn't a real report reason,
 				// it's just to make players feel better that they think they can report people they don't like.
 				if !matches!(report.reason, ReportReason::DontLikePlayer) {
-					state.api.report_player(report).await?;
+					todo!("insert report into db");
 				}
 				Ok(())
 			}.await;
@@ -365,6 +363,18 @@ impl GameState {
 				}
 			}
 		});
+	}
+	
+	fn log_event(&mut self, event: GameEvent, buf: &mut Vec<u8>) {
+		LoggedGameEvent {
+			event,
+			timestamp_ms: Utc::now().timestamp_millis(),
+		}.append(buf);
+	}
+	
+	fn log_flush(&mut self, buf: &mut Vec<u8>) {
+		todo!("append buffer to game.events");
+		buf.clear();
 	}
 	
 	/// Don't use this, this is just to prevent errors in the ide

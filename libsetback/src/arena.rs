@@ -7,7 +7,6 @@ use {
 		mem::MaybeUninit,
 		ops::Deref,
 		ptr::NonNull,
-		collections::LinkedList,
 	},
 	tracing::debug,
 };
@@ -24,7 +23,7 @@ impl<'arena> Arena<'arena> {
 		Self {
 			allocator: ArenaAlloc {
 				_phantom: PhantomData,
-				segments: UnsafeCell::new(LinkedList::new()),
+				segments: UnsafeCell::new(Vec::new()),
 				offset: Cell::new(0),
 				cap: 0,
 			}
@@ -57,20 +56,6 @@ impl<'arena> Arena<'arena> {
 		}
 	}
 	
-	/// Allocates at least bytes.
-	/// Returns a reference to uninitialized memory whose lifetime is the same as the arena.
-	/// # Panic
-	/// Panics if the underlying heap allocation fails (if your system runs out of memory or something similar).
-	/// # Safety
-	/// You must initialize the memory before reading it
-	pub unsafe fn alloc_uninit<T>(&self, bytes: usize) -> *mut T {
-		self.allocator
-			.allocate(Layout::from_size_align(bytes, 1).unwrap())
-			.unwrap()
-			.cast()
-			.as_mut()
-	}
-	
 	/// Allocates at least enough space for object and moves object into that space.
 	/// Returns a reference to object whose lifetime is the same as the arena.
 	/// # Panic
@@ -86,6 +71,19 @@ impl<'arena> Arena<'arena> {
 		}
 	}
 	
+	/// Allocates at least bytes.
+	/// Returns a reference to uninitialized memory whose lifetime is the same as the arena.
+	/// # Panic
+	/// Panics if the underlying heap allocation fails (if your system runs out of memory or something similar).
+	/// # Safety
+	/// You must initialize the memory before reading it
+	pub fn alloc_uninit<T>(&self, bytes: usize) -> NonNull<T> {
+		self.allocator
+			.allocate(Layout::from_size_align(bytes, 1).unwrap())
+			.unwrap()
+			.cast()
+	}
+	
 	/// Allocates at least enough space for object and moves object into that space.
 	/// Returns a Box to object whose lifetime is the same as the arena.
 	pub fn boxed<T>(&'arena self, object: T) -> Box<T, &'arena ArenaAlloc<'arena>> {
@@ -97,6 +95,12 @@ impl<'arena> Arena<'arena> {
 		Vec::new_in(self)
 	}
 	
+	/// Returns an empty Vec with initial capacity whose lifetime is the same as the arena that contains its elements.
+	/// Capacity is the number of elements, not the number of bytes.
+	pub fn vec_with_capacity<T>(&'arena self, capacity: usize) -> Vec<T, &'arena ArenaAlloc<'arena>> {
+		Vec::with_capacity_in(capacity, self)
+	}
+	
 	/// Copies the string slice into the arena and returns the arena-allocated string slice.
 	pub fn string(&'arena self, str: &str) -> &'arena str {
 		// SAFETY:
@@ -105,9 +109,10 @@ impl<'arena> Arena<'arena> {
 		// from_raw_parts should hopefully work.
 		// str is already utf-8 valid therefore p is.
 		unsafe {
-			let p = self.alloc_uninit(str.len());
-			std::ptr::copy_nonoverlapping(str.as_ptr(), p, str.len());
-			let s = std::slice::from_raw_parts(p, str.len());
+			let len = str.len();
+			let p = self.alloc_uninit(len).as_ptr();
+			std::ptr::copy_nonoverlapping(str.as_ptr(), p, len);
+			let s = std::slice::from_raw_parts(p, len);
 			str::from_utf8_unchecked(s)
 		}
 	}
@@ -115,7 +120,7 @@ impl<'arena> Arena<'arena> {
 	/// Invalidates all reference to this arena and de-allocates most memory.
 	/// The last segment in the arena is reused to start the arena.
 	pub fn clear(&mut self) {
-		if let Some(tail) = self.allocator.segments.get_mut().pop_back() {
+		if let Some(tail) = self.allocator.segments.get_mut().pop() {
 			*self = Self {
 				allocator: ArenaAlloc {
 					_phantom: PhantomData,
@@ -158,7 +163,7 @@ pub struct ArenaAlloc<'arena> {
 	/// Make sure this is the first field so the lifetime ends before the memory is deallocated when the arena is dropped.
 	_phantom: PhantomData<&'arena mut ()>,
 	// Contains all the memory allocated by the arena in a linked list of memory chunks.
-	segments: UnsafeCell<LinkedList<ArenaSegment>>,
+	segments: UnsafeCell<Vec<ArenaSegment>>,
 	/// Index within the tail segment to the first unused byte. Offset = 0 is guaranteed to be aligned in memory.
 	offset: Cell<usize>,
 	/// Total capacity of the arena
@@ -184,7 +189,7 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 		let segments = unsafe {self.segments.as_mut_unchecked()};
 		
 		// If the space needed for this allocation is greater than the amount of memory we have,
-		let new_seg_size = if let Some(tail) = segments.back_mut() && self.offset.get() + size > tail.len() {
+		let new_seg_size = if let Some(tail) = segments.last() && self.offset.get() + size > tail.len() {
 			// create a new segment with the size of the entire arena
 			let new_seg_size = size + self.cap;
 			debug!("Increasing arena size to {}", new_seg_size + self.cap);
@@ -194,7 +199,7 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 			// create the first segment in the linked list with the layout size
 			size
 		};
-		segments.push_back(new_mem_chunk(new_seg_size));
+		segments.push(new_mem_chunk(new_seg_size));
 		
 		// Get the pointer to the thing we just allocated.
 		// SAFETY:
@@ -202,17 +207,13 @@ unsafe impl<'arena> Allocator for ArenaAlloc<'arena> {
 		// This ptr is non-null and aligned in memory.
 		// ArenaAlloc has a phantom lifetime which invalidates all references before de-allocating the segments.
 		let new_alloc_ptr = unsafe {
-			NonNull::slice_from_raw_parts(
-				NonNull::new_unchecked(
-					segments
-						.back_mut()
-						.unwrap_unchecked()
-						.as_mut_ptr()
-						.add(self.offset.get()),
-				)
-				.cast(),
-				size,
-			)
+			let ptr = segments
+				.last_mut()
+				.unwrap_unchecked()
+				.as_mut_ptr()
+				.add(self.offset.get());
+			let ptr = NonNull::new_unchecked(ptr).cast();
+			NonNull::slice_from_raw_parts(ptr, size)
 		};
 		self.offset.set(self.offset.get() + size);
 		Ok(new_alloc_ptr)
