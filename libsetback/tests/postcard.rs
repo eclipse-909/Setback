@@ -1,7 +1,9 @@
 #[cfg(test)]
-mod size_tests {
-	use arrayvec::ArrayVec;
-	use setback::*;
+mod postcard_size_tests {
+	use {
+		arrayvec::ArrayVec,
+		setback::*,
+	};
 	
 	/// Every encoded event (including the timestamp wrapper) must stay below this.
 	const MAX_ENCODED: usize = 256;
@@ -68,7 +70,7 @@ mod size_tests {
 		
 		for (name, event) in largest_events() {
 			let buf = Vec::<u8>::with_capacity(u8::MAX as usize);
-			let logged = LoggedGameEvent { timestamp_ms: i64::MAX, event };
+			let logged = LoggedGameEventRef { timestamp_ms: i64::MAX, event: &event };
 			let bytes = postcard::to_extend(&logged, buf).unwrap();
 			
 			println!("{name}: {} bytes", bytes.len());
@@ -81,14 +83,5 @@ mod size_tests {
 		}
 		
 		println!("largest encoded event: {largest} bytes");
-	}
-	
-	fn player_type_serde() {
-		// TODO:
-		// Create a PlayerType::HumanConnection,
-		// serialize it,
-		// deserialize it,
-		// and confirm that it's a PlayerType::HumanPlayer
-		// and that all the data is the same.
 	}
 }

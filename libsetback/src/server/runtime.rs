@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use {
 	crate::*,
 	arrayvec::ArrayVec,
@@ -55,7 +56,8 @@ impl GameState {
 	) {
 		debug!(cx = %self.cx(), "Starting game");
 		tokio::spawn(async move {
-			let mut client_io_fut = self.advance_game(ClientIOResult::None);
+			let mut log_buf = Vec::with_capacity(u8::MAX as usize);
+			let mut client_io_fut = self.advance_game(ClientIOResult::None, &mut log_buf);
 			loop {
 				tokio::select! {
 					client_io_res = &mut client_io_fut => {
@@ -65,6 +67,7 @@ impl GameState {
 								self.lobby_state.rules.code.clone(),
 								self.lobby_state.rules.password.clone(),
 							).await;
+							self.log_flush(&mut log_buf);
 							self.lobby_state
 								.players
 								.into_iter()
@@ -75,7 +78,7 @@ impl GameState {
 								.for_each(|conn| conn.spawn_server_handler());
 							return;
 						}
-						client_io_fut = self.advance_game(client_io_res);
+						client_io_fut = self.advance_game(client_io_res, &mut log_buf);
 					}
 					message = Player::try_recv_fallback(&mut self.lobby_state.players) => self.handle_fallback(message),
 					Some(conn) = rejoin_rx.recv() => self.rejoin_player(conn),
@@ -90,7 +93,7 @@ impl GameState {
 		});
 	}
 	
-	fn advance_game(&mut self, io_res: ClientIOResult) -> ClientIOFut {
+	fn advance_game(&mut self, io_res: ClientIOResult, log_buf: &mut Vec<u8>) -> ClientIOFut {
 		match &io_res {
 			ClientIOResult::NotifyCardPlayed(play_result) => {
 				match play_result {
@@ -110,6 +113,7 @@ impl GameState {
 				}
 			}
 			ClientIOResult::GameOver => {
+				// this should be unreachable
 				self.loop_state = GameLoopState::Terminated;
 				return ClientIOFut::GameOver;
 			}
@@ -123,6 +127,7 @@ impl GameState {
 			GameLoopState::Init => {
 				self.loop_state = GameLoopState::DealCards;
 				self.increment_turn();
+				GameEvent::Init { idx: 0 }.log(log_buf);
 				self.lobby_state.notify_all_unique(|idx,_| GamePayload::GameEvent(GameEvent::Init { idx }));
 				ClientIOFut::None
 			}
@@ -131,10 +136,14 @@ impl GameState {
 				self.loop_state = GameLoopState::Bidding;
 				self.increment_turn();
 				let dealer_idx = self.dealer_idx;
-				self.lobby_state.notify_all_unique(|_, player| GamePayload::GameEvent(GameEvent::DealCards {
-					hand: player.hand.clone(),
-					idx: dealer_idx,
-				}));
+				self.lobby_state.notify_all_unique(|_, player| {
+					let event = GameEvent::DealCards {
+						hand: player.hand.clone(),
+						idx: dealer_idx,
+					};
+					event.log(log_buf);
+					GamePayload::GameEvent(event)
+				});
 				ClientIOFut::None
 			}
 			GameLoopState::Bidding => self.prompt::<Bid>(io_res),
@@ -142,7 +151,7 @@ impl GameState {
 			GameLoopState::GameOver => {
 				self.loop_state = GameLoopState::Terminated;
 				self.lobby_state.notify_all(GamePayload::GameEvent(GameEvent::GameOver));
-				ClientIOFut::None
+				ClientIOFut::GameOver
 			}
 			GameLoopState::Terminated => ClientIOFut::GameOver,
 		}
@@ -365,13 +374,6 @@ impl GameState {
 		});
 	}
 	
-	fn log_event(&mut self, event: GameEvent, buf: &mut Vec<u8>) {
-		LoggedGameEvent {
-			event,
-			timestamp_ms: Utc::now().timestamp_millis(),
-		}.append(buf);
-	}
-	
 	fn log_flush(&mut self, buf: &mut Vec<u8>) {
 		todo!("append buffer to game.events");
 		buf.clear();
@@ -383,4 +385,48 @@ impl GameState {
 		_event_emitter: impl EventEmitter,
 		_event_response_rx: impl EventResponseReceiver,
 	) {}
+}
+
+#[derive(Deserialize)]
+pub struct LoggedGameEvent {
+	pub event: GameEvent,
+	pub timestamp_ms: i64
+}
+
+#[derive(Serialize)]
+pub struct LoggedGameEventRef<'e> {
+	pub event: &'e GameEvent,
+	pub timestamp_ms: i64
+}
+
+impl LoggedGameEvent {
+	pub fn decode_all(buf: &[u8]) -> Result<Vec<Self>, NetError> {
+		let mut cursor = 0;
+		let mut events = Vec::new();
+		while cursor < buf.len() {
+			let size = buf[cursor];
+			cursor += 1;
+			let end = cursor + size as usize;
+			let event = postcard::from_bytes(&buf[cursor..end])
+				.map_err(|_| NetError::ServerError)?;
+			events.push(event);
+			cursor = end;
+		}
+		Ok(events)
+	}
+}
+
+impl GameEvent {
+	fn log(&self, buf: &mut Vec<u8>) {
+		let event = LoggedGameEventRef {
+			event: self,
+			timestamp_ms: Utc::now().timestamp_millis(),
+		};
+		let header_idx = buf.len();
+		buf.push(0);
+		*buf = postcard::to_extend(&event, std::mem::take(buf)).unwrap();
+		let size = buf.len() - header_idx - 1;
+		assert!(size < u8::MAX as usize);
+		buf[header_idx] = size as u8;
+	}
 }

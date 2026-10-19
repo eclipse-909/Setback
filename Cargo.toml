@@ -32,6 +32,7 @@ debug = false
 strip = "debuginfo"
 
 [workspace.dependencies]
+arena = { git = "https://github.com/eclipse-909/arena" }
 arrayvec = { version = "0.7.8", features = ["serde"] }
 axum = "0.8.9"
 base64 = "0.23.1"

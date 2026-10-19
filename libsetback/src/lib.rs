@@ -5,7 +5,6 @@
 	trait_alias,
 )]
 
-mod arena;
 mod client;
 mod constants;
 mod error;
@@ -22,7 +21,6 @@ mod ws;
 mod server;
 
 pub use {
-	arena::*,
 	client::*,
 	constants::*,
 	error::*,

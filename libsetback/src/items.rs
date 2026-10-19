@@ -370,38 +370,6 @@ pub enum GameEvent {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct LoggedGameEvent {
-	pub event: GameEvent,
-	pub timestamp_ms: i64
-}
-
-impl LoggedGameEvent {
-	pub fn append(&self, buf: &mut Vec<u8>) {
-		let header_idx = buf.len();
-		buf.push(0);
-		*buf = postcard::to_extend(self, std::mem::take(buf)).unwrap();
-		let size = buf.len() - header_idx - 1;
-		assert!(size < u8::MAX as usize);
-		buf[header_idx] = size as u8;
-	}
-	
-	pub fn decode_all(buf: &[u8]) -> Result<Vec<Self>, NetError> {
-		let mut cursor = 0;
-		let mut events = Vec::new();
-		while cursor < buf.len() {
-			let size = buf[cursor];
-			cursor += 1;
-			let end = cursor + size as usize;
-			let event = postcard::from_bytes(&buf[cursor..end])
-				.map_err(|_| NetError::ServerError)?;
-			events.push(event);
-			cursor = end;
-		}
-		Ok(events)
-	}
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PublicGame {
 	pub join_code: u32,
 	pub rules: LobbyRules,

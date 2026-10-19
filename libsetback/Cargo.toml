@@ -8,6 +8,7 @@ name = "setback"
 
 # This library needs to target WASM so don't just throw dependencies in here
 [dependencies]
+arena.workspace = true
 arrayvec.workspace = true
 bytes.workspace = true
 dioxus.workspace = true
@@ -45,6 +46,10 @@ trybuild.workspace = true
 server = ["dep:nanoid", "dep:scc", "dep:sqlx"]
 http = ["dep:tower-http"]
 test-libsetback = []
+
+[[test]]
+name = "server"
+required-features = ["server"]
 
 [lints]
 workspace = true
