@@ -1,5 +1,5 @@
 # Setback
-![icon](./setback/assets/images/cardsIcon.png)
+[![icon](./setback/assets/images/cardsIcon.png)](https://www.flaticon.com/free-icons/hobbies "Hobbies icons created by AB Design - Flaticon")
 
 This mono-repo contains the source code for all Setback programs server and client side.
 
