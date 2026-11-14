@@ -1,6 +1,10 @@
 # Setback
 [![icon](./setback/assets/images/cardsIcon.png)](https://www.flaticon.com/free-icons/hobbies "Hobbies icons created by AB Design - Flaticon")
 
+### Warning!
+This project is a work in progress. It is very early and nothing works yet.
+___
+
 This mono-repo contains the source code for all Setback programs server and client side.
 
 ```
