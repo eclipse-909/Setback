@@ -1,5 +1,5 @@
-set dotenv-path := '.env.local'
-compose := "docker compose -f ./local/docker-compose.yml"
+set dotenv-load
+compose := "sudo docker compose -f local/docker-compose.yml"
 cov_threshold := "80"
 
 # list available recipes
@@ -14,6 +14,7 @@ cloc:
 		--not-match-d=".*\.bak" \
 		.
 
+# sqlx prepare allows offline compilation with sql queries
 prepare:
 	cargo sqlx prepare --workspace
 
@@ -22,34 +23,12 @@ dbup:
 	{{compose}} up -d --wait
 
 # run the api
-api:
-	cargo run -p api
+api profile="dev":
+	cargo run -p api --profile {{profile}}
 
 # run the server
-server:
-	cargo run -p server
-
-# run setbackd with docker compose
-dev: dbup
-	#!/usr/bin/env bash
-	set -euo pipefail
-	cargo build -p api -p server
-	cleanup() {
-		trap - EXIT
-		trap 'kill -KILL $(jobs -p) 2>/dev/null || true; exit 130' INT TERM
-		kill $(jobs -p) 2>/dev/null || true
-		wait
-	}
-	trap cleanup EXIT
-	trap 'exit 130' INT TERM
-	cargo run -p api &
-	sleep 1
-	cargo run -p server &
-	xdg-open http://localhost:8080/ # Traefik dashboard
-	xdg-open http://localhost:8081  # phpmyadmin
-	#xdg-open https://localhost      # website
-	wait
-	echo "db is still running, use `dbdown` to stop it"
+server profile="dev":
+	cargo run -p server -- profile {{profile}}
 
 # stop compose
 dbdown:

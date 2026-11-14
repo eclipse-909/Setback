@@ -1,6 +1,5 @@
 # security
 *.env*
-!.env.template
 *.pem
 *certs
 
@@ -10,8 +9,7 @@
 .vscode
 
 # generated
-local/*
-!local/docker-compose.yml
+.sqlx
 api/openapi
 setback/settings.json
 setback/usr.crd
@@ -20,6 +18,11 @@ target
 *dist
 *node_modules
 *package-lock.json
+
+# local
+local/*
+!local/docker-compose.yml
+!.env.template
 
 # scratch space
 *tmp

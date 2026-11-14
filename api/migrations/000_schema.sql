@@ -141,7 +141,7 @@ create table game(
 create unique index game_index on game(game_code) where ended_at is null;
 
 create table game_player(
-	game_id    bigint    not null references game(game_id) on delete cascade,
+	game_id    uuid      not null references game(game_id) on delete cascade,
 	account_id bigint    not null references account(account_id),
 	seat       smallint,
 	won        bool,
@@ -153,7 +153,7 @@ create index game_player_account_index on game_player(account_id);
 
 create table player_report(
 	report_id     bigint generated always as identity primary key,
-	game_id       bigint      not null references game(game_id) on delete restrict,
+	game_id       uuid        not null references game(game_id) on delete restrict,
 	reporter_id   bigint               references account(account_id) on delete restrict,
 	target_id     bigint      not null references account(account_id) on delete restrict,
 	report_reason report_type not null,

@@ -30,7 +30,7 @@ pub fn create_jwt(
 	encode(
 		&Header::default(), // HS256 by default
 		&claims,
-		&EncodingKey::from_secret(&state.jwt_secret),
+		&EncodingKey::from_secret(&state.jwt_secret)?,
 	)
 }
 
@@ -68,7 +68,8 @@ async fn auth_middleware(
 	
 	let claims = decode::<Claims>(
 		token,
-		&DecodingKey::from_secret(&state.jwt_secret),
+		&DecodingKey::from_secret(&state.jwt_secret)
+			.map_err(|_| StatusCode::UNAUTHORIZED)?,
 		&Validation::default(),
 	).map(|data| data.claims)
 		.map_err(|_| StatusCode::UNAUTHORIZED)?;

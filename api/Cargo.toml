@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+argon2.workspace = true
 axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
@@ -11,12 +12,14 @@ http.workspace = true
 jsonwebtoken.workspace = true
 lettre.workspace = true
 libsetback = { workspace = true, features = ["server", "http"] }
+rand.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 sqlx.workspace = true
 sha2.workspace = true
 subtle.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true
 utoipa-swagger-ui.workspace = true

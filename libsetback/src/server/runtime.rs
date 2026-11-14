@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
 use {
 	crate::*,
 	arrayvec::ArrayVec,
 	futures::FutureExt,
+	serde::{Deserialize, Serialize},
 	sqlx::types::chrono::Utc,
 	std::{
 		pin::Pin,

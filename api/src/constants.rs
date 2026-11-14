@@ -1,5 +1,7 @@
-pub const ENV_JWT_SECRET          : &str = "API_JWT_SECRET";
-pub const ENV_API_BIND_ADDR       : &str = "API_BIND_ADDR";
-pub const ENV_NO_REPLY_EMAIL_HOST : &str = "SETBACK_NO_REPLY_EMAIL_HOST";
-pub const ENV_NO_REPLY_EMAIL_USER : &str = "SETBACK_NO_REPLY_EMAIL_USER";
-pub const ENV_NO_REPLY_EMAIL_PASS : &str = "SETBACK_NO_REPLY_EMAIL_PASS";
+pub const ENV_JWT_SECRET           : &str = "API_JWT_SECRET";
+pub const ENV_API_BIND_ADDR        : &str = "API_BIND_ADDR";
+pub const ENV_NO_REPLY_EMAIL_HOST  : &str = "SETBACK_NO_REPLY_EMAIL_HOST";
+pub const ENV_NO_REPLY_EMAIL_USER  : &str = "SETBACK_NO_REPLY_EMAIL_USER";
+pub const ENV_NO_REPLY_EMAIL_PASS  : &str = "SETBACK_NO_REPLY_EMAIL_PASS";
+pub const MAX_ACCOUNTS_PER_OWNER   : i64  = 3;
+pub const SIGNUP_TOKEN_TTL_MINUTES : i32  = 15;

@@ -2,6 +2,7 @@ mod constants;
 mod middleware;
 mod controllers;
 mod models;
+mod status;
 mod util;
 
 use {
@@ -38,10 +39,15 @@ async fn main() {
 		db: PgPoolOptions::new()
 			.max_connections(DB_MAX_CONNECTIONS)
 			.after_connect(|conn, _meta| Box::pin(async move {
-				conn.execute(r#"
-					set time_zone = '+00:00';
-					update game set ended_at = current_timestamp where ended_at is null;
-				"#).await?;
+				conn.execute(
+					r#" DO $$
+						BEGIN
+							IF to_regclass('game') IS NOT NULL THEN
+								EXECUTE 'update game set ended_at = current_timestamp where ended_at is null';
+							END IF;
+						END $$;
+					"#
+				).await?;
 				Ok(())
 			}))
 			.connect(env::var(ENV_DB_URL).unwrap().as_str())
@@ -55,7 +61,10 @@ async fn main() {
 	let router = Router::new()
 		.merge(api_public_routes())
 		.nest("/account", api_account_routes(state.clone()))
-		.route_layer(axum::middleware::from_fn_with_state(state.clone(), rate_limit::require_rate_limiter))
+		.route_layer(axum::middleware::from_fn_with_state(
+			state.clone(),
+			rate_limit::require_rate_limiter
+		))
     	.nest("/admin", api_admin_routes(state.clone()))
 		.route_layer(http_trace_layer())
 		.route("/healthcheck", get(StatusCode::OK));
@@ -75,6 +84,7 @@ async fn main() {
 		.with_state(state);
 
 	let addr = env::var(ENV_API_BIND_ADDR).unwrap();
+	println!("listening on {addr}");
 	let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
 	axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
 		.await
@@ -97,9 +107,9 @@ fn merge_swagger(router: Router<AppState>) -> axum::Router<AppState> {
 		.merge(router)
 		.split_for_parts();
 	
-	let docs_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("api/openapi");
+	let docs_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("openapi");
 	fs::create_dir_all(&docs_path).unwrap();
 	fs::write(docs_path.join("openapi.json"), api.to_pretty_json().unwrap()).unwrap();
 	
-	router.merge(SwaggerUi::new("/swagger").url("/api/openapi/openapi.json", api.clone()))
+	router.merge(SwaggerUi::new("/swagger").url("/api-docs/openapi.json", api.clone()))
 }

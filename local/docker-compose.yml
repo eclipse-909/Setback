@@ -7,9 +7,9 @@
 # Requires Docker Compose 2.23.1+ (inline `configs` content).
 #
 # Prerequisites:
-#   - Self-signed certs in ./local/certs/cert.pem and ./local/certs/key.pem
+#   - Self-signed certs in ./certs/cert.pem and ./certs/key.pem
 #     (the cert needs a subjectAltName of DNS:localhost)
-#   - .env.local with the db credentials
+#   - .env with the db credentials
 #
 # Host ports the native apps must listen on (bind to 0.0.0.0, not 127.0.0.1,
 # so the Traefik container can reach them):
@@ -46,8 +46,8 @@ services:
       - "127.0.0.1:8080:8080"   # Traefik dashboard
       - "127.0.0.1:42069:42069" # WSS — server
     volumes:
-      - ./local/certs:/etc/traefik/certs:ro
-      - ./local/logs:/var/log/traefik
+      - ./certs:/etc/traefik/certs:ro,z
+#      - ./logs:/var/log/traefik
     configs:
       - source: traefik_dynamic
         target: /etc/traefik/dynamic.yml
@@ -71,10 +71,10 @@ services:
       # Logs (written to ./logs/traefik/)
       - "--log.level=INFO" # change to DEBUG for more verbose logs
       - "--log.format=json"
-      - "--log.filepath=/var/log/traefik/traefik.log"
+#      - "--log.filepath=/var/log/traefik/traefik.log"
       - "--accesslog=true"
       - "--accesslog.format=json"
-      - "--accesslog.filepath=/var/log/traefik/access.log"
+#      - "--accesslog.filepath=/var/log/traefik/access.log"
       - "--accesslog.fields.headers.defaultmode=drop"
 
   # ---------------------------------------------------------------------------
@@ -85,14 +85,13 @@ services:
     container_name: db
     restart: unless-stopped
     env_file:
-      - .env.local
+      - ../.env
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - db_data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - db_data:/var/lib/postgresql
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U setback -d setback-db" ]
+      test: [ "CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -110,7 +109,7 @@ configs:
       http:
         routers:
           api:
-            rule: "Host(`localhost`) && PathPrefix(`/api`)"
+            rule: "Host(`localhost`)"
             entryPoints: [websecure]
             service: api
             tls: {}
