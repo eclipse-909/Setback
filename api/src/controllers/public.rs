@@ -1,19 +1,17 @@
 use {
-	crate::{constants::*, models::*, status::*, util::*},
+	crate::{constants::*, models::*, status::*, util::*, middleware::jwt::*},
 	argon2::{
 		Argon2,
 		password_hash::PasswordHasher,
 	},
-	axum::{Json, extract::{ConnectInfo, Query, State}},
-	base64::engine::{general_purpose::URL_SAFE_NO_PAD, Engine},
+	axum::{Json, extract::{ConnectInfo, State}},
+	base64::engine::{Engine, general_purpose::URL_SAFE_NO_PAD},
 	http::{HeaderMap, StatusCode},
 	setback::*,
 	sha2::{Digest, Sha256},
-	sqlx::PgPool,
-	std::{
-		collections::HashMap,
-		net::{IpAddr, SocketAddr},
-	},
+	sqlx::{PgPool, types::ipnet::IpNet},
+	std::
+	net::{IpAddr, SocketAddr},
 	tracing::error,
 	utoipa_axum::{router::OpenApiRouter as Router, routes},
 };
@@ -21,7 +19,7 @@ use {
 #[utoipa::path(
 	post,
 	path = "/signup",
-	request_body = SignupRequest,
+	request_body = BeginSignupRequest,
 	responses((status = 200)),
 	responses((status = 403)),
 	responses((status = 409)),
@@ -30,46 +28,28 @@ use {
 )]
 async fn api_begin_signup(
 	State(db): State<PgPool>,
-	Json(creds): Json<SignupRequest>,
+	Json(creds): Json<BeginSignupRequest>,
 ) -> Result<(), Status> {
-	// 1. Validate request (cheap checks first, before any DB or hashing work)
-	let email = creds.email.trim().to_owned();
-	validate_email(&email)?;
-	let username = creds.username.trim().to_owned();
-	validate_username(&username)?;
-	validate_password(&creds.password)?;
-	let email_normalized = normalize_email(&email);
+	// validate request
+	let email = email_validated(creds.email)?;
+	let username = username_validated(creds.username)?;
+	let password = password_validated(creds.password)?;
+	let email_normalized = email_normalized(&email);
 	
-	// 2. Create temporary secure code; only its hash is stored
-	let mut raw = [0u8; 32];
-	rand::fill(&mut raw);
-	let code = URL_SAFE_NO_PAD.encode(raw);
-	let token_hash = Sha256::digest(code.as_bytes()).to_vec();
+	// create temporary secure code; only its hash is stored
+	let token = new_token32();
+	let token_hash = hash_token32(token.as_bytes());
 	
-	// 3. Hash the password BEFORE opening the transaction, so the tx (and its locks)
-	//    isn't held open during the expensive step.
-	let password = creds.password;
-	let password_hash = tokio::task::spawn_blocking(move || {
-		Argon2::default()
-			.hash_password(password.as_bytes())
-			.map(|h| h.to_string())
-	}).await
-		.map_err(|e| {
-			error!("hash task panicked: {e}");
-			Status::s500("")
-		})?
-		.map_err(|e| {
-			error!("argon2 failure: {e}");
-			Status::s500("")
-		})?;
+	// hash the password before opening the transaction, so the tx (and its locks) isn't held open during the expensive step
+	let password_hash = hash_password(password).await?;
 	
-	// 4. One transaction, two statements
+	// One transaction, two statements
 	let mut tx = db.begin().await?;
 	
-	// 4a. Clear expired pending signups that would otherwise block this
-	//     username/email. Kept as its own statement: inside the CTE below, the
-	//     delete and the insert would share a snapshot, so the insert could
-	//     still collide with the row being deleted.
+	// Clear expired pending signups that would otherwise block this
+	// username/email. Kept as its own statement: inside the CTE below, the
+	// delete and the insert would share a snapshot, so the insert could
+	// still collide with the row being deleted.
 	sqlx::query!(
 		r#" delete from stage_account
 			where expires_at < now()
@@ -79,11 +59,11 @@ async fn api_begin_signup(
 		email_normalized
 	).execute(&mut *tx).await?;
 	
-	// 4b. All checks + the upsert in a single statement (one snapshot).
-	//     The insert only produces a row when every check passes; the final
-	//     select reports which check (if any) failed.
-	//     Explicit casts on the insert params are needed so Postgres/sqlx can
-	//     infer their types (e.g. $5 must be bytea, not text).
+	// All checks + the upsert in a single statement (one snapshot).
+	// The insert only produces a row when every check passes; the final
+	// select reports which check (if any) failed.
+	// Explicit casts on the insert params are needed so Postgres/sqlx can
+	// infer their types (e.g. $5 must be bytea, not text).
 	let upsert = sqlx::query_scalar!(
 		r#" with chk as (
 				select
@@ -145,7 +125,7 @@ async fn api_begin_signup(
 		email_normalized,
 		email,
 		password_hash,
-		token_hash,
+		&token_hash,
 		SIGNUP_TOKEN_TTL_MINUTES,
 		MAX_ACCOUNTS_PER_OWNER
 	).fetch_one(&mut *tx).await;
@@ -161,32 +141,28 @@ async fn api_begin_signup(
 	
 	match outcome.as_str() {
 		"ok" => {}
-		"suspended" => return Err(Status::s403("this email cannot be used to sign up")),
-		"username_taken" => return Err(Status::s409("username is already taken")),
-		"limit" => return Err(Status::s403("account limit reached for this email")),
+		"suspended" => return Err(Status::s403("This email cannot be used to sign up")),
+		"username_taken" => return Err(Status::s409("Username is already taken")),
+		"limit" => return Err(Status::s403("Account limit reached for this email")),
 		other => {
 			error!("unexpected signup outcome: {other}");
-			return Err(Status::s500(""));
+			return Err(Status::s500());
 		}
 	}
 	tx.commit().await?;
 	
-	// 5. Send the email with the code (after commit, so the code is always valid)
-	Email {
+	// send email with the code
+	let email = Email {
 		to: email,
 		subject: "Confirm your signup".to_owned(),
 		body: format!(
 			"Welcome, {username}!\n\n\
-			 Your confirmation code is:\n\n{code}\n\n\
+			 Your confirmation code is:\n\n{token}\n\n\
 			 It expires in {SIGNUP_TOKEN_TTL_MINUTES} minutes. \
 			 If you didn't request this, you can ignore this email."
 		),
-	}.send()
-		.await
-		.map_err(|e| {
-			error!("failed to send signup email: {e}");
-			Status::s500("")
-		})?;
+	};
+	email.send().await?;
 	
 	Ok(())
 }
@@ -194,21 +170,131 @@ async fn api_begin_signup(
 #[utoipa::path(
 	get,
 	path = "/signup",
-	params(("token" = String, Query)),
+	request_body = FinishSignupRequest,
 	responses((status = 201, body = LoginResponse)),
+	responses((status = 403)),
+	responses((status = 404)),
+	responses((status = 500)),
 	tag = "public"
 )]
 async fn api_finish_signup(
-	State(db): State<PgPool>,
-	Query(params): Query<HashMap<String, String>>,
+	State(state): State<AppState>,
 	ConnectInfo(peer): ConnectInfo<SocketAddr>,
 	headers: HeaderMap,
-) -> Result<Json<LoginResponse>, StatusCode> {
-	todo!()
-	// remove from staging account table,
-	// insert into account table and owner table if new email,
-	// create new jwt and refresh token,
-	// return response
+	Json(FinishSignupRequest {token}): Json<FinishSignupRequest>,
+) -> Result<Json<LoginResponse>, Status> {
+	let ip_addr = client_ip(&headers, peer);
+	
+	let mut tx = state.db.begin().await?;
+	
+	struct Checks {
+		token_valid: bool,
+		profile_id: Option<i32>,
+	}
+	let checks: Option<Checks> = sqlx::query_as!(
+		Checks,
+		r#" with staged as (
+				select expires_at, email_normalized from stage_account
+				where tmp_token_hash = $1
+			)
+ 			select
+     			staged.expires_at >= now() as "token_valid!",
+     			(
+					select profile_id from profile_email
+					where email_normalized = staged.email_normalized
+				) as profile_id
+ 			from staged
+		"#,
+		token.as_bytes()
+	).fetch_optional(&mut *tx).await?;
+	
+	let Some(checks) = checks else {
+		return Err(Status::s404("Code not found"));
+	};
+	if !checks.token_valid {
+		return Err(Status::s403("Code expired"));
+	}
+	
+	let profile_id = checks.profile_id.unwrap_or(
+		sqlx::query_scalar!(
+			r#" with staged as (
+					select email, email_normalized from stage_account
+					where tmp_token_hash = $1
+				),
+				prof_id as (
+                    insert into profile default values
+                    returning profile_id
+				),
+				ins_profile_email as (
+                    insert into profile_email(profile_id, email, email_normalized)
+					select (select * from prof_id), email, email_normalized
+					from staged
+					returning 1
+				),
+				ins_profile_ip as (
+                    insert into profile_ip(profile_id, ip)
+					select *, $2 from prof_id
+					returning 1
+				)
+ 				select * from prof_id
+			"#,
+			token.as_bytes(),
+			ip_addr,
+		).fetch_one(&mut *tx).await?
+	);
+	
+	let refresh_token = new_token32();
+	let refresh_token_hash = hash_token32(refresh_token.as_bytes());
+	
+	struct Account {
+		id: i32,
+		username: String,
+		email: String,
+	}
+	let account = sqlx::query_as!(
+		Account,
+		r#" with staged as (
+				select username, email_normalized, password_hash from stage_account
+				where tmp_token_hash = $1
+			),
+			acc_id as (
+                insert into account(profile_id, username, username_archive, password_hash)
+                select $2, username, username, password_hash
+				from staged
+				returning account_id
+			),
+			ins_refresh_token as (
+                insert into refresh_token(token_hash, profile_id, account_id, expires_at)
+				select $3, $2, *, now() + make_interval(hours => $4::int)
+				from acc_id
+				returning 1
+			),
+			rm_staged as (
+                delete from stage_account
+				where tmp_token_hash = $1
+				returning 1
+			)
+ 			select
+				(select * from acc_id) as "id!",
+				username,
+				email_normalized as email
+ 			from staged
+		"#,
+		token.as_bytes(),
+		profile_id,
+		&refresh_token_hash,
+		REFRESH_TOKEN_TTL_HOURS,
+	).fetch_one(&mut *tx).await?;
+	
+	tx.commit().await?;
+	
+	let jwt = create_jwt(account.id as u32, profile_id as u32, &account.username, &account.email, &state)?;
+	
+	Ok(Json(LoginResponse {
+		auth_token: jwt,
+		refresh_token,
+		username: account.username,
+	}))
 }
 
 #[utoipa::path(
@@ -235,15 +321,50 @@ async fn api_login(
 	path = "/refresh-token",
 	request_body = RefreshTokenRequest,
 	responses((status = 200, body = RefreshTokenResponse)),
+	responses((status = 401)),
+	responses((status = 403)),
+	responses((status = 500)),
 	tag = "public"
 )]
 async fn api_refresh_token(
-	State(db): State<PgPool>,
-	Json(creds): Json<RefreshTokenRequest>,
-) -> Result<Json<RefreshTokenResponse>, StatusCode> {
-	todo!()
-	// validate refresh token in db,
-	// return new auth token
+	State(state): State<AppState>,
+	Json(RefreshTokenRequest {refresh_token}): Json<RefreshTokenRequest>,
+) -> Result<Json<RefreshTokenResponse>, Status> {
+	let refresh_token_hash = hash_token32(refresh_token.as_bytes());
+	struct Token {
+		expired: bool,
+		profile_id: i32,
+		account_id: i32,
+		username: String,
+		email: String,
+	}
+	let token = sqlx::query_as!(
+		Token,
+		r#" with token as (
+     			select r.profile_id, r.account_id, r.expires_at, a.username, p.email_normalized
+     			from refresh_token r
+     			inner join account a on a.account_id = r.account_id
+     			inner join profile_email p on p.profile_id = r.profile_id
+ 				where token_hash = $1
+			)
+ 			select (expires_at < now()) as "expired!", profile_id, account_id, username as "username!", email_normalized as "email!"
+ 			from token
+		"#,
+		&refresh_token_hash,
+	).fetch_optional(&state.db).await?;
+	
+	let Some(token) = token else {
+		return Err(Status::s401("Refresh token not found"))
+	};
+	if token.expired {
+		return Err(Status::s403("Refresh token expired"))
+	}
+	
+	let jwt = create_jwt(token.account_id as u32, token.profile_id as u32, &token.username, &token.email, &state)?;
+	
+	Ok(Json(RefreshTokenResponse {
+		auth_token: jwt,
+	}))
 }
 
 pub fn api_public_routes() -> Router<AppState> {
@@ -255,7 +376,33 @@ pub fn api_public_routes() -> Router<AppState> {
 
 // ---------- helpers ----------
 
-fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
+fn new_token32() -> String {
+	let mut raw = [0u8; 32];
+	rand::fill(&mut raw);
+	URL_SAFE_NO_PAD.encode(raw)
+}
+
+fn hash_token32(code: &[u8]) -> [u8; 32] {
+	Sha256::digest(code).into()
+}
+
+async fn hash_password(password: String) -> Result<String, Status> {
+	tokio::task::spawn_blocking(move || {
+		Argon2::default()
+			.hash_password(password.as_bytes())
+			.map(|h| h.to_string())
+	}).await
+		.map_err(|e| {
+			error!("hash task panicked: {e}");
+			Status::s500()
+		})?
+		.map_err(|e| {
+			error!("argon2 failure: {e}");
+			Status::s500()
+		})
+}
+
+fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpNet {
 	headers
 		.get("x-forwarded-for")
 		.and_then(|v| v.to_str().ok())
@@ -263,14 +410,16 @@ fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpAddr {
 		.and_then(|v| v.rsplit(',').next())
 		.and_then(|s| s.trim().parse::<IpAddr>().ok())
 		.unwrap_or_else(|| peer.ip()) // fallback: direct connection
+		.into()
 }
 
-fn validate_email(email: &str) -> Result<(), Status> {
-	let bad = || Status::s400("invalid email address");
+fn email_validated(email: String) -> Result<String, Status> {
+	const BAD_EMAIL: &str = "invalid email address";
+	let email = email.trim();
 	if email.len() > 255 || email.chars().any(|c| c.is_whitespace() || c.is_control()) {
-		return Err(bad());
+		return Err(Status::s400(BAD_EMAIL));
 	}
-	let (local, domain) = email.split_once('@').ok_or_else(bad)?;
+	let (local, domain) = email.split_once('@').ok_or_else(|| Status::s400(BAD_EMAIL))?;
 	if local.is_empty()
 		|| local.len() > 64
 		|| domain.contains('@')
@@ -279,15 +428,15 @@ fn validate_email(email: &str) -> Result<(), Status> {
 		|| domain.ends_with('.')
 		|| domain.contains("..")
 	{
-		return Err(bad());
+		return Err(Status::s400(BAD_EMAIL));
 	}
-	Ok(())
+	Ok(email.to_owned())
 }
 
 /// Must be the same function used wherever `profile_email.email_normalized`
 /// is written (e.g. the signup-confirmation endpoint), or the checks above
 /// won't line up.
-fn normalize_email(email: &str) -> String {
+fn email_normalized(email: &str) -> String {
 	let lower = email.trim().to_lowercase();
 	let (local, domain) = lower.split_once('@').unwrap_or((&lower, ""));
 	let local = local.split('+').next().unwrap_or(local);
@@ -298,7 +447,8 @@ fn normalize_email(email: &str) -> String {
 	}
 }
 
-fn validate_username(username: &str) -> Result<(), Status> {
+fn username_validated(username: String) -> Result<String, Status> {
+	let username = username.trim();
 	let len = username.chars().count();
 	if !(3..=15).contains(&len) {
 		return Err(Status::s400("username must be 3-15 characters"));
@@ -311,7 +461,7 @@ fn validate_username(username: &str) -> Result<(), Status> {
 	if !is_username_appropriate(username) {
 		return Err(Status::s400("username is not allowed"));
 	}
-	Ok(())
+	Ok(username.to_owned())
 }
 
 /// Minimal placeholder: swap in a real profanity/impersonation list.
@@ -336,7 +486,8 @@ fn is_username_appropriate(username: &str) -> bool {
 	!BLOCKED.iter().any(|b| folded.contains(b))
 }
 
-fn validate_password(password: &str) -> Result<(), Status> {
+fn password_validated(password: String) -> Result<String, Status> {
+	let password = password.trim();
 	let len = password.chars().count();
 	if len < 8 {
 		return Err(Status::s400("password must be at least 8 characters"));
@@ -345,5 +496,5 @@ fn validate_password(password: &str) -> Result<(), Status> {
 	if len > 128 {
 		return Err(Status::s400("password must be at most 128 characters"));
 	}
-	Ok(())
+	Ok(password.to_owned())
 }

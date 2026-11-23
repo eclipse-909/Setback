@@ -21,7 +21,11 @@ target
 
 # local
 local/*
+local/migrations/*
 !local/docker-compose.yml
+!local/migrations
+!local/migrations/0*.sql
+!local/migrations/README.md
 !.env.template
 
 # scratch space

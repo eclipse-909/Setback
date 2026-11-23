@@ -3,7 +3,7 @@ create type game_mode   as enum('Sp','Mp');
 create type report_type as enum('Stalling','Hacking','Cheating');
 
 create table profile(
-	profile_id      bigint generated always as identity primary key,
+	profile_id      integer generated always as identity primary key,
 	suspended_at    timestamptz,
 	suspended_until timestamptz,
 	created_at      timestamptz not null default current_timestamp,
@@ -12,10 +12,10 @@ create table profile(
 );
 
 create table profile_email(
-	profile_id       bigint       references profile(profile_id),
+	profile_id       integer      references profile(profile_id),
 	email            varchar(255) not null unique,
 	email_normalized varchar(255) not null unique,
-	active           bool         not null,
+	active           bool         not null default true,
 
 	primary key (profile_id, email_normalized)
 );
@@ -23,7 +23,7 @@ create table profile_email(
 create unique index profile_email_index on profile_email(profile_id) where active;
 
 create table profile_ip(
-	profile_id bigint      not null references profile(profile_id),
+	profile_id integer     not null references profile(profile_id),
 	ip         inet        not null,
 	first_seen timestamptz not null default current_timestamp,
 	last_seen  timestamptz not null default current_timestamp,
@@ -34,8 +34,8 @@ create table profile_ip(
 create index profile_ip_index on profile_ip(ip);
 
 create table account(
-	account_id       bigint generated always as identity primary key,
-	profile_id       bigint       not null references profile(profile_id),
+	account_id       integer generated always as identity primary key,
+	profile_id       integer      not null references profile(profile_id),
 	username         varchar(15)           unique,
 	username_archive varchar(15),
 	password_hash    text         not null,
@@ -49,10 +49,10 @@ create table account(
 
 create table profile_moderation_log(
 	log_id     bigint generated always as identity primary key,
-	profile_id bigint      not null references profile(profile_id),
+	profile_id integer     not null references profile(profile_id),
 	action     mod_action  not null,
 	reason     text,
-	acted_by   bigint               references account(account_id) on delete set null,
+	acted_by   integer              references account(account_id) on delete set null,
 	created_at timestamptz not null default current_timestamp,
 	expires_at timestamptz
 );
@@ -60,7 +60,7 @@ create table profile_moderation_log(
 create index profile_moderation_log_index on profile_moderation_log(profile_id, created_at);
 
 create table account_stats(
-	account_id     bigint    not null references account(account_id) on delete cascade,
+	account_id     integer   not null references account(account_id) on delete cascade,
 	mode           game_mode not null,
 	games_won      bigint    not null default 0,
 	games_lost     bigint    not null default 0,
@@ -81,8 +81,8 @@ create table account_stats(
 
 create table refresh_token(
 	token_hash   bytea       primary key check (octet_length(token_hash) = 32),
-	profile_id   bigint      not null,
-	account_id   bigint      not null,
+	profile_id   integer     not null,
+	account_id   integer     not null,
 	created_at   timestamptz not null default current_timestamp,
 	last_used_at timestamptz not null default current_timestamp,
 	expires_at   timestamptz not null,
@@ -105,7 +105,7 @@ create table stage_account(
 create index stage_account_exp_index on stage_account(expires_at);
 
 create table stage_email_change(
-	profile_id           bigint       primary key references profile(profile_id),
+	profile_id           integer      primary key references profile(profile_id),
 	new_email            varchar(255) not null unique,
 	new_email_normalized varchar(255) not null unique,
 	tmp_token_hash       bytea        not null unique,
@@ -115,7 +115,7 @@ create table stage_email_change(
 create index stage_email_change_index on stage_email_change(expires_at);
 
 create table stage_password_change(
-	account_id     bigint      primary key references account(account_id) on delete cascade,
+	account_id     integer     primary key references account(account_id) on delete cascade,
 	tmp_token_hash bytea       not null unique,
 	expires_at     timestamptz not null
 );
@@ -123,8 +123,8 @@ create table stage_password_change(
 create index stage_password_change_index on stage_password_change(expires_at);
 
 create table feedback(
-	feedback_id bigint generated always as identity primary key,
-	profile_id  bigint      not null references profile(profile_id),
+	feedback_id integer generated always as identity primary key,
+	profile_id  integer     not null references profile(profile_id),
 	created_at  timestamptz not null default current_timestamp,
 	description text        not null
 );
@@ -142,7 +142,7 @@ create unique index game_index on game(game_code) where ended_at is null;
 
 create table game_player(
 	game_id    uuid      not null references game(game_id) on delete cascade,
-	account_id bigint    not null references account(account_id),
+	account_id integer   not null references account(account_id),
 	seat       smallint,
 	won        bool,
 
@@ -152,14 +152,14 @@ create table game_player(
 create index game_player_account_index on game_player(account_id);
 
 create table player_report(
-	report_id     bigint generated always as identity primary key,
+	report_id     integer generated always as identity primary key,
 	game_id       uuid        not null references game(game_id) on delete restrict,
-	reporter_id   bigint               references account(account_id) on delete restrict,
-	target_id     bigint      not null references account(account_id) on delete restrict,
+	reporter_id   integer              references account(account_id) on delete restrict,
+	target_id     integer     not null references account(account_id) on delete restrict,
 	report_reason report_type not null,
 	description   text        not null,
 	created_at    timestamptz not null default current_timestamp,
-	reviewed_by   bigint               references account(account_id) on delete set null,
+	reviewed_by   integer              references account(account_id) on delete set null,
 	resolved_at   timestamptz,
 
 	check (reporter_id <> target_id),

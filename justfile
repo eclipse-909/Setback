@@ -14,13 +14,22 @@ cloc:
 		--not-match-d=".*\.bak" \
 		.
 
-# sqlx prepare allows offline compilation with sql queries
-prepare:
-	cargo sqlx prepare --workspace
-
 # start compose
 dbup:
 	{{compose}} up -d --wait
+
+# stop compose
+dbdown:
+	{{compose}} down
+
+# sqlx prepare allows offline compilation with sql queries
+dbprep:
+	cargo sqlx prepare --workspace
+
+# reset database and run api + local migrations
+dbreset:
+	sqlx database reset --source api/migrations/
+	sqlx migrate run --source local/migrations/
 
 # run the api
 api profile="dev":
@@ -30,25 +39,15 @@ api profile="dev":
 server profile="dev":
 	cargo run -p server -- profile {{profile}}
 
-# stop compose
-dbdown:
-	{{compose}} down
-
-# check libsetback for compiler errors only, does not show warnings
-check-lib $RUSTFLAGS="-Awarnings":
-	cargo check -q -p libsetback --all-targets
-	cargo check -q -p libsetback --target wasm32-unknown-unknown
-	cargo check -q -p libsetback -F server
-
-# Same check as CI
-cov-check:
+# Check coverage; same check as CI
+chcov:
 	#!/usr/bin/env bash
 	cargo llvm-cov --workspace --all-targets --locked \
 		--fail-under-lines {{cov_threshold}} \
 		--fail-under-functions {{cov_threshold}} \
 		--fail-under-regions {{cov_threshold}}
 
-# Generate HTML report in ./coverage/html
+# Generate HTML coverage report in ./coverage/html
 cov:
     cargo llvm-cov --workspace --all-targets --html --output-dir local/coverage
     @echo "Report: local/coverage/html/index.html"

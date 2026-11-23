@@ -7,13 +7,12 @@ use {
 		response::Response,
 	},
 	chrono::{Duration, Utc},
-	jsonwebtoken::{DecodingKey, Validation, decode},
-	jsonwebtoken::{EncodingKey, Header, encode},
+	jsonwebtoken::{DecodingKey, Validation, decode, EncodingKey, Header, encode},
 };
 
 pub fn create_jwt(
 	account_id: u32,
-	owner_id: u32,
+	profile_id: u32,
 	username: &str,
 	email: &str,
 	state: &AppState,
@@ -22,7 +21,7 @@ pub fn create_jwt(
 	let claims = Claims {
 		sub: format!("{email}:{username}"),
 		account_id,
-		owner_id,
+		profile_id,
 		iat: now.timestamp() as usize,
 		exp: (now + Duration::minutes(15)).timestamp() as usize,
 	};

@@ -24,5 +24,5 @@ pub struct Claims {
 	/// Subject (whom token refers to - email:username)
 	pub sub: String,
 	pub account_id: u32,
-	pub owner_id: u32,
+	pub profile_id: u32,
 }

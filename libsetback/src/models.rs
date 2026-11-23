@@ -5,10 +5,15 @@ use {
 };
 
 #[derive(Serialize, Deserialize, ToSchema)]
-pub struct SignupRequest {
+pub struct BeginSignupRequest {
 	pub email: String,
 	pub username: String,
 	pub password: String,
+}
+
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct FinishSignupRequest {
+	pub token: String,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]
