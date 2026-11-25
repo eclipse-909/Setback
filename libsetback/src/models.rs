@@ -26,7 +26,6 @@ pub struct LoginRequest {
 pub struct LoginResponse {
 	pub auth_token: String,
 	pub refresh_token: String,
-	pub username: String,
 }
 
 #[derive(Serialize, Deserialize, ToSchema)]

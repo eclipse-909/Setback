@@ -11,8 +11,8 @@ use {
 };
 
 pub fn create_jwt(
-	account_id: u32,
-	profile_id: u32,
+	account_id: i32,
+	profile_id: i32,
 	username: &str,
 	email: &str,
 	state: &AppState,

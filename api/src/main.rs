@@ -39,15 +39,7 @@ async fn main() {
 		db: PgPoolOptions::new()
 			.max_connections(DB_MAX_CONNECTIONS)
 			.after_connect(|conn, _meta| Box::pin(async move {
-				conn.execute(
-					r#" DO $$
-						BEGIN
-							IF to_regclass('game') IS NOT NULL THEN
-								EXECUTE 'update game set ended_at = current_timestamp where ended_at is null';
-							END IF;
-						END $$;
-					"#
-				).await?;
+				conn.execute(include_str!("../sql/after_connect.sql")).await?;
 				Ok(())
 			}))
 			.connect(env::var(ENV_DB_URL).unwrap().as_str())

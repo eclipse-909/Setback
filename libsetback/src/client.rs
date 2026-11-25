@@ -43,7 +43,7 @@ impl SetbackClient {
 			.json::<LoginResponse>()
 			.await
 			.map_err(|_| NetError::ServerError)?;
-		info!("Logged in as {}", session.username);
+		info!("Logged in as {}", credentials.username);
 
 		let (mut reader, mut writer) = ws::ws_connect().await?;
 		info!("Connected to Setback server");

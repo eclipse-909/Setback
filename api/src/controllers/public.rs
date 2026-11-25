@@ -1,15 +1,15 @@
 use {
-	crate::{constants::*, models::*, status::*, util::*, middleware::jwt::*},
+	crate::{constants::*, middleware::jwt::*, models::*, status::*, util::*},
 	argon2::{
-		Argon2,
-		password_hash::PasswordHasher,
+		Argon2, PasswordVerifier,
+		password_hash::{PasswordHasher, phc::PasswordHash},
 	},
 	axum::{Json, extract::{ConnectInfo, State}},
 	base64::engine::{Engine, general_purpose::URL_SAFE_NO_PAD},
-	http::{HeaderMap, StatusCode},
+	http::HeaderMap,
 	setback::*,
 	sha2::{Digest, Sha256},
-	sqlx::{PgPool, types::ipnet::IpNet},
+	sqlx::{Executor, PgPool, Postgres, types::ipnet::IpNet},
 	std::
 	net::{IpAddr, SocketAddr},
 	tracing::error,
@@ -19,6 +19,8 @@ use {
 #[utoipa::path(
 	post,
 	path = "/signup",
+	summary="Create a new account",
+	description="Begins account creation and sends the user an email with a signup code to finish account creation",
 	request_body = BeginSignupRequest,
 	responses((status = 200)),
 	responses((status = 403)),
@@ -34,16 +36,13 @@ async fn api_begin_signup(
 	let email = email_validated(creds.email)?;
 	let username = username_validated(creds.username)?;
 	let password = password_validated(creds.password)?;
+	let password_hash = hash_password(password).await?;
 	let email_normalized = email_normalized(&email);
 	
-	// create temporary secure code; only its hash is stored
-	let token = new_token32();
+	// temporary secure code
+	let token = create_token32();
 	let token_hash = hash_token32(token.as_bytes());
 	
-	// hash the password before opening the transaction, so the tx (and its locks) isn't held open during the expensive step
-	let password_hash = hash_password(password).await?;
-	
-	// One transaction, two statements
 	let mut tx = db.begin().await?;
 	
 	// Clear expired pending signups that would otherwise block this
@@ -70,15 +69,17 @@ async fn api_begin_signup(
 				    -- if suspended
 					exists(
 						select 1
-						from profile_email pe
+						from profile_email e
 						join profile p using (profile_id)
-						where pe.email_normalized = $2
+						where e.email_normalized = $2
+							and e.active
 							and p.suspended_at is not null
 							and (p.suspended_until is null or p.suspended_until > now())
 					) as suspended,
 				    -- if username is taken
 					exists(
-						select 1 from account where lower(username) = lower($1)
+						select 1 from account
+						where lower(username) = lower($1) and deleted_at is not null
 					) as username_taken,
 				    -- if username is taken in staging table
 					exists(
@@ -89,16 +90,15 @@ async fn api_begin_signup(
 					(
 						select count(*)
 						from account a
-						join profile_email pe using (profile_id)
-						where pe.email_normalized = $2
+						join profile_email e using (profile_id)
+						where e.email_normalized = $2
+							and e.active
 							and a.deleted_at is null
 					) as account_count
 			),
 			ins as (
-				insert into stage_account
-					(username, email_normalized, email, password_hash, tmp_token_hash, expires_at)
-				select
-					$1::varchar, $2::varchar, $3::varchar, $4::text, $5::bytea,
+				insert into stage_account(username, email_normalized, email, password_hash, tmp_token_hash, expires_at)
+				select $1::varchar, $2::varchar, $3::varchar, $4::text, $5::bytea,
 					now() + make_interval(mins => $6::int)
 				from chk
 				where not suspended
@@ -170,6 +170,8 @@ async fn api_begin_signup(
 #[utoipa::path(
 	get,
 	path = "/signup",
+	summary="Create a new account",
+	description="Finishes account creation and logs the user into that account",
 	request_body = FinishSignupRequest,
 	responses((status = 201, body = LoginResponse)),
 	responses((status = 403)),
@@ -187,6 +189,7 @@ async fn api_finish_signup(
 	
 	let mut tx = state.db.begin().await?;
 	
+	// validate token
 	struct Checks {
 		token_valid: bool,
 		profile_id: Option<i32>,
@@ -201,7 +204,7 @@ async fn api_finish_signup(
      			staged.expires_at >= now() as "token_valid!",
      			(
 					select profile_id from profile_email
-					where email_normalized = staged.email_normalized
+					where email_normalized = staged.email_normalized and active
 				) as profile_id
  			from staged
 		"#,
@@ -215,6 +218,7 @@ async fn api_finish_signup(
 		return Err(Status::s403("Code expired"));
 	}
 	
+	// create or update profile
 	let profile_id = checks.profile_id.unwrap_or(
 		sqlx::query_scalar!(
 			r#" with staged as (
@@ -229,11 +233,13 @@ async fn api_finish_signup(
                     insert into profile_email(profile_id, email, email_normalized)
 					select (select * from prof_id), email, email_normalized
 					from staged
+                    on conflict (profile_id, email_normalized) do update set active = true
 					returning 1
 				),
 				ins_profile_ip as (
                     insert into profile_ip(profile_id, ip)
-					select *, $2 from prof_id
+					select *, $2::inet from prof_id
+                    on conflict(profile_id, ip) do update set last_seen = now()
 					returning 1
 				)
  				select * from prof_id
@@ -243,9 +249,7 @@ async fn api_finish_signup(
 		).fetch_one(&mut *tx).await?
 	);
 	
-	let refresh_token = new_token32();
-	let refresh_token_hash = hash_token32(refresh_token.as_bytes());
-	
+	// create account
 	struct Account {
 		id: i32,
 		username: String,
@@ -258,21 +262,10 @@ async fn api_finish_signup(
 				where tmp_token_hash = $1
 			),
 			acc_id as (
-                insert into account(profile_id, username, username_archive, password_hash)
-                select $2, username, username, password_hash
+                insert into account(profile_id, username, password_hash)
+                select $2, username, password_hash
 				from staged
 				returning account_id
-			),
-			ins_refresh_token as (
-                insert into refresh_token(token_hash, profile_id, account_id, expires_at)
-				select $3, $2, *, now() + make_interval(hours => $4::int)
-				from acc_id
-				returning 1
-			),
-			rm_staged as (
-                delete from stage_account
-				where tmp_token_hash = $1
-				returning 1
 			)
  			select
 				(select * from acc_id) as "id!",
@@ -282,43 +275,128 @@ async fn api_finish_signup(
 		"#,
 		token.as_bytes(),
 		profile_id,
-		&refresh_token_hash,
-		REFRESH_TOKEN_TTL_HOURS,
 	).fetch_one(&mut *tx).await?;
+	
+	// remove staged account
+	sqlx::query!(
+		r#" delete from stage_account
+			where tmp_token_hash = $1
+		"#,
+		token.as_bytes(),
+	).execute(&mut *tx).await?;
+	
+	let refresh_token = create_refresh_token(profile_id, account.id, &mut *tx).await?;
 	
 	tx.commit().await?;
 	
-	let jwt = create_jwt(account.id as u32, profile_id as u32, &account.username, &account.email, &state)?;
+	let jwt = create_jwt(account.id, profile_id, &account.username, &account.email, &state)?;
 	
 	Ok(Json(LoginResponse {
 		auth_token: jwt,
 		refresh_token,
-		username: account.username,
 	}))
 }
 
 #[utoipa::path(
 	post,
 	path = "/login",
+	summary="Login to an account",
+	description="Login with a username and password",
 	request_body = LoginRequest,
 	responses((status = 200, body = LoginResponse)),
+	responses((status = 401)),
+	responses((status = 500)),
 	tag = "public"
 )]
 async fn api_login(
-	State(db): State<PgPool>,
+	State(state): State<AppState>,
 	ConnectInfo(peer): ConnectInfo<SocketAddr>,
 	headers: HeaderMap,
 	Json(creds): Json<LoginRequest>,
-) -> Result<Json<LoginResponse>, StatusCode> {
-	todo!()
-	// validate credentials
-	// create new jwt and refresh token,
-	// return response
+) -> Result<Json<LoginResponse>, Status> {
+	let ip_addr = client_ip(&headers, peer);
+	let username = creds.username.trim().to_owned();
+	let password = creds.password.trim().to_owned();
+	
+	let mut tx = state.db.begin().await?;
+	
+	// fetch requested account info (not authenticated yet)
+	struct Account {
+		id: i32,
+		profile_id: i32,
+		email: String,
+		password_hash: String,
+	}
+	let account = sqlx::query_as!(
+		Account,
+		r#" with target as (
+				select account_id, profile_id, password_hash
+				from account
+				where username = $1
+                    and deleted_at is not null
+			)
+			select t.account_id as id, t.profile_id, e.email_normalized as email, t.password_hash
+			from target t
+			inner join profile_email e on e.profile_id = t.profile_id and e.active
+		"#,
+		username
+	).fetch_optional(&mut *tx).await?;
+	
+	// verify password hash (authentication)
+	const INVALID_USER_PASS: Status = Status::s401("Invalid username or password");
+	let Some(account) = account else {
+		return Err(INVALID_USER_PASS);
+	};
+	let parsed_hash = PasswordHash::new(&account.password_hash)
+		.map_err(|e| {
+			error!("Failed to parse password hash: {e}");
+			Status::s500()
+		})?;
+	Argon2::default()
+		.verify_password(password.as_bytes(), &parsed_hash)
+		.map_err(|e| {
+			if e == argon2::password_hash::Error::PasswordInvalid {
+				INVALID_USER_PASS
+			} else {
+				error!("Failed to verify password hash: {e}");
+				Status::s500()
+			}
+		})?;
+	
+	// update account info (successfully authenticated at this point)
+	sqlx::query!(
+		r#" update account
+			set last_active = now()
+			where account_id = $1
+		"#,
+		account.id
+	).execute(&mut *tx).await?;
+	sqlx::query!(
+		r#" insert into profile_ip(profile_id, ip, first_seen, last_seen)
+			values ($1, $2::inet, now(), now())
+			on conflict(profile_id, ip) do update set last_seen = now()
+		"#,
+		account.profile_id,
+		ip_addr,
+	).execute(&mut *tx).await?;
+	
+	let refresh_token = create_refresh_token(account.profile_id, account.id, &mut *tx).await?;
+	
+	tx.commit().await?;
+	
+	let jwt = create_jwt(account.id, account.profile_id, &username, &account.email, &state)?;
+	
+	Ok(Json(LoginResponse {
+		auth_token: jwt,
+		refresh_token,
+	}))
 }
 
 #[utoipa::path(
 	post,
 	path = "/refresh-token",
+	summary="Refresh auth token",
+	description="Use a long-lived refresh token to get a new short-lived auth token",
 	request_body = RefreshTokenRequest,
 	responses((status = 200, body = RefreshTokenResponse)),
 	responses((status = 401)),
@@ -346,6 +424,8 @@ async fn api_refresh_token(
      			inner join account a on a.account_id = r.account_id
      			inner join profile_email p on p.profile_id = r.profile_id
  				where token_hash = $1
+ 					and a.deleted_at is not null
+ 					and p.active
 			)
  			select (expires_at < now()) as "expired!", profile_id, account_id, username as "username!", email_normalized as "email!"
  			from token
@@ -360,7 +440,7 @@ async fn api_refresh_token(
 		return Err(Status::s403("Refresh token expired"))
 	}
 	
-	let jwt = create_jwt(token.account_id as u32, token.profile_id as u32, &token.username, &token.email, &state)?;
+	let jwt = create_jwt(token.account_id, token.profile_id, &token.username, &token.email, &state)?;
 	
 	Ok(Json(RefreshTokenResponse {
 		auth_token: jwt,
@@ -376,7 +456,7 @@ pub fn api_public_routes() -> Router<AppState> {
 
 // ---------- helpers ----------
 
-fn new_token32() -> String {
+fn create_token32() -> String {
 	let mut raw = [0u8; 32];
 	rand::fill(&mut raw);
 	URL_SAFE_NO_PAD.encode(raw)
@@ -384,6 +464,26 @@ fn new_token32() -> String {
 
 fn hash_token32(code: &[u8]) -> [u8; 32] {
 	Sha256::digest(code).into()
+}
+
+async fn create_refresh_token<'e, 'c, E>(profile_id: i32, account_id: i32, executor: E) -> Result<String, Status>
+where
+	'c: 'e,
+	E: 'e + Executor<'c, Database = Postgres>,
+	Postgres: 'e,
+{
+	let refresh_token = create_token32();
+	let refresh_token_hash = hash_token32(refresh_token.as_bytes());
+	sqlx::query!(
+		r#" insert into refresh_token(token_hash, profile_id, account_id, expires_at)
+			values ($1, $2, $3, now() + make_interval(hours => $4::int))
+		"#,
+		&refresh_token_hash,
+		profile_id,
+		account_id,
+		REFRESH_TOKEN_TTL_HOURS,
+	).execute(executor).await?;
+	Ok(refresh_token)
 }
 
 async fn hash_password(password: String) -> Result<String, Status> {

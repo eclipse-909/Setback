@@ -23,6 +23,6 @@ pub struct Claims {
 	pub iat: usize,
 	/// Subject (whom token refers to - email:username)
 	pub sub: String,
-	pub account_id: u32,
-	pub profile_id: u32,
+	pub account_id: i32,
+	pub profile_id: i32,
 }

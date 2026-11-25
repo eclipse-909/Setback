@@ -1,5 +1,6 @@
 # These directories will only be owned by eclipse-909
-/.github/  @eclipse-909
-/scripts/  @eclipse-909
-/docker/  @eclipse-909
-.gitignore @eclipse-909
+.github            @eclipse-909
+.gitignore         @eclipse-909
+docker-compose.yml @eclipse-909
+Dockerfile         @eclipse-909
+LICENSE.txt        @eclipse-909
