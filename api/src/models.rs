@@ -25,4 +25,5 @@ pub struct Claims {
 	pub sub: String,
 	pub account_id: i32,
 	pub profile_id: i32,
+	pub suspended: bool,
 }

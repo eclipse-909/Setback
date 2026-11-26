@@ -6,7 +6,7 @@ create table profile(
 	profile_id      integer generated always as identity primary key,
 	suspended_at    timestamptz,
 	suspended_until timestamptz,
-	created_at      timestamptz not null default current_timestamp,
+	created_at      timestamptz not null default now(),
 
 	check (suspended_until is null or (suspended_at is not null and suspended_until >= suspended_at))
 );
@@ -25,8 +25,8 @@ create unique index profile_email_index on profile_email(profile_id) where activ
 create table profile_ip(
 	profile_id integer     not null references profile(profile_id),
 	ip         inet        not null,
-	first_seen timestamptz not null default current_timestamp,
-	last_seen  timestamptz not null default current_timestamp,
+	first_seen timestamptz not null default now(),
+	last_seen  timestamptz not null default now(),
 
 	primary key (profile_id, ip)
 );
@@ -39,8 +39,8 @@ create table account(
 	username         varchar(15)           unique,
 	username_archive varchar(15),
 	password_hash    text         not null,
-	created_at       timestamptz  not null default current_timestamp,
-	last_active      timestamptz  not null default current_timestamp,
+	created_at       timestamptz  not null default now(),
+	last_active      timestamptz  not null default now(),
 	is_admin         bool         not null default false,
 	deleted_at       timestamptz,
 
@@ -53,7 +53,7 @@ create table profile_moderation_log(
 	action     mod_action  not null,
 	reason     text,
 	acted_by   integer              references account(account_id) on delete set null,
-	created_at timestamptz not null default current_timestamp,
+	created_at timestamptz not null default now(),
 	expires_at timestamptz
 );
 
@@ -83,8 +83,8 @@ create table refresh_token(
 	token_hash   bytea       primary key check (octet_length(token_hash) = 32),
 	profile_id   integer     not null,
 	account_id   integer     not null,
-	created_at   timestamptz not null default current_timestamp,
-	last_used_at timestamptz not null default current_timestamp,
+	created_at   timestamptz not null default now(),
+	last_used_at timestamptz not null default now(),
 	expires_at   timestamptz not null,
 
 	foreign key (profile_id, account_id) references account(profile_id, account_id) on delete cascade
@@ -125,7 +125,7 @@ create index stage_password_change_index on stage_password_change(expires_at);
 create table feedback(
 	feedback_id integer generated always as identity primary key,
 	profile_id  integer     not null references profile(profile_id),
-	created_at  timestamptz not null default current_timestamp,
+	created_at  timestamptz not null default now(),
 	description text        not null
 );
 
@@ -158,7 +158,7 @@ create table player_report(
 	target_id     integer     not null references account(account_id) on delete restrict,
 	report_reason report_type not null,
 	description   text        not null,
-	created_at    timestamptz not null default current_timestamp,
+	created_at    timestamptz not null default now(),
 	reviewed_by   integer              references account(account_id) on delete set null,
 	resolved_at   timestamptz,
 

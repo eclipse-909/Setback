@@ -62,6 +62,8 @@ pub enum Error {
 	BadTeamNumber,
 	#[error("Must be the host of the lobby to perform this action")]
 	NotHost,
+	#[error("Your account is suspended")]
+	Suspended,
 }
 
 impl From<reqwest::Error> for Error {

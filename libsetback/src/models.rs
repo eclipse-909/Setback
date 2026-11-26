@@ -41,7 +41,7 @@ pub struct RefreshTokenResponse {
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct UsernameResponse {
 	pub username: String,
-	pub owner_id: u32,
+	pub profile_id: u32,
 	pub account_id: u32,
 }
 
@@ -118,10 +118,13 @@ pub struct StatsRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct SuspendRequest {
-	action: SuspendAction,
-	duration: Duration,
-	reason: String,
+	pub account_id: u32,
+	pub action: ModAction,
+	pub duration: Duration,
+	pub reason: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
-pub enum SuspendAction { Suspend, Reinstate, Warn }
+#[derive(Serialize, Deserialize, Debug, Clone, ToSchema, sqlx::Type)]
+#[sqlx(type_name = "mod_action")]
+#[repr(i32)]
+pub enum ModAction { Suspend, Reinstate, Warn }

@@ -1,11 +1,15 @@
+use sqlx::{Executor, Postgres};
 use {
 	crate::{constants::*, status::*},
-	std::env,
+	http::HeaderMap,
 	lettre::{
-		Message, AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
+		AsyncSmtpTransport, AsyncTransport,
+		Message, Tokio1Executor,
 		message::header::ContentType,
 		transport::smtp::authentication::Credentials,
 	},
+	sqlx::types::ipnet::IpNet,
+	std::{env, net::{IpAddr, SocketAddr}},
 	tracing::error
 };
 
@@ -46,4 +50,46 @@ impl Email {
 			.map_err(|_| Status::s400("Invalid email address"))?;
 		Ok(())
 	}
+}
+
+pub fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpNet {
+	headers
+		.get("x-forwarded-for")
+		.and_then(|v| v.to_str().ok())
+		// rightmost entry = the one appended by YOUR proxy (not client-controlled)
+		.and_then(|v| v.rsplit(',').next())
+		.and_then(|s| s.trim().parse::<IpAddr>().ok())
+		.unwrap_or_else(|| peer.ip()) // fallback: direct connection
+		.into()
+}
+
+/// Returns bool for whether the account exists
+pub async fn update_account_activity<'e, 'c, E>(
+	account_id: i32,
+	profile_id: i32,
+	ip_addr: IpNet,
+	executor: E,
+) -> Result<bool, sqlx::Error>
+where
+	'c: 'e,
+	E: 'e + Executor<'c, Database = Postgres>,
+	Postgres: 'e,
+{
+	let exists = sqlx::query_scalar!(
+		r#" with ups_ip as (
+				insert into profile_ip(profile_id, ip, first_seen, last_seen)
+				values ($2, $3::inet, now(), now())
+				on conflict(profile_id, ip) do update set last_seen = now()
+				returning 1
+			)
+			update account
+			set last_active = now()
+			where account_id = $1 and deleted_at is not null
+			returning 1
+		"#,
+		account_id,
+		profile_id,
+		ip_addr,
+	).fetch_one(executor).await?;
+	Ok(exists.is_some())
 }

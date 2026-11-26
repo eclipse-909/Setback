@@ -1,24 +1,48 @@
 use {
-	crate::{middleware::jwt, models::*},
-	axum::{Extension, Json},
+	crate::{middleware::jwt, models::*, status::*},
+	axum::{Extension, Json, extract::State},
 	setback::*,
+	sqlx::PgPool,
 	utoipa_axum::{router::OpenApiRouter as Router, routes},
 };
 
-type Result<T> = core::result::Result<T, http::StatusCode>;
+type Result<T> = core::result::Result<T, Status>;
 
 #[utoipa::path(
 	get,
 	path = "/username",
+	summary = "Get username for server",
+	description = "The server uses this endpoint to authenticate clients and get their username.\
+ This endpoint checks if the account is suspended and will return a 403",
 	responses(
         (status = 200, body = UsernameResponse),
+        (status = 401),
+        (status = 403),
+        (status = 500),
 	),
 	tag = "account"
 )]
 async fn api_username(
+	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 ) -> Result<Json<UsernameResponse>> {
-	todo!()
+	if claims.suspended {
+		return Err(Status::s403("Account suspended"));
+	}
+	let username = sqlx::query_scalar!(
+		r#" select username as "username!" from account
+			where account_id = $1 and deleted_at is not null
+		"#,
+		claims.account_id
+	).fetch_optional(&db).await?;
+	let Some(username) = username else {
+		return Err(Status::s401("Username not found"));
+	};
+	Ok(Json(UsernameResponse {
+		username,
+		profile_id: claims.profile_id as u32,
+		account_id: claims.account_id as u32,
+	}))
 }
 
 #[utoipa::path(
@@ -29,6 +53,7 @@ async fn api_username(
 	tag = "account"
 )]
 async fn api_feedback(
+	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 	Json(req): Json<FeedbackRequest>,
 ) -> Result<()> {
@@ -42,6 +67,7 @@ async fn api_feedback(
 	tag = "account"
 )]
 async fn api_logout(
+	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 ) -> Result<()> {
 	todo!()
@@ -54,6 +80,7 @@ async fn api_logout(
 	tag = "account"
 )]
 async fn api_begin_reset_password(
+	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 ) -> Result<()> {
 	todo!()
@@ -70,6 +97,7 @@ async fn api_begin_reset_password(
 	tag = "account"
 )]
 async fn api_finish_reset_password(
+	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 	Json(creds): Json<ChangePasswordRequest>,
 ) -> Result<()> {
@@ -86,6 +114,7 @@ async fn api_finish_reset_password(
 	tag = "account"
 )]
 async fn api_begin_change_email(
+	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 ) -> Result<()> {
 	todo!()
@@ -102,6 +131,7 @@ async fn api_begin_change_email(
 	tag = "account"
 )]
 async fn api_finish_change_email(
+	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 	Json(creds): Json<ChangeEmailRequest>,
 ) -> Result<()> {
@@ -118,6 +148,7 @@ async fn api_finish_change_email(
 	tag = "account"
 )]
 async fn api_delete_account(
+	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 ) -> Result<()> {
 	todo!()

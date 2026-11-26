@@ -9,12 +9,14 @@ use {
 	http::HeaderMap,
 	setback::*,
 	sha2::{Digest, Sha256},
-	sqlx::{Executor, PgPool, Postgres, types::ipnet::IpNet},
+	sqlx::{Executor, PgPool, Postgres},
 	std::
-	net::{IpAddr, SocketAddr},
+	net::SocketAddr,
 	tracing::error,
 	utoipa_axum::{router::OpenApiRouter as Router, routes},
 };
+
+type Result<T> = core::result::Result<T, Status>;
 
 #[utoipa::path(
 	post,
@@ -22,16 +24,18 @@ use {
 	summary="Create a new account",
 	description="Begins account creation and sends the user an email with a signup code to finish account creation",
 	request_body = BeginSignupRequest,
-	responses((status = 200)),
-	responses((status = 403)),
-	responses((status = 409)),
-	responses((status = 500)),
+	responses(
+		(status = 200),
+		(status = 403),
+		(status = 409),
+		(status = 500),
+	),
 	tag = "public"
 )]
 async fn api_begin_signup(
 	State(db): State<PgPool>,
 	Json(creds): Json<BeginSignupRequest>,
-) -> Result<(), Status> {
+) -> Result<()> {
 	// validate request
 	let email = email_validated(creds.email)?;
 	let username = username_validated(creds.username)?;
@@ -173,10 +177,12 @@ async fn api_begin_signup(
 	summary="Create a new account",
 	description="Finishes account creation and logs the user into that account",
 	request_body = FinishSignupRequest,
-	responses((status = 201, body = LoginResponse)),
-	responses((status = 403)),
-	responses((status = 404)),
-	responses((status = 500)),
+	responses(
+		(status = 201, body = LoginResponse),
+		(status = 403),
+		(status = 404),
+		(status = 500),
+	),
 	tag = "public"
 )]
 async fn api_finish_signup(
@@ -184,7 +190,7 @@ async fn api_finish_signup(
 	ConnectInfo(peer): ConnectInfo<SocketAddr>,
 	headers: HeaderMap,
 	Json(FinishSignupRequest {token}): Json<FinishSignupRequest>,
-) -> Result<Json<LoginResponse>, Status> {
+) -> Result<Json<LoginResponse>> {
 	let ip_addr = client_ip(&headers, peer);
 	
 	let mut tx = state.db.begin().await?;
@@ -194,19 +200,16 @@ async fn api_finish_signup(
 		token_valid: bool,
 		profile_id: Option<i32>,
 	}
-	let checks: Option<Checks> = sqlx::query_as!(
+	let checks = sqlx::query_as!(
 		Checks,
-		r#" with staged as (
-				select expires_at, email_normalized from stage_account
-				where tmp_token_hash = $1
-			)
- 			select
-     			staged.expires_at >= now() as "token_valid!",
+		r#" select
+     			a.expires_at >= now() as "token_valid!",
      			(
-					select profile_id from profile_email
-					where email_normalized = staged.email_normalized and active
+					select e.profile_id from profile_email e
+					where e.email_normalized = a.email_normalized and e.active
 				) as profile_id
- 			from staged
+ 			from stage_account a
+			where a.tmp_token_hash = $1
 		"#,
 		token.as_bytes()
 	).fetch_optional(&mut *tx).await?;
@@ -221,28 +224,27 @@ async fn api_finish_signup(
 	// create or update profile
 	let profile_id = checks.profile_id.unwrap_or(
 		sqlx::query_scalar!(
-			r#" with staged as (
-					select email, email_normalized from stage_account
-					where tmp_token_hash = $1
-				),
-				prof_id as (
+			r#" with prof_id as (
                     insert into profile default values
                     returning profile_id
 				),
 				ins_profile_email as (
                     insert into profile_email(profile_id, email, email_normalized)
-					select (select * from prof_id), email, email_normalized
-					from staged
-                    on conflict (profile_id, email_normalized) do update set active = true
+					select (select profile_id from prof_id), a.email, a.email_normalized
+					from stage_account a
+					where a.tmp_token_hash = $1
+                    on conflict (profile_id, email_normalized)
+					do update set active = true
 					returning 1
 				),
 				ins_profile_ip as (
                     insert into profile_ip(profile_id, ip)
-					select *, $2::inet from prof_id
-                    on conflict(profile_id, ip) do update set last_seen = now()
+					select profile_id, $2::inet from prof_id
+                    on conflict(profile_id, ip)
+					do update set last_seen = now()
 					returning 1
 				)
- 				select * from prof_id
+ 				select profile_id from prof_id
 			"#,
 			token.as_bytes(),
 			ip_addr,
@@ -254,6 +256,7 @@ async fn api_finish_signup(
 		id: i32,
 		username: String,
 		email: String,
+		suspended: bool,
 	}
 	let account = sqlx::query_as!(
 		Account,
@@ -266,11 +269,16 @@ async fn api_finish_signup(
                 select $2, username, password_hash
 				from staged
 				returning account_id
+			),
+			sspd as (
+                select true from profile
+                where profile_id = $2 and suspended_until >= now()
 			)
  			select
-				(select * from acc_id) as "id!",
+				(select account_id from acc_id) as "id!",
 				username,
-				email_normalized as email
+				email_normalized as email,
+				coalesce((select * from sspd), false) as "suspended!"
  			from staged
 		"#,
 		token.as_bytes(),
@@ -289,7 +297,7 @@ async fn api_finish_signup(
 	
 	tx.commit().await?;
 	
-	let jwt = create_jwt(account.id, profile_id, &account.username, &account.email, &state)?;
+	let jwt = create_jwt(account.id, profile_id, account.suspended, &account.username, &account.email, &state)?;
 	
 	Ok(Json(LoginResponse {
 		auth_token: jwt,
@@ -303,9 +311,11 @@ async fn api_finish_signup(
 	summary="Login to an account",
 	description="Login with a username and password",
 	request_body = LoginRequest,
-	responses((status = 200, body = LoginResponse)),
-	responses((status = 401)),
-	responses((status = 500)),
+	responses(
+		(status = 200, body = LoginResponse),
+		(status = 401),
+		(status = 500),
+	),
 	tag = "public"
 )]
 async fn api_login(
@@ -313,7 +323,7 @@ async fn api_login(
 	ConnectInfo(peer): ConnectInfo<SocketAddr>,
 	headers: HeaderMap,
 	Json(creds): Json<LoginRequest>,
-) -> Result<Json<LoginResponse>, Status> {
+) -> Result<Json<LoginResponse>> {
 	let ip_addr = client_ip(&headers, peer);
 	let username = creds.username.trim().to_owned();
 	let password = creds.password.trim().to_owned();
@@ -326,18 +336,21 @@ async fn api_login(
 		profile_id: i32,
 		email: String,
 		password_hash: String,
+		suspended: bool,
 	}
 	let account = sqlx::query_as!(
 		Account,
-		r#" with target as (
-				select account_id, profile_id, password_hash
-				from account
-				where username = $1
-                    and deleted_at is not null
-			)
-			select t.account_id as id, t.profile_id, e.email_normalized as email, t.password_hash
-			from target t
-			inner join profile_email e on e.profile_id = t.profile_id and e.active
+		r#" select
+				a.account_id as id,
+				a.profile_id,
+				e.email_normalized as email,
+				a.password_hash,
+				p.suspended_at >= now() as "suspended!"
+			from account a
+			inner join profile_email e on e.profile_id = a.profile_id and e.active
+			inner join profile p on p.profile_id = a.profile_id
+			where a.username = $1
+				and a.deleted_at is not null
 		"#,
 		username
 	).fetch_optional(&mut *tx).await?;
@@ -364,27 +377,11 @@ async fn api_login(
 		})?;
 	
 	// update account info (successfully authenticated at this point)
-	sqlx::query!(
-		r#" update account
-			set last_active = now()
-			where account_id = $1
-		"#,
-		account.id
-	).execute(&mut *tx).await?;
-	sqlx::query!(
-		r#" insert into profile_ip(profile_id, ip, first_seen, last_seen)
-			values ($1, $2::inet, now(), now())
-			on conflict(profile_id, ip) do update set last_seen = now()
-		"#,
-		account.profile_id,
-		ip_addr,
-	).execute(&mut *tx).await?;
-	
+	let exists = update_account_activity(account.id, account.profile_id, ip_addr, &mut *tx).await?;
+	assert!(exists);
 	let refresh_token = create_refresh_token(account.profile_id, account.id, &mut *tx).await?;
-	
 	tx.commit().await?;
-	
-	let jwt = create_jwt(account.id, account.profile_id, &username, &account.email, &state)?;
+	let jwt = create_jwt(account.id, account.profile_id, account.suspended, &username, &account.email, &state)?;
 	
 	Ok(Json(LoginResponse {
 		auth_token: jwt,
@@ -398,19 +395,22 @@ async fn api_login(
 	summary="Refresh auth token",
 	description="Use a long-lived refresh token to get a new short-lived auth token",
 	request_body = RefreshTokenRequest,
-	responses((status = 200, body = RefreshTokenResponse)),
-	responses((status = 401)),
-	responses((status = 403)),
-	responses((status = 500)),
+	responses(
+		(status = 200, body = RefreshTokenResponse),
+		(status = 401),
+		(status = 403),
+		(status = 500),
+	),
 	tag = "public"
 )]
 async fn api_refresh_token(
 	State(state): State<AppState>,
 	Json(RefreshTokenRequest {refresh_token}): Json<RefreshTokenRequest>,
-) -> Result<Json<RefreshTokenResponse>, Status> {
+) -> Result<Json<RefreshTokenResponse>> {
 	let refresh_token_hash = hash_token32(refresh_token.as_bytes());
 	struct Token {
 		expired: bool,
+		suspended: bool,
 		profile_id: i32,
 		account_id: i32,
 		username: String,
@@ -418,17 +418,20 @@ async fn api_refresh_token(
 	}
 	let token = sqlx::query_as!(
 		Token,
-		r#" with token as (
-     			select r.profile_id, r.account_id, r.expires_at, a.username, p.email_normalized
-     			from refresh_token r
-     			inner join account a on a.account_id = r.account_id
-     			inner join profile_email p on p.profile_id = r.profile_id
- 				where token_hash = $1
- 					and a.deleted_at is not null
- 					and p.active
-			)
- 			select (expires_at < now()) as "expired!", profile_id, account_id, username as "username!", email_normalized as "email!"
- 			from token
+		r#" select
+				r.expires_at < now() as "expired!",
+				p.suspended_at >= now() as "suspended!",
+				r.profile_id,
+				r.account_id,
+				a.username as "username!",
+				e.email_normalized as "email!"
+			from refresh_token r
+			inner join account a on a.account_id = r.account_id
+			inner join profile_email e on e.profile_id = r.profile_id
+			inner join profile p on p.profile_id = r.profile_id
+			where token_hash = $1
+				and a.deleted_at is not null
+				and e.active
 		"#,
 		&refresh_token_hash,
 	).fetch_optional(&state.db).await?;
@@ -440,7 +443,7 @@ async fn api_refresh_token(
 		return Err(Status::s403("Refresh token expired"))
 	}
 	
-	let jwt = create_jwt(token.account_id, token.profile_id, &token.username, &token.email, &state)?;
+	let jwt = create_jwt(token.account_id, token.profile_id, token.suspended, &token.username, &token.email, &state)?;
 	
 	Ok(Json(RefreshTokenResponse {
 		auth_token: jwt,
@@ -466,7 +469,7 @@ fn hash_token32(code: &[u8]) -> [u8; 32] {
 	Sha256::digest(code).into()
 }
 
-async fn create_refresh_token<'e, 'c, E>(profile_id: i32, account_id: i32, executor: E) -> Result<String, Status>
+async fn create_refresh_token<'e, 'c, E>(profile_id: i32, account_id: i32, executor: E) -> Result<String>
 where
 	'c: 'e,
 	E: 'e + Executor<'c, Database = Postgres>,
@@ -486,7 +489,7 @@ where
 	Ok(refresh_token)
 }
 
-async fn hash_password(password: String) -> Result<String, Status> {
+async fn hash_password(password: String) -> Result<String> {
 	tokio::task::spawn_blocking(move || {
 		Argon2::default()
 			.hash_password(password.as_bytes())
@@ -502,18 +505,7 @@ async fn hash_password(password: String) -> Result<String, Status> {
 		})
 }
 
-fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> IpNet {
-	headers
-		.get("x-forwarded-for")
-		.and_then(|v| v.to_str().ok())
-		// rightmost entry = the one appended by YOUR proxy (not client-controlled)
-		.and_then(|v| v.rsplit(',').next())
-		.and_then(|s| s.trim().parse::<IpAddr>().ok())
-		.unwrap_or_else(|| peer.ip()) // fallback: direct connection
-		.into()
-}
-
-fn email_validated(email: String) -> Result<String, Status> {
+fn email_validated(email: String) -> Result<String> {
 	const BAD_EMAIL: &str = "invalid email address";
 	let email = email.trim();
 	if email.len() > 255 || email.chars().any(|c| c.is_whitespace() || c.is_control()) {
@@ -547,7 +539,7 @@ fn email_normalized(email: &str) -> String {
 	}
 }
 
-fn username_validated(username: String) -> Result<String, Status> {
+fn username_validated(username: String) -> Result<String> {
 	let username = username.trim();
 	let len = username.chars().count();
 	if !(3..=15).contains(&len) {
@@ -586,7 +578,7 @@ fn is_username_appropriate(username: &str) -> bool {
 	!BLOCKED.iter().any(|b| folded.contains(b))
 }
 
-fn password_validated(password: String) -> Result<String, Status> {
+fn password_validated(password: String) -> Result<String> {
 	let password = password.trim();
 	let len = password.chars().count();
 	if len < 8 {

@@ -34,7 +34,7 @@ pub struct ClientConnection {
 	ssp_tx: SspTx,
 	pub fallback_rx: FallbackRx,
 	correlation_id: u32,
-	pub owner_id: u32,
+	pub profile_id: u32,
 	pub account_id: u32,
 	pub username: String,
 	pub ready: bool,
@@ -84,7 +84,7 @@ impl ClientConnection {
 			Ok(response)
 		}.await;
 		
-		let UsernameResponse {username, owner_id, account_id} = match res {
+		let UsernameResponse {username, profile_id, account_id} = match res {
 			Ok(r) => r,
 			Err(err) => {
 				debug!("Authentication failed for client - Error: {err}");
@@ -101,7 +101,7 @@ impl ClientConnection {
 		tokio::spawn(Self::run_rw_handler(reader, writer, ssp_rx, fallback_tx));
 		
 		// This verifies the player isn't already connected to the server on any of their accounts
-		if state.owner_store.insert_sync(owner_id).is_err() {
+		if state.owner_store.insert_sync(profile_id).is_err() {
 			_ = Self::send_event_raw(&ssp_tx, Payload::Err(Error::AlreadyConnected));
 			//TODO: if a client is trying to connect more than once,
 			// it could either mean they are trying to cheat by being 2 players at once in a game,
@@ -118,7 +118,7 @@ impl ClientConnection {
 			ssp_tx,
 			fallback_rx,
 			correlation_id: Self::INIT_CORRELATION_ID,
-			owner_id,
+			profile_id,
 			account_id,
 			username,
 			ready: false,
@@ -247,7 +247,7 @@ impl Drop for ClientConnection {
 		// allows the owner to connect with one of their accounts after they disconnect from this one
 		//TODO profile this to make sure it doesn't hold up the thread.
 		// use tokio spawn_blocking if it does
-		self.state.owner_store.remove_sync(&self.owner_id);
+		self.state.owner_store.remove_sync(&self.profile_id);
 	}
 }
 

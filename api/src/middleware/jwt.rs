@@ -1,18 +1,20 @@
 use {
-	crate::models::*,
+	crate::{models::*, util::*},
 	axum::{
-		extract::{Request, State},
+		RequestExt,
+		extract::{ConnectInfo, Request, State},
 		http::StatusCode,
 		middleware::Next,
 		response::Response,
 	},
 	chrono::{Duration, Utc},
-	jsonwebtoken::{DecodingKey, Validation, decode, EncodingKey, Header, encode},
+	jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode},
 };
 
 pub fn create_jwt(
 	account_id: i32,
 	profile_id: i32,
+	suspended: bool,
 	username: &str,
 	email: &str,
 	state: &AppState,
@@ -22,6 +24,7 @@ pub fn create_jwt(
 		sub: format!("{email}:{username}"),
 		account_id,
 		profile_id,
+		suspended,
 		iat: now.timestamp() as usize,
 		exp: (now + Duration::minutes(15)).timestamp() as usize,
 	};
@@ -73,13 +76,30 @@ async fn auth_middleware(
 	).map(|data| data.claims)
 		.map_err(|_| StatusCode::UNAUTHORIZED)?;
 	
-	todo!("update the last active column on the account and set it to now");
-	todo!("check to see if account is deleted or owner is suspended");
+	let ConnectInfo(peer) = req.extract_parts()
+		.await
+		.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+	let ip_addr = client_ip(req.headers(), peer);
+	
+	update_account_activity(claims.account_id, claims.profile_id, ip_addr, &state.db)
+		.await
+		.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+		.ok_or(StatusCode::UNAUTHORIZED)?;
+	
+	// user is authenticated at this point
+	
 	if require_admin {
-		todo!("check to see if account is admin");
+		sqlx::query_scalar!(
+			r#" select 1 from account
+				where account_id = $1 and is_admin
+			"#,
+			claims.account_id
+		).fetch_one(&state.db)
+			.await
+			.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+			.ok_or(StatusCode::FORBIDDEN)?;
 	}
 	
 	req.extensions_mut().insert(claims);
-	
 	Ok(next.run(req).await)
 }
