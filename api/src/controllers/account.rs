@@ -48,29 +48,52 @@ async fn api_username(
 #[utoipa::path(
 	post,
 	path = "/feedback",
+	summary = "Submit feedback",
+	description = "Submit feedback about the game to the developers. Not intended for reporting players.",
 	request_body = FeedbackRequest,
-	responses((status = 200)),
+	responses(
+		(status = 200),
+		(status = 500),
+	),
 	tag = "account"
 )]
 async fn api_feedback(
 	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
-	Json(req): Json<FeedbackRequest>,
+	Json(FeedbackRequest {description}): Json<FeedbackRequest>,
 ) -> Result<()> {
-	todo!()
+	sqlx::query!(
+		r#" insert into feedback(profile_id, description)
+			values ($1, $2)
+		"#,
+		claims.profile_id,
+		description,
+	).execute(&db).await?;
+	Ok(())
 }
 
 #[utoipa::path(
 	get,
 	path = "/logout",
-	responses((status = 200)),
+	summary = "Logs out of all instances of this account",
+	description = "Deletes all refresh tokens for this account",
+	responses(
+		(status = 200),
+		(status = 500),
+	),
 	tag = "account"
 )]
 async fn api_logout(
 	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 ) -> Result<()> {
-	todo!()
+	sqlx::query!(
+		r#" delete from refresh_token
+			where account_id = $1
+		"#,
+		claims.account_id
+	).execute(&db).await?;
+	Ok(())
 }
 
 #[utoipa::path(
@@ -144,17 +167,41 @@ async fn api_finish_change_email(
 #[utoipa::path(
 	delete,
 	path = "/delete-account",
-	responses((status = 200)),
+	summary = "Delete an account",
+	description = "Marks an account as deleted and deletes refresh tokens, staged password changes, and account stats",
+	responses(
+		(status = 200),
+		(status = 500),
+	),
 	tag = "account"
 )]
 async fn api_delete_account(
 	State(db): State<PgPool>,
 	Extension(claims): Extension<Claims>,
 ) -> Result<()> {
-	todo!()
-	// mark account as deleted (don't actually delete),
-	// set username to null,
-	// actually delete all rows from refresh_token and staging_password_change where account_id matches
+	sqlx::query!(
+		r#" with del_acc as (
+				update account set
+				    deleted_at = now(),
+					username_archive = username,
+					username = null,
+					password_hash = null
+				where account_id = $1
+			),
+			del_ref_token as (
+                delete from refresh_token
+                where account_id = $1
+			),
+			del_stage_passwd as (
+                delete from stage_password_change
+                where account_id = $1
+			)
+			delete from account_stats
+			where account_id = $1
+		"#,
+		claims.account_id,
+	).execute(&db).await?;
+	Ok(())
 }
 
 pub fn api_account_routes(state: AppState) -> Router<AppState> {

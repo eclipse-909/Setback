@@ -59,7 +59,7 @@ pub struct ChangeEmailRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
 pub struct FeedbackRequest {
-	description: String,
+	pub description: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema)]
@@ -126,5 +126,5 @@ pub struct SuspendRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone, ToSchema, sqlx::Type)]
 #[sqlx(type_name = "mod_action")]
-#[repr(i32)]
+#[repr(i8)]
 pub enum ModAction { Suspend, Reinstate, Warn }

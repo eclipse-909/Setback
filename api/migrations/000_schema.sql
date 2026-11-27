@@ -38,7 +38,7 @@ create table account(
 	profile_id       integer      not null references profile(profile_id),
 	username         varchar(15)           unique,
 	username_archive varchar(15),
-	password_hash    text         not null,
+	password_hash    text,
 	created_at       timestamptz  not null default now(),
 	last_active      timestamptz  not null default now(),
 	is_admin         bool         not null default false,

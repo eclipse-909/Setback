@@ -10,8 +10,7 @@ use {
 	setback::*,
 	sha2::{Digest, Sha256},
 	sqlx::{Executor, PgPool, Postgres},
-	std::
-	net::SocketAddr,
+	std::net::SocketAddr,
 	tracing::error,
 	utoipa_axum::{router::OpenApiRouter as Router, routes},
 };
@@ -20,7 +19,7 @@ type Result<T> = core::result::Result<T, Status>;
 
 #[utoipa::path(
 	post,
-	path = "/signup",
+	path = "/begin",
 	summary="Create a new account",
 	description="Begins account creation and sends the user an email with a signup code to finish account creation",
 	request_body = BeginSignupRequest,
@@ -74,7 +73,7 @@ async fn api_begin_signup(
 					exists(
 						select 1
 						from profile_email e
-						join profile p using (profile_id)
+						inner join profile p using (profile_id)
 						where e.email_normalized = $2
 							and e.active
 							and p.suspended_at is not null
@@ -94,7 +93,7 @@ async fn api_begin_signup(
 					(
 						select count(*)
 						from account a
-						join profile_email e using (profile_id)
+						inner join profile_email e using (profile_id)
 						where e.email_normalized = $2
 							and e.active
 							and a.deleted_at is null
@@ -158,7 +157,7 @@ async fn api_begin_signup(
 	// send email with the code
 	let email = Email {
 		to: email,
-		subject: "Confirm your signup".to_owned(),
+		subject: "Setback - Confirm your signup".to_owned(),
 		body: format!(
 			"Welcome, {username}!\n\n\
 			 Your confirmation code is:\n\n{token}\n\n\
@@ -172,8 +171,8 @@ async fn api_begin_signup(
 }
 
 #[utoipa::path(
-	get,
-	path = "/signup",
+	post,
+	path = "/finish",
 	summary="Create a new account",
 	description="Finishes account creation and logs the user into that account",
 	request_body = FinishSignupRequest,
@@ -451,7 +450,10 @@ async fn api_refresh_token(
 }
 
 pub fn api_public_routes() -> Router<AppState> {
+	let signup_router = Router::new()
+		.routes(routes!(api_begin_signup, api_finish_signup));
 	Router::new()
+		.nest("/signup", signup_router)
 		.routes(routes!(api_begin_signup, api_finish_signup))
 		.routes(routes!(api_login))
 		.routes(routes!(api_refresh_token))
